@@ -1,4 +1,4 @@
-# LS AI Dashboard
+# Love Strings Dashboard
 
 This folder is the working home for the Love Strings Sprint Dashboard project.
 
