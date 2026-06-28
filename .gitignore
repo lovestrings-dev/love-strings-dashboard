@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Next.js / build output
+.next/
+out/
+dist/
+build/
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/
+
+# Local generated data
+data/processed/*
+!data/processed/.gitkeep
+data/raw/*
+!data/raw/.gitkeep
+imports/platform-exports/*
+!imports/platform-exports/.gitkeep
+imports/screenshots/*
+!imports/screenshots/.gitkeep
+imports/spreadsheets/*
+!imports/spreadsheets/.gitkeep
