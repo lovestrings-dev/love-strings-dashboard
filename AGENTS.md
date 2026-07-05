@@ -25,6 +25,7 @@ Main goal: provide a daily command screen for production, marketing, platform gr
 - Environment template exists at `.env.example`.
 - Local `.env.local` exists on this machine with browser-safe Supabase public config. It is intentionally ignored by Git.
 - `.env.local` also contains `YOUTUBE_API_KEY` for local YouTube Data API imports. Do not commit or print it.
+- Basic Auth protection exists in `proxy.ts`. Set `APP_BASIC_AUTH_USER` and `APP_BASIC_AUTH_PASSWORD` in Vercel before sharing the deployed app. If either value is missing, the app remains open for local development.
 - Local dev server runs at `http://localhost:3000`.
 - Current navigation is in-page state, not route-based pages yet.
 
@@ -259,8 +260,8 @@ Important source data to import later:
 
 ## Next Priorities
 
-1. Add basic app access protection before sharing the deployed app with Yullia.
-2. Set up Vercel deployment and environment variables.
+1. Set up Vercel deployment and environment variables.
+2. Share the Basic Auth credentials with Yullia after deployment is verified.
 3. Commit/push current UI/backend work via GitHub Desktop if terminal Git auth still fails.
 4. Decide whether to convert in-page nav state into real Next.js routes.
 5. Import workbook and Google Sheet campaign data into normalized Supabase tables.

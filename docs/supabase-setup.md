@@ -22,6 +22,17 @@ Recommended settings:
 7. Store frontend environment values outside Git:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+## Deployment Protection
+
+The app has temporary Basic Auth protection through `proxy.ts`.
+
+Set these server-side environment variables in Vercel before sharing the app:
+
+- `APP_BASIC_AUTH_USER`
+- `APP_BASIC_AUTH_PASSWORD`
+
+If either value is missing, the local/deployed app stays open. This is useful for local development, but production should have both values set before sharing the link.
    - `SUPABASE_SERVICE_ROLE_KEY`
 
 ## First Data Model
