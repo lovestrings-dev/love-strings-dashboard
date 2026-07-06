@@ -4,7 +4,7 @@ type CollectorStatus = "fulfilled" | "rejected" | "skipped";
 
 type MetricCollectorResult = {
   metrics?: Record<string, number | string | null>;
-  name: "instagram" | "youtube" | "youtube-music";
+  name: "instagram" | "spotify" | "youtube" | "youtube-music";
   reason?: string;
   status: CollectorStatus;
 };
@@ -39,6 +39,17 @@ type YouTubeVideoItem = {
     viewCount?: string;
   };
 };
+type SpotifyArtist = {
+  external_urls?: {
+    spotify?: string;
+  };
+  followers?: {
+    total?: number;
+  };
+  id: string;
+  name: string;
+  popularity?: number;
+};
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -51,7 +62,8 @@ export async function refreshAllMetricCollectors() {
   }> = [
     { name: "youtube", refresh: refreshYouTubeMetrics },
     { name: "instagram", refresh: refreshInstagramMetrics },
-    { name: "youtube-music", refresh: refreshYouTubeMusicMetrics }
+    { name: "youtube-music", refresh: refreshYouTubeMusicMetrics },
+    { name: "spotify", refresh: refreshSpotifyMetrics }
   ];
   const results = await Promise.allSettled(collectors.map((collector) => collector.refresh()));
 
@@ -69,6 +81,56 @@ export async function refreshAllMetricCollectors() {
       };
     }),
     startedAt
+  };
+}
+
+async function refreshSpotifyMetrics(): Promise<MetricCollectorResult> {
+  const clientId = process.env.SPOTIFY_CLIENT_ID;
+  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+  const artistId = process.env.SPOTIFY_ARTIST_ID ?? "4CESELwcVlIPnfiWuaxRbF";
+
+  if (!clientId || !clientSecret) {
+    return {
+      name: "spotify",
+      reason: "Missing SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET.",
+      status: "skipped"
+    };
+  }
+
+  const accessToken = await fetchSpotifyAccessToken(clientId, clientSecret);
+  const artist = await fetchSpotifyJson<SpotifyArtist>(accessToken, `/v1/artists/${artistId}`);
+
+  await upsertPlatformMetricSnapshots(
+    {
+      accountName: artist.name,
+      category: "music",
+      externalId: artist.id,
+      platformName: "Spotify",
+      platformSlug: "spotify",
+      url: artist.external_urls?.spotify ?? `https://open.spotify.com/artist/${artist.id}`
+    },
+    [
+      {
+        metricName: "followers",
+        metricUnit: "count",
+        metricValue: Number(artist.followers?.total ?? 0)
+      },
+      {
+        metricName: "popularity_score",
+        metricUnit: "score_0_100",
+        metricValue: Number(artist.popularity ?? 0)
+      }
+    ],
+    "spotify-web-api"
+  );
+
+  return {
+    metrics: {
+      followers: Number(artist.followers?.total ?? 0),
+      popularityScore: Number(artist.popularity ?? 0)
+    },
+    name: "spotify",
+    status: "fulfilled"
   };
 }
 
@@ -446,6 +508,38 @@ async function fetchYouTubeJson(
   }
 
   return response.json();
+}
+
+async function fetchSpotifyAccessToken(clientId: string, clientSecret: string) {
+  const response = await fetch("https://accounts.spotify.com/api/token", {
+    body: new URLSearchParams({ grant_type: "client_credentials" }),
+    headers: {
+      Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    throw new Error(`Spotify token request failed: ${response.status} ${await response.text()}`);
+  }
+
+  const data = await response.json();
+  return String(data.access_token);
+}
+
+async function fetchSpotifyJson<T>(accessToken: string, path: string): Promise<T> {
+  const response = await fetch(`https://api.spotify.com${path}`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Spotify API request failed: ${response.status} ${await response.text()}`);
+  }
+
+  return response.json() as Promise<T>;
 }
 
 async function discoverLatestYouTubeUploads(

@@ -142,6 +142,8 @@ Current working API metrics:
 - YouTube Music Topic channel subscribers.
 - YouTube Music total plays from Topic channel views.
 - YouTube Music current release plays from the latest Topic channel track.
+- Spotify artist followers.
+- Spotify artist popularity score for later analytics.
 - Instagram followers.
 - Instagram accounts reached in the last 30 days.
 - Instagram views in the last 30 days.
@@ -159,5 +161,22 @@ Implementation notes:
 - Local CLI importers still exist for direct testing: `pnpm run import:youtube`, `pnpm run check:instagram`, and `pnpm run import:instagram`.
 - A server-side refresh endpoint exists at `/api/metrics/refresh` for the Dashboard refresh button and future scheduler.
 - Server refresh requires `SUPABASE_SERVICE_ROLE_KEY` because it writes metric snapshots with service-role privileges.
-- The scheduler calls `https://love-strings-dashboard-love-strings-dashboard.vercel.app/api/metrics/refresh?scheduled=1` at 04:05 UTC and 05:05 UTC. The endpoint's Europe/Vienna time guard skips the non-06:00 run so daylight saving time does not break the daily schedule.
+- The scheduler calls `https://love-strings-dashboard.vercel.app/api/metrics/refresh?scheduled=1` at 04:05 UTC and 05:05 UTC. The endpoint's Europe/Vienna time guard skips the non-06:00 run so daylight saving time does not break the daily schedule.
 - YouTube Music first uses the public Topic channel ID `UCKlfg9lYKyMOg_Oiz-Zb1Fg` with the existing YouTube Data API key. OAuth-based YouTube Analytics may be revisited later if we need deeper artist-only metrics.
+- Spotify first uses artist ID `4CESELwcVlIPnfiWuaxRbF` with the Spotify Web API Client Credentials flow. Exact Spotify stream counts remain manual/export-based until a Spotify for Artists data path is found.
+
+## 2026-07-06 - Apple Music CSV Snapshot Model
+
+Decision:
+
+- Use browser CSV upload for Apple Music for Artists data instead of trying to automate an unavailable artist analytics API.
+- Parse Apple Music CSV files once, write extracted metrics to Supabase, and discard the original file content.
+- Store all available CSV metrics per song: plays, average daily listeners, Shazam count, radio spins, and purchases.
+- Store dashboard aggregate metrics on the same report end date: last update, total plays, total Shazams, current release name, current release plays, and current release Shazams.
+- Treat Apple CSV imports as lifetime report snapshots. Campaign growth should be calculated later as the difference between two lifetime snapshots, for example start-of-campaign versus end-of-campaign.
+
+Reason:
+
+- Apple Music for Artists data is not available to the app as a simple daily API collector.
+- Lifetime snapshots prevent missing first/last campaign-day totals when CSV exports are only downloaded a few times per sprint.
+- Supabase should store the useful structured data, not the raw CSV file, unless an audit/archive requirement appears later.

@@ -200,6 +200,54 @@ h2 {
   color: #1f7a58;
 }
 
+.apple-import-panel {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  padding: 14px 16px;
+}
+
+.apple-import-panel h2 {
+  font-size: 16px;
+  margin-bottom: 0;
+}
+
+.apple-import-actions {
+  align-items: flex-end;
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+}
+
+.apple-import-button {
+  align-items: center;
+  background: #171717;
+  border: 1px solid #171717;
+  border-radius: 7px;
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 14px;
+  font-weight: 800;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 14px;
+}
+
+.apple-import-button input {
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  width: 1px;
+}
+
 .roadmap-band {
   align-items: center;
   background: var(--surface);
@@ -1330,6 +1378,15 @@ h2 {
   .section-heading {
     align-items: start;
     display: grid;
+  }
+
+  .apple-import-panel {
+    align-items: start;
+    display: grid;
+  }
+
+  .apple-import-actions {
+    justify-items: start;
   }
 
   .platform-grid {

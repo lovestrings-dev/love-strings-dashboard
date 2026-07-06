@@ -10,6 +10,7 @@ import {
   Clock3,
   Disc3,
   Headphones,
+  Upload,
   Music2,
   Pencil,
   Plus,
@@ -78,6 +79,15 @@ type MetricRow = {
 type RefreshStatus = {
   message: string;
   state: "error" | "idle" | "loading" | "success";
+};
+type AppleMusicImportStatus = RefreshStatus;
+type AppleMusicCsvRow = {
+  avgDailyListeners: number;
+  plays: number;
+  purchases: number;
+  radioSpins: number;
+  shazams: number;
+  song: string;
 };
 type MarketingCampaignTaskDbRow = {
   id: string;
@@ -190,12 +200,24 @@ const platformStats = [
     icon: Music2,
     dashboard: true,
     metrics: [
-      { label: "Listeners", metricName: "listeners", value: "5" },
-      { label: "Total Plays", metricName: "total_plays", value: "3" },
+      { label: "Last Update", metricName: "last_update_date", value: "04/07/2026" },
+      { label: "Total Plays", metricName: "total_plays", value: "12" },
+      { label: "Total Shazams", metricName: "total_shazams", value: "0" },
+      {
+        label: "Current Release",
+        metricName: "current_release_name",
+        value: "Flowers"
+      },
       {
         label: "Current Release Plays",
         metricName: "current_release_plays",
-        value: "1",
+        value: "0",
+        context: "Flowers"
+      },
+      {
+        label: "Current Release Shazams",
+        metricName: "current_release_shazams",
+        value: "0",
         context: "Flowers"
       }
     ]
@@ -836,6 +858,11 @@ export default function Home() {
     message: "",
     state: "idle"
   });
+  const [appleMusicImportStatus, setAppleMusicImportStatus] =
+    useState<AppleMusicImportStatus>({
+      message: "",
+      state: "idle"
+    });
   const [campaigns, setCampaigns] = useState(() =>
     sortCampaignsByReleaseDate(marketingCampaigns)
   );
@@ -1088,6 +1115,57 @@ export default function Home() {
     }
   }
 
+  async function importAppleMusicCsv(file: File) {
+    setAppleMusicImportStatus({
+      message: "Reading Apple Music CSV...",
+      state: "loading"
+    });
+
+    try {
+      const csvText = await file.text();
+      const { reportEndDate, reportStartDate, rows } = parseAppleMusicCsvFile(
+        file.name,
+        csvText
+      );
+      const currentReleaseName =
+        getPlatformMetric(platformStatsData, "apple-music", "current_release_name")?.value ??
+        getPlatformMetric(platformStatsData, "apple-music", "current_release_plays")?.context ??
+        "Flowers";
+      const response = await fetch("/api/apple-music/import", {
+        body: JSON.stringify({
+          currentReleaseName,
+          fileName: file.name,
+          reportEndDate,
+          reportStartDate,
+          rows
+        }),
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "x-love-strings-import": "apple-music-csv"
+        },
+        method: "POST"
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error ?? `Apple CSV import failed with status ${response.status}.`);
+      }
+
+      const result = await response.json();
+      await loadPlatformStats();
+      setAppleMusicImportStatus({
+        message: `Imported ${result.songs} songs from ${formatDateForDisplay(result.reportEndDate)}.`,
+        state: "success"
+      });
+    } catch (error) {
+      setAppleMusicImportStatus({
+        message: error instanceof Error ? error.message : "Apple CSV import failed.",
+        state: "error"
+      });
+    }
+  }
+
   const updateCampaignDays = useCallback(
     (campaignId: string, campaignDays: CampaignDay[]) => {
       setCampaigns((currentCampaigns) =>
@@ -1286,8 +1364,10 @@ export default function Home() {
         activeSection !== "Platforms" &&
         activeSection !== "Marketing" ? (
           <DashboardView
+            appleMusicImportStatus={appleMusicImportStatus}
             campaigns={campaigns}
             dashboardPlatformStats={dashboardPlatformStats}
+            onAppleMusicCsvImport={importAppleMusicCsv}
             onRefreshPlatformStats={refreshPlatformStats}
             refreshStatus={refreshStatus}
           />
@@ -2015,14 +2095,60 @@ function StatusDot({
   return <span aria-label={label} className={`status-dot status-dot-${status}`} />;
 }
 
+function AppleMusicCsvImportControl({
+  importStatus,
+  onImport
+}: {
+  importStatus: AppleMusicImportStatus;
+  onImport: (file: File) => void;
+}) {
+  return (
+    <section className="apple-import-panel" aria-label="Apple Music CSV import">
+      <div>
+        <p className="eyebrow">Apple Music</p>
+        <h2>CSV Import</h2>
+      </div>
+      <div className="apple-import-actions">
+        <label className="apple-import-button">
+          <Upload size={16} aria-hidden />
+          Import CSV
+          <input
+            accept=".csv,text/csv"
+            disabled={importStatus.state === "loading"}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+
+              if (file) {
+                onImport(file);
+              }
+
+              event.target.value = "";
+            }}
+            type="file"
+          />
+        </label>
+        {importStatus.message ? (
+          <span className={`refresh-status refresh-status-${importStatus.state}`}>
+            {importStatus.message}
+          </span>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 function DashboardView({
+  appleMusicImportStatus,
   campaigns,
   dashboardPlatformStats,
+  onAppleMusicCsvImport,
   onRefreshPlatformStats,
   refreshStatus
 }: {
+  appleMusicImportStatus: AppleMusicImportStatus;
   campaigns: MarketingCampaignConfig[];
   dashboardPlatformStats: typeof platformStats;
+  onAppleMusicCsvImport: (file: File) => void;
   onRefreshPlatformStats: () => void;
   refreshStatus: RefreshStatus;
 }) {
@@ -2058,6 +2184,11 @@ function DashboardView({
         title="Platform Snapshot"
         description="Key audience and consumption signals from the main platforms."
         variant="dashboard"
+      />
+
+      <AppleMusicCsvImportControl
+        importStatus={appleMusicImportStatus}
+        onImport={onAppleMusicCsvImport}
       />
 
       <DashboardCampaignPreview preview={campaignPreview} />
@@ -2270,11 +2401,137 @@ function mergePlatformMetricRows(
 
       return {
         ...metric,
-        value: formatMetricValue(row.metric_value),
+        value: getMetricDisplayValue(metric.metricName, row),
         context
       };
     })
   }));
+}
+
+function getMetricDisplayValue(metricName: string, row: MetricRow) {
+  if (metricName === "last_update_date" || metricName === "current_release_name") {
+    return row.notes ?? "";
+  }
+
+  return formatMetricValue(row.metric_value);
+}
+
+function parseAppleMusicCsvFile(fileName: string, csvText: string) {
+  const [reportStartDate, reportEndDate] = parseAppleMusicCsvDates(fileName);
+  const [headerRow, ...dataRows] = parseCsv(csvText.trim());
+
+  if (!headerRow) {
+    throw new Error("Apple Music CSV is empty.");
+  }
+
+  const headerMap = new Map(
+    headerRow.map((header, index) => [normalizeCsvHeader(header), index])
+  );
+  const rows = dataRows
+    .filter((row) => row.some((cell) => cell.trim().length > 0))
+    .map((row) => ({
+      avgDailyListeners: readCsvNumber(row, headerMap, "avg daily listeners"),
+      plays: readCsvNumber(row, headerMap, "plays"),
+      purchases: readCsvNumber(row, headerMap, "purchases"),
+      radioSpins: readCsvNumber(row, headerMap, "radio spins"),
+      shazams: readCsvNumber(row, headerMap, "shazam count"),
+      song: readCsvText(row, headerMap, "song")
+    }));
+
+  if (rows.length === 0) {
+    throw new Error("Apple Music CSV has no song rows.");
+  }
+
+  return {
+    reportEndDate,
+    reportStartDate,
+    rows
+  };
+}
+
+function parseAppleMusicCsvDates(fileName: string) {
+  const matches = Array.from(fileName.matchAll(/\d{4}-\d{2}-\d{2}/g)).map(
+    (match) => match[0]
+  );
+
+  if (matches.length === 0) {
+    const today = new Date().toISOString().slice(0, 10);
+    return [today, today];
+  }
+
+  return [matches[0], matches[matches.length - 1]];
+}
+
+function parseCsv(csvText: string) {
+  const rows: string[][] = [];
+  let currentCell = "";
+  let currentRow: string[] = [];
+  let inQuotes = false;
+
+  for (let index = 0; index < csvText.length; index += 1) {
+    const char = csvText[index];
+    const nextChar = csvText[index + 1];
+
+    if (char === "\"" && nextChar === "\"") {
+      currentCell += "\"";
+      index += 1;
+      continue;
+    }
+
+    if (char === "\"") {
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      currentRow.push(currentCell);
+      currentCell = "";
+      continue;
+    }
+
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && nextChar === "\n") {
+        index += 1;
+      }
+
+      currentRow.push(currentCell);
+      rows.push(currentRow);
+      currentCell = "";
+      currentRow = [];
+      continue;
+    }
+
+    currentCell += char;
+  }
+
+  currentRow.push(currentCell);
+  rows.push(currentRow);
+
+  return rows;
+}
+
+function readCsvText(row: string[], headerMap: Map<string, number>, header: string) {
+  const index = headerMap.get(header);
+
+  if (index === undefined) {
+    throw new Error(`Apple Music CSV is missing "${header}".`);
+  }
+
+  return row[index]?.trim() ?? "";
+}
+
+function readCsvNumber(row: string[], headerMap: Map<string, number>, header: string) {
+  const value = readCsvText(row, headerMap, header);
+  return Number(value.replaceAll(",", "")) || 0;
+}
+
+function normalizeCsvHeader(header: string) {
+  return header.trim().replaceAll(".", "").toLowerCase();
+}
+
+function formatDateForDisplay(date: string) {
+  const [year, month, day] = date.split("-");
+  return `${day}/${month}/${year}`;
 }
 
 function compareMetricRows(first: MetricRow, second: MetricRow) {
@@ -2310,6 +2567,12 @@ function getDashboardPlatformStats(stats: typeof platformStats) {
   return dashboardOrder
     .map((slug) => stats.find((platform) => platform.slug === slug))
     .filter((platform): platform is (typeof platformStats)[number] => Boolean(platform));
+}
+
+function getPlatformMetric(stats: typeof platformStats, platformSlug: string, metricName: string) {
+  return stats
+    .find((platform) => platform.slug === platformSlug)
+    ?.metrics.find((metric) => metric.metricName === metricName);
 }
 
 function getPlatformsViewStats(stats: typeof platformStats) {

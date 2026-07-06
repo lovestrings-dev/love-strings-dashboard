@@ -18,6 +18,6 @@ jobs:
           curl --fail-with-body --show-error --silent \
             --request GET \
             --header "Authorization: Bearer $CRON_SECRET" \
-            "https://love-strings-dashboard-love-strings-dashboard.vercel.app/api/metrics/refresh?scheduled=1"
+            "https://love-strings-dashboard.vercel.app/api/metrics/refresh?scheduled=1"
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}

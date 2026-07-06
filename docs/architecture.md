@@ -37,6 +37,7 @@ Current working API source systems:
 - YouTube Data API
 - Instagram API
 - YouTube Music Topic channel through the YouTube Data API
+- Spotify Web API
 
 ## High-Level Data Flow
 
@@ -123,6 +124,20 @@ YouTube Music collector:
 - Reads the Love Strings Topic channel through the YouTube Data API.
 - Stores Topic channel subscribers, total plays from channel views, and current release plays from the latest uploaded track.
 - Uses YouTube API `views` as app-level YouTube Music `plays` because the Topic channel videos represent tracks.
+
+Spotify collector:
+
+- Reads the Love Strings Spotify artist profile through the Spotify Web API.
+- Stores artist followers and Spotify popularity score.
+- Does not store exact stream counts yet because Spotify's public Web API does not expose Spotify for Artists stream totals.
+
+Apple Music CSV import:
+
+- Reads Apple Music for Artists song CSV files from a browser file upload.
+- Parses the file once in the browser, sends structured rows to the app API, writes extracted metrics to Supabase, and discards the original file.
+- Stores all available CSV columns for each song: plays, average daily listeners, Shazam count, radio spins, and purchases.
+- Stores dashboard aggregates for last update date, total plays, total Shazams, current release name, current release plays, and current release Shazams.
+- Treats each CSV as a lifetime report snapshot, so future campaign analysis should compare two imported lifetime snapshots rather than expect daily Apple data.
 
 Refresh modes:
 
