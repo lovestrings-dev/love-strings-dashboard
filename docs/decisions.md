@@ -139,6 +139,9 @@ Current working API metrics:
 - YouTube Channel subscribers.
 - YouTube latest regular video title and views.
 - YouTube latest Short title and views.
+- YouTube Music Topic channel subscribers.
+- YouTube Music total plays from Topic channel views.
+- YouTube Music current release plays from the latest Topic channel track.
 - Instagram followers.
 - Instagram accounts reached in the last 30 days.
 - Instagram views in the last 30 days.
@@ -157,3 +160,4 @@ Implementation notes:
 - A server-side refresh endpoint exists at `/api/metrics/refresh` for the Dashboard refresh button and future scheduler.
 - Server refresh requires `SUPABASE_SERVICE_ROLE_KEY` because it writes metric snapshots with service-role privileges.
 - The scheduler calls `https://love-strings-dashboard-love-strings-dashboard.vercel.app/api/metrics/refresh?scheduled=1` at 04:05 UTC and 05:05 UTC. The endpoint's Europe/Vienna time guard skips the non-06:00 run so daylight saving time does not break the daily schedule.
+- YouTube Music first uses the public Topic channel ID `UCKlfg9lYKyMOg_Oiz-Zb1Fg` with the existing YouTube Data API key. OAuth-based YouTube Analytics may be revisited later if we need deeper artist-only metrics.

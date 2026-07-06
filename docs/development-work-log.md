@@ -32,10 +32,10 @@ This is a practical project-management log, not a strict timesheet. When exact s
 | Infrastructure | 0h 12m + earlier TBD | GitHub, Supabase, CLI access, migrations, YouTube API setup, Vercel deployment, GitHub Actions scheduler. |
 | Marketing UI | 0h 45m + earlier TBD | Marketing campaign cards, dashboard previous/current/next previews, task workflow, album-art autosave polish. Earlier UI build still needs historical estimate. |
 | Marketing Backend | 0h 14m + earlier TBD | Supabase campaign schema, seed migration, first UI read/write wiring, album-art persistence. Earlier migration work still needs historical estimate. |
-| Platform APIs | 2h 14m + earlier TBD | YouTube and Instagram importers, live API verification, 30-day Instagram reach/views, server refresh endpoint, snapshot policy, scheduled refresh wiring. |
+| Platform APIs | 2h 34m + earlier TBD | YouTube and Instagram importers, YouTube Music Topic channel collector, live API verification, 30-day Instagram reach/views, server refresh endpoint, snapshot policy, scheduled refresh wiring. |
 | Production Tracker | 0h 00m | Not started yet. |
-| Content Notes | TBD | Separate storytelling/reel idea notes. |
-| Maintenance | 0h 38m | Time tracking setup, changelog/versioning, project context/docs updates. |
+| Content Notes | 0h 10m | Build-story log for future Instagram Reels/Shorts about the dashboard creation process. |
+| Maintenance | 0h 43m | Time tracking setup, changelog/versioning, project context/docs updates. |
 
 Known exact/near-exact time so far:
 
@@ -50,6 +50,8 @@ Known exact/near-exact time so far:
 | 2026-07-05 | TBD | TBD | 1h 25m | estimated | Maintenance, Platform APIs, Marketing UI | Added Beta 1.0 version marker/changelog, polished mobile task readability in Dashboard/Marketing, tested new YouTube Short import, built Instagram importer, added Instagram 30-day reach/views, and verified dashboard values from Supabase. Approx split: Platform APIs 60m, Marketing UI 15m, Maintenance 10m. |
 | 2026-07-06 | 09:00 | 09:50 | 0h 50m | estimated | Marketing UI, Marketing Backend, Platform APIs, Maintenance | Fixed album-art URL autosave to Supabase, refreshed YouTube latest Short views to 1.1K, added protected server-side metrics refresh endpoint and Dashboard Refresh button, confirmed snapshot policy, and updated project docs. Approx split: Platform APIs 25m, Marketing UI 10m, Marketing Backend 10m, Maintenance 5m. |
 | 2026-07-06 | TBD | TBD | 0h 20m | estimated | Infrastructure, Platform APIs, Maintenance | Published and verified Beta 1.1, added GitHub Actions daily metrics scheduler for the protected refresh endpoint, and updated project architecture/decision/changelog notes. Approx split: Infrastructure 12m, Platform APIs 4m, Maintenance 4m. |
+| 2026-07-06 | TBD | TBD | 0h 15m | estimated | Content Notes, Maintenance | Added a build-story log for future Instagram Reel/Short storytelling, including timeline beats, platform setup moments, and draft Reel angles. Approx split: Content Notes 10m, Maintenance 5m. |
+| 2026-07-06 | TBD | TBD | 0h 20m | estimated | Platform APIs | Tested the Love Strings YouTube Music Topic channel through the existing YouTube Data API and added a server-side YouTube Music collector for subscribers, total plays, and current release plays. |
 
 ## How To Update Totals
 

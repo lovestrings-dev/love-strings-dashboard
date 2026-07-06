@@ -36,6 +36,7 @@ Current working API source systems:
 
 - YouTube Data API
 - Instagram API
+- YouTube Music Topic channel through the YouTube Data API
 
 ## High-Level Data Flow
 
@@ -116,6 +117,12 @@ Instagram collector:
 
 - Reads Love Strings Instagram account profile and media.
 - Stores followers, accounts reached in the last 30 days, views in the last 30 days, and latest Reel/Post views.
+
+YouTube Music collector:
+
+- Reads the Love Strings Topic channel through the YouTube Data API.
+- Stores Topic channel subscribers, total plays from channel views, and current release plays from the latest uploaded track.
+- Uses YouTube API `views` as app-level YouTube Music `plays` because the Topic channel videos represent tracks.
 
 Refresh modes:
 

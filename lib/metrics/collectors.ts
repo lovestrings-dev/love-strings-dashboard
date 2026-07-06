@@ -4,7 +4,7 @@ type CollectorStatus = "fulfilled" | "rejected" | "skipped";
 
 type MetricCollectorResult = {
   metrics?: Record<string, number | string | null>;
-  name: "instagram" | "youtube";
+  name: "instagram" | "youtube" | "youtube-music";
   reason?: string;
   status: CollectorStatus;
 };
@@ -31,6 +31,7 @@ type PlatformAccountInput = {
 type YouTubeVideoItem = {
   id: string;
   snippet?: {
+    publishedAt?: string;
     title?: string;
   };
   statistics?: {
@@ -44,10 +45,15 @@ const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 export async function refreshAllMetricCollectors() {
   const startedAt = new Date().toISOString();
-  const results = await Promise.allSettled([
-    refreshYouTubeMetrics(),
-    refreshInstagramMetrics()
-  ]);
+  const collectors: Array<{
+    name: MetricCollectorResult["name"];
+    refresh: () => Promise<MetricCollectorResult>;
+  }> = [
+    { name: "youtube", refresh: refreshYouTubeMetrics },
+    { name: "instagram", refresh: refreshInstagramMetrics },
+    { name: "youtube-music", refresh: refreshYouTubeMusicMetrics }
+  ];
+  const results = await Promise.allSettled(collectors.map((collector) => collector.refresh()));
 
   return {
     finishedAt: new Date().toISOString(),
@@ -57,12 +63,84 @@ export async function refreshAllMetricCollectors() {
       }
 
       return {
-        name: index === 0 ? "youtube" : "instagram",
+        name: collectors[index].name,
         reason: result.reason instanceof Error ? result.reason.message : String(result.reason),
         status: "rejected"
       };
     }),
     startedAt
+  };
+}
+
+async function refreshYouTubeMusicMetrics(): Promise<MetricCollectorResult> {
+  const youtubeApiKey = process.env.YOUTUBE_API_KEY;
+  const youtubeMusicChannelId =
+    process.env.YOUTUBE_MUSIC_CHANNEL_ID ?? "UCKlfg9lYKyMOg_Oiz-Zb1Fg";
+
+  if (!youtubeApiKey) {
+    return { name: "youtube-music", reason: "Missing YOUTUBE_API_KEY.", status: "skipped" };
+  }
+
+  const channel = await fetchYouTubeJson(youtubeApiKey, "channels", {
+    id: youtubeMusicChannelId,
+    part: "id,snippet,statistics,contentDetails"
+  });
+  const channelItem = channel.items?.[0];
+
+  if (!channelItem) {
+    throw new Error(`No YouTube Music channel found for id ${youtubeMusicChannelId}.`);
+  }
+
+  const tracks = await discoverYouTubeMusicTracks(youtubeApiKey, channelItem);
+  const currentRelease = tracks[0] ?? null;
+
+  await upsertPlatformMetricSnapshots(
+    {
+      accountName: cleanAsciiTitle(channelItem.snippet?.title ?? "Love Strings - Topic"),
+      category: "music",
+      externalId: channelItem.id,
+      platformName: "YouTube Music",
+      platformSlug: "youtube-music",
+      url: `https://music.youtube.com/channel/${channelItem.id}`
+    },
+    [
+      {
+        metricName: "subscribers",
+        metricUnit: "count",
+        metricValue: Number(channelItem.statistics?.subscriberCount ?? 0)
+      },
+      {
+        metricName: "total_plays",
+        metricUnit: "plays",
+        metricValue: Number(channelItem.statistics?.viewCount ?? 0)
+      },
+      ...(currentRelease
+        ? [
+            {
+              contentExternalId: currentRelease.id,
+              contentTitle: cleanAsciiTitle(currentRelease.snippet?.title ?? "Current release"),
+              contentType: "track",
+              contentUrl: `https://music.youtube.com/watch?v=${currentRelease.id}`,
+              metricName: "current_release_plays",
+              metricUnit: "plays",
+              metricValue: Number(currentRelease.statistics?.viewCount ?? 0),
+              notes: cleanAsciiTitle(currentRelease.snippet?.title ?? "Current release")
+            }
+          ]
+        : [])
+    ],
+    "youtube-data-api"
+  );
+
+  return {
+    metrics: {
+      currentReleasePlays: Number(currentRelease?.statistics?.viewCount ?? 0),
+      currentReleaseTitle: currentRelease?.snippet?.title ?? null,
+      subscribers: Number(channelItem.statistics?.subscriberCount ?? 0),
+      totalPlays: Number(channelItem.statistics?.viewCount ?? 0)
+    },
+    name: "youtube-music",
+    status: "fulfilled"
   };
 }
 
@@ -416,6 +494,36 @@ async function discoverLatestYouTubeUploads(
         (upload: { durationSeconds: number }) => upload.durationSeconds > maxShortDurationSeconds
       ) ?? null
   };
+}
+
+async function discoverYouTubeMusicTracks(apiKey: string, channelItem: any) {
+  const uploadsPlaylistId = channelItem.contentDetails?.relatedPlaylists?.uploads;
+
+  if (!uploadsPlaylistId) {
+    return [];
+  }
+
+  const playlist = await fetchYouTubeJson(apiKey, "playlistItems", {
+    maxResults: "25",
+    part: "snippet,contentDetails",
+    playlistId: uploadsPlaylistId
+  });
+  const trackIds =
+    playlist.items?.map((item: any) => item.contentDetails?.videoId).filter(Boolean) ?? [];
+
+  if (trackIds.length === 0) {
+    return [];
+  }
+
+  const videos = await fetchYouTubeJson(apiKey, "videos", {
+    id: trackIds.join(","),
+    part: "id,snippet,statistics"
+  });
+
+  return ((videos.items ?? []) as YouTubeVideoItem[]).sort(
+    (first, second) =>
+      Date.parse(second.snippet?.publishedAt ?? "") - Date.parse(first.snippet?.publishedAt ?? "")
+  );
 }
 
 function parseYouTubeDurationSeconds(duration: string) {
