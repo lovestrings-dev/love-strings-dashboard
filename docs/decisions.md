@@ -120,3 +120,39 @@ Reason:
 - Marketing and Dashboard now load campaigns from Supabase when available.
 - Campaign title/date changes, campaign deletion, new campaigns, and full day/task plan snapshots write back to Supabase through temporary prototype policies.
 - The next sharing step is basic app access protection plus Vercel deployment.
+
+## 2026-07-06 - Platform API Snapshots And Refresh Rules
+
+Decision:
+
+- YouTube and Instagram are the first working platform API collectors.
+- Keep one metric snapshot per platform/account/content/metric/source per calendar date.
+- A manual refresh updates today's rows instead of creating unlimited extra rows.
+- Normal app open/refresh should only read the latest data already stored in Supabase.
+- Do not automatically run API collectors every time the app opens.
+- Keep a visible/manual Dashboard `Refresh` action for intentional fresh pulls.
+- Use a daily 06:00 Europe/Vienna scheduled collector as the official daily snapshot target.
+
+Current working API metrics:
+
+- YouTube Channel subscribers.
+- YouTube latest regular video title and views.
+- YouTube latest Short title and views.
+- Instagram followers.
+- Instagram accounts reached in the last 30 days.
+- Instagram views in the last 30 days.
+- Instagram latest Reel/Post title and views.
+
+Reason:
+
+- One row per metric per day keeps Supabase small and predictable.
+- Manual refresh is useful during active campaign checks, but should not pollute the daily timeline with duplicate rows.
+- Opening the app should stay fast and should not unexpectedly consume API quota.
+- If historical charts later need a strict 06:00 archive plus live/manual data, split sources into `daily_snapshot` and `latest_live` or `manual_refresh`.
+
+Implementation notes:
+
+- Local CLI importers still exist for direct testing: `pnpm run import:youtube`, `pnpm run check:instagram`, and `pnpm run import:instagram`.
+- A server-side refresh endpoint exists at `/api/metrics/refresh` for the Dashboard refresh button and future scheduler.
+- Server refresh requires `SUPABASE_SERVICE_ROLE_KEY` because it writes metric snapshots with service-role privileges.
+- A scheduler should call the protected refresh endpoint at 06:00 Europe/Vienna; exact deployed URL and secret setup must be confirmed before adding an automated workflow.

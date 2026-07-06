@@ -14,6 +14,7 @@ import {
   Pencil,
   Plus,
   Radio,
+  RefreshCw,
   Save,
   Sparkles,
   Trash2,
@@ -67,11 +68,16 @@ type MetricRow = {
   metric_name: string;
   metric_value: number | string;
   notes: string | null;
+  source: string | null;
   snapshot_date: string;
   imported_at: string;
   platforms: { slug: string } | Array<{ slug: string }> | null;
   content_posts: { title: string | null } | Array<{ title: string | null }> | null;
   releases: { title: string | null } | Array<{ title: string | null }> | null;
+};
+type RefreshStatus = {
+  message: string;
+  state: "error" | "idle" | "loading" | "success";
 };
 type MarketingCampaignTaskDbRow = {
   id: string;
@@ -111,6 +117,11 @@ const platformStats = [
         label: "Accounts Reached, Last 30 Days",
         metricName: "accounts_reached_30d",
         value: "3.5K"
+      },
+      {
+        label: "Views, Last 30 Days",
+        metricName: "views_30d",
+        value: "29.0K"
       },
       {
         label: "Latest Reel/Post Views",
@@ -246,6 +257,8 @@ const todayTasks = [
   "Add first platform metric snapshot",
   "Prepare release checklist template"
 ];
+
+const appVersionLabel = "Beta 1.1";
 
 const sections = [
   "Dashboard",
@@ -819,15 +832,53 @@ async function saveMarketingCampaignDays(
 export default function Home() {
   const [activeSection, setActiveSection] = useState<Section>("Dashboard");
   const [platformStatsData, setPlatformStatsData] = useState(platformStats);
+  const [refreshStatus, setRefreshStatus] = useState<RefreshStatus>({
+    message: "",
+    state: "idle"
+  });
   const [campaigns, setCampaigns] = useState(() =>
     sortCampaignsByReleaseDate(marketingCampaigns)
   );
   const [hasLoadedCampaignDrafts, setHasLoadedCampaignDrafts] = useState(false);
   const dashboardPlatformStats = getDashboardPlatformStats(platformStatsData);
 
+  const loadPlatformStats = useCallback(async () => {
+    try {
+      const supabase = createBrowserSupabaseClient();
+      const { data, error } = await supabase
+        .from("platform_metric_snapshots")
+        .select(
+          `
+            metric_name,
+            metric_value,
+            notes,
+            source,
+            snapshot_date,
+            imported_at,
+            platforms!inner(slug),
+            content_posts(title),
+            releases(title)
+          `
+        )
+        .order("snapshot_date", { ascending: false })
+        .order("imported_at", { ascending: false });
+
+      if (error) {
+        console.warn("Unable to load platform metrics from Supabase.", error);
+        return;
+      }
+
+      setPlatformStatsData((currentStats) =>
+        mergePlatformMetricRows(currentStats, (data ?? []) as MetricRow[])
+      );
+    } catch (error) {
+      console.warn("Using local platform metric fallback.", error);
+    }
+  }, []);
+
   async function saveMarketingCampaignHeader(
     campaignId: string,
-    updates: Partial<Pick<MarketingCampaignConfig, "releaseDate" | "releaseTitle">>
+    updates: Partial<Pick<MarketingCampaignConfig, "albumArtUrl" | "releaseDate" | "releaseTitle">>
   ) {
     const campaign = campaigns.find((candidate) => candidate.id === campaignId);
 
@@ -835,7 +886,7 @@ export default function Home() {
       return;
     }
 
-    const payload: { release_date?: string; title?: string } = {};
+    const payload: { album_art_url?: string; release_date?: string; title?: string } = {};
 
     if (updates.releaseDate) {
       const releaseDate = formatInputDateForDatabase(updates.releaseDate);
@@ -847,6 +898,10 @@ export default function Home() {
 
     if (updates.releaseTitle) {
       payload.title = updates.releaseTitle;
+    }
+
+    if (updates.albumArtUrl !== undefined) {
+      payload.album_art_url = updates.albumArtUrl;
     }
 
     if (Object.keys(payload).length === 0) {
@@ -961,6 +1016,76 @@ export default function Home() {
       )
     );
     void saveMarketingCampaignHeader(campaignId, { releaseTitle });
+  }
+
+  function updateCampaignAlbumArt(campaignId: string, albumArtUrl: string) {
+    setCampaigns((currentCampaigns) =>
+      currentCampaigns.map((campaign) =>
+        campaign.id === campaignId
+          ? {
+              ...campaign,
+              albumArtUrl
+            }
+          : campaign
+      )
+    );
+    void saveMarketingCampaignHeader(campaignId, { albumArtUrl });
+  }
+
+  async function refreshPlatformStats() {
+    setRefreshStatus({
+      message: "Collecting latest platform stats...",
+      state: "loading"
+    });
+
+    try {
+      const response = await fetch("/api/metrics/refresh", {
+        credentials: "same-origin",
+        headers: {
+          "x-love-strings-refresh": "manual"
+        },
+        method: "POST"
+      });
+
+      if (!response.ok) {
+        throw new Error(`Refresh failed with status ${response.status}.`);
+      }
+
+      const result = await response.json();
+      await loadPlatformStats();
+
+      const refreshedCount =
+        result.results?.filter(
+          (item: { status: string }) => item.status === "fulfilled"
+        ).length ?? 0;
+      const failedCount =
+        result.results?.filter(
+          (item: { status: string }) => item.status === "rejected"
+        ).length ?? 0;
+      const skippedCount =
+        result.results?.filter(
+          (item: { status: string }) => item.status === "skipped"
+        ).length ?? 0;
+
+      if (failedCount > 0) {
+        throw new Error(
+          `${failedCount} collector${failedCount === 1 ? "" : "s"} failed.`
+        );
+      }
+
+      setRefreshStatus({
+        message:
+          skippedCount > 0
+            ? `Updated ${refreshedCount}; skipped ${skippedCount}.`
+            : `Updated ${refreshedCount} data collectors.`,
+        state: refreshedCount > 0 ? "success" : "error"
+      });
+    } catch (error) {
+      setRefreshStatus({
+        message: error instanceof Error ? error.message : "Refresh failed.",
+        state: "error"
+      });
+    }
   }
 
   const updateCampaignDays = useCallback(
@@ -1110,41 +1235,10 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    async function loadPlatformStats() {
-      try {
-        const supabase = createBrowserSupabaseClient();
-        const { data, error } = await supabase
-          .from("platform_metric_snapshots")
-          .select(
-            `
-              metric_name,
-              metric_value,
-              notes,
-              snapshot_date,
-              imported_at,
-              platforms!inner(slug),
-              content_posts(title),
-              releases(title)
-            `
-          )
-          .order("snapshot_date", { ascending: false })
-          .order("imported_at", { ascending: false });
-
-        if (error) {
-          console.warn("Unable to load platform metrics from Supabase.", error);
-          return;
-        }
-
-        setPlatformStatsData((currentStats) =>
-          mergePlatformMetricRows(currentStats, (data ?? []) as MetricRow[])
-        );
-      } catch (error) {
-        console.warn("Using local platform metric fallback.", error);
-      }
-    }
-
-    loadPlatformStats();
-  }, []);
+    window.setTimeout(() => {
+      void loadPlatformStats();
+    }, 0);
+  }, [loadPlatformStats]);
 
   return (
     <main className="dashboard-shell">
@@ -1154,6 +1248,7 @@ export default function Home() {
           <div>
             <strong>Love Strings</strong>
             <span>Sprint Dashboard</span>
+            <span className="app-version-label">{appVersionLabel}</span>
           </div>
         </div>
 
@@ -1177,6 +1272,7 @@ export default function Home() {
           <MarketingView
             campaigns={campaigns}
             onAddCampaign={addCampaign}
+            onAlbumArtSave={updateCampaignAlbumArt}
             onCampaignDaysChange={updateCampaignDays}
             onDeleteCampaign={deleteCampaign}
             onReleaseDateSave={updateCampaignReleaseDate}
@@ -1192,6 +1288,8 @@ export default function Home() {
           <DashboardView
             campaigns={campaigns}
             dashboardPlatformStats={dashboardPlatformStats}
+            onRefreshPlatformStats={refreshPlatformStats}
+            refreshStatus={refreshStatus}
           />
         ) : null}
       </section>
@@ -1202,6 +1300,7 @@ export default function Home() {
 function MarketingView({
   campaigns,
   onAddCampaign,
+  onAlbumArtSave,
   onCampaignDaysChange,
   onDeleteCampaign,
   onReleaseDateSave,
@@ -1209,6 +1308,7 @@ function MarketingView({
 }: {
   campaigns: MarketingCampaignConfig[];
   onAddCampaign: () => void;
+  onAlbumArtSave: (campaignId: string, albumArtUrl: string) => void;
   onCampaignDaysChange: (campaignId: string, campaignDays: CampaignDay[]) => void;
   onDeleteCampaign: (campaignId: string) => void;
   onReleaseDateSave: (campaignId: string, releaseDate: string) => void;
@@ -1231,6 +1331,7 @@ function MarketingView({
           <MarketingCampaignBoard
             campaign={campaign}
             key={campaign.id}
+            onAlbumArtSave={onAlbumArtSave}
             onDaysChange={onCampaignDaysChange}
             onDelete={onDeleteCampaign}
             onReleaseDateSave={onReleaseDateSave}
@@ -1250,12 +1351,14 @@ function MarketingView({
 function MarketingCampaignBoard({
   campaign,
   onDaysChange,
+  onAlbumArtSave,
   onDelete,
   onReleaseDateSave,
   onTitleSave
 }: {
   campaign: MarketingCampaignConfig;
   onDaysChange: (campaignId: string, campaignDays: CampaignDay[]) => void;
+  onAlbumArtSave: (campaignId: string, albumArtUrl: string) => void;
   onDelete: (campaignId: string) => void;
   onReleaseDateSave: (campaignId: string, releaseDate: string) => void;
   onTitleSave: (campaignId: string, releaseTitle: string) => void;
@@ -1304,6 +1407,18 @@ function MarketingCampaignBoard({
       setAlbumArtUrl(campaign.albumArtUrl);
     }, 0);
   }, [campaign.albumArtUrl, campaign.releaseDate, campaign.releaseTitle]);
+
+  useEffect(() => {
+    if (albumArtUrl === campaign.albumArtUrl) {
+      return;
+    }
+
+    const saveTimer = window.setTimeout(() => {
+      onAlbumArtSave(campaign.id, albumArtUrl);
+    }, 700);
+
+    return () => window.clearTimeout(saveTimer);
+  }, [albumArtUrl, campaign.albumArtUrl, campaign.id, onAlbumArtSave]);
 
   function updateCampaignDaysState(
     updater: (currentDays: CampaignDay[]) => CampaignDay[]
@@ -1569,6 +1684,12 @@ function MarketingCampaignBoard({
               <span>Album art URL</span>
               <input
                 onChange={(event) => setAlbumArtUrl(event.target.value.trim())}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    onAlbumArtSave(campaign.id, albumArtUrl);
+                    setIsAlbumArtEditorOpen(false);
+                  }
+                }}
                 placeholder="https://example.com/cover.jpg"
                 type="url"
                 value={albumArtUrl}
@@ -1896,10 +2017,14 @@ function StatusDot({
 
 function DashboardView({
   campaigns,
-  dashboardPlatformStats
+  dashboardPlatformStats,
+  onRefreshPlatformStats,
+  refreshStatus
 }: {
   campaigns: MarketingCampaignConfig[];
   dashboardPlatformStats: typeof platformStats;
+  onRefreshPlatformStats: () => void;
+  refreshStatus: RefreshStatus;
 }) {
   const campaignPreview = getDashboardCampaignPreview(campaigns);
 
@@ -1910,9 +2035,22 @@ function DashboardView({
           <p className="eyebrow">Daily command screen</p>
           <h1>Love Strings Dashboard</h1>
         </div>
-        <button className="icon-button" type="button" aria-label="Open project setup">
-          <ArrowUpRight size={18} aria-hidden />
-        </button>
+        <div className="dashboard-refresh-control">
+          <button
+            className="refresh-button"
+            disabled={refreshStatus.state === "loading"}
+            onClick={onRefreshPlatformStats}
+            type="button"
+          >
+            <RefreshCw size={16} aria-hidden />
+            Refresh
+          </button>
+          {refreshStatus.message ? (
+            <span className={`refresh-status refresh-status-${refreshStatus.state}`}>
+              {refreshStatus.message}
+            </span>
+          ) : null}
+        </div>
       </header>
 
       <PlatformStatsSection
@@ -2112,11 +2250,13 @@ function mergePlatformMetricRows(
   return currentStats.map((platform) => ({
     ...platform,
     metrics: platform.metrics.map((metric) => {
-      const row = rows.find(
-        (candidate) =>
-          getSingle(candidate.platforms)?.slug === platform.slug &&
-          candidate.metric_name === metric.metricName
-      );
+      const row = rows
+        .filter(
+          (candidate) =>
+            getSingle(candidate.platforms)?.slug === platform.slug &&
+            candidate.metric_name === metric.metricName
+        )
+        .sort(compareMetricRows)[0];
 
       if (!row) {
         return metric;
@@ -2135,6 +2275,27 @@ function mergePlatformMetricRows(
       };
     })
   }));
+}
+
+function compareMetricRows(first: MetricRow, second: MetricRow) {
+  const snapshotDiff =
+    Date.parse(second.snapshot_date) - Date.parse(first.snapshot_date);
+
+  if (snapshotDiff !== 0) {
+    return snapshotDiff;
+  }
+
+  const sourceDiff = getMetricSourcePriority(second) - getMetricSourcePriority(first);
+
+  if (sourceDiff !== 0) {
+    return sourceDiff;
+  }
+
+  return Date.parse(second.imported_at) - Date.parse(first.imported_at);
+}
+
+function getMetricSourcePriority(row: MetricRow) {
+  return row.source?.includes("manual") ? 0 : 1;
 }
 
 function getDashboardPlatformStats(stats: typeof platformStats) {

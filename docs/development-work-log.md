@@ -30,12 +30,12 @@ This is a practical project-management log, not a strict timesheet. When exact s
 | --- | ---: | --- |
 | Architecture | TBD | Initial app direction, modules, navigation, architecture notes. |
 | Infrastructure | TBD | GitHub, Supabase, CLI access, migrations, YouTube API setup. |
-| Marketing UI | TBD | Marketing campaign cards, dashboard previous/current/next previews, task workflow. |
-| Marketing Backend | 0h 04m + earlier TBD | Supabase campaign schema, seed migration, and first UI read/write wiring. Earlier migration work still needs historical estimate. |
-| Platform APIs | TBD | YouTube metrics importer and daily snapshot logic. |
+| Marketing UI | 0h 45m + earlier TBD | Marketing campaign cards, dashboard previous/current/next previews, task workflow, album-art autosave polish. Earlier UI build still needs historical estimate. |
+| Marketing Backend | 0h 14m + earlier TBD | Supabase campaign schema, seed migration, first UI read/write wiring, album-art persistence. Earlier migration work still needs historical estimate. |
+| Platform APIs | 2h 10m + earlier TBD | YouTube and Instagram importers, live API verification, 30-day Instagram reach/views, server refresh endpoint, snapshot policy. |
 | Production Tracker | 0h 00m | Not started yet. |
 | Content Notes | TBD | Separate storytelling/reel idea notes. |
-| Maintenance | 0h 09m | Time tracking setup and project context updates. |
+| Maintenance | 0h 34m | Time tracking setup, changelog/versioning, project context/docs updates. |
 
 Known exact/near-exact time so far:
 
@@ -47,6 +47,8 @@ Known exact/near-exact time so far:
 | --- | --- | --- | ---: | --- | --- | --- |
 | TBD | TBD | TBD | 1h 42m | user-reported | Architecture, Infrastructure, Marketing UI | Early build session from rough idea to working prototype. Exact date and split are not yet confirmed. |
 | 2026-07-05 | 09:30 | 09:43 | 0h 13m | exact | Maintenance, Marketing Backend | Created project time/stage tracking log, then wired Marketing campaign reads/writes to Supabase for shared use. Approx split: Maintenance 9m, Marketing Backend 4m. |
+| 2026-07-05 | TBD | TBD | 1h 25m | estimated | Maintenance, Platform APIs, Marketing UI | Added Beta 1.0 version marker/changelog, polished mobile task readability in Dashboard/Marketing, tested new YouTube Short import, built Instagram importer, added Instagram 30-day reach/views, and verified dashboard values from Supabase. Approx split: Platform APIs 60m, Marketing UI 15m, Maintenance 10m. |
+| 2026-07-06 | 09:00 | 09:50 | 0h 50m | estimated | Marketing UI, Marketing Backend, Platform APIs, Maintenance | Fixed album-art URL autosave to Supabase, refreshed YouTube latest Short views to 1.1K, added protected server-side metrics refresh endpoint and Dashboard Refresh button, confirmed snapshot policy, and updated project docs. Approx split: Platform APIs 25m, Marketing UI 10m, Marketing Backend 10m, Maintenance 5m. |
 
 ## How To Update Totals
 

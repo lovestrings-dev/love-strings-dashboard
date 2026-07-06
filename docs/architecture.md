@@ -32,6 +32,11 @@ Excel and Google Sheets should be used only as bootstrap/import sources, not as 
 
 External platforms such as YouTube, Spotify, Instagram, TikTok, distributor dashboards, and website analytics should be treated as source systems. The app should collect only the needed metrics from those systems and store daily snapshots in the database.
 
+Current working API source systems:
+
+- YouTube Data API
+- Instagram API
+
 ## High-Level Data Flow
 
 ```text
@@ -39,7 +44,8 @@ Platform APIs / exports
 YouTube / Instagram / Spotify / Website / Distributor
         |
         v
-Daily import jobs or manual imports
+Server-side collectors
+Scheduled 06:00 Europe/Vienna job or manual Dashboard Refresh
         |
         v
 Supabase PostgreSQL database
@@ -69,7 +75,7 @@ Likely tables/entities:
 
 ## Historical Metrics Model
 
-The key historical table should store daily snapshots from different sources.
+The key historical table stores daily snapshots from different sources.
 
 Conceptual fields:
 
@@ -82,6 +88,13 @@ Conceptual fields:
 - source
 - imported_at
 
+Current implementation:
+
+- Table: `platform_metric_snapshots`
+- Uniqueness: `snapshot_date + platform + account + content + song + release + metric + source`
+- Manual refresh updates the current date's rows instead of creating extra rows for every click.
+- This keeps the database small while preserving one daily metric value per tracked signal.
+
 This should support:
 
 - YouTube subscribers by day
@@ -90,6 +103,25 @@ This should support:
 - Instagram followers/reach by day
 - Release performance after 7/14/30 days
 - Campaign performance over time
+
+## Current Platform Collector Status
+
+YouTube collector:
+
+- Reads Love Strings channel data.
+- Detects latest regular video and latest Short from the channel uploads playlist.
+- Stores channel subscribers, latest regular video views, and latest Short views.
+
+Instagram collector:
+
+- Reads Love Strings Instagram account profile and media.
+- Stores followers, accounts reached in the last 30 days, views in the last 30 days, and latest Reel/Post views.
+
+Refresh modes:
+
+- Daily scheduled refresh: target is 06:00 Europe/Vienna.
+- Manual Dashboard Refresh: intentional on-demand update for fresher data.
+- App load: read-only; it should not call external APIs.
 
 ## Future AI Agent Fit
 

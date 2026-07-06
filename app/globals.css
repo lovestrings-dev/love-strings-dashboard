@@ -72,6 +72,15 @@ button {
   margin-top: 2px;
 }
 
+.brand-mark .app-version-label {
+  color: #77d6c9;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+  margin-top: 6px;
+  text-transform: uppercase;
+}
+
 .nav-list {
   display: grid;
   gap: 4px;
@@ -144,6 +153,51 @@ h2 {
   height: 42px;
   justify-content: center;
   width: 42px;
+}
+
+.dashboard-refresh-control {
+  align-items: flex-end;
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+  min-width: 0;
+}
+
+.refresh-button {
+  align-items: center;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 14px;
+  font-weight: 800;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 14px;
+}
+
+.refresh-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.refresh-status {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.25;
+  max-width: 220px;
+  text-align: right;
+}
+
+.refresh-status-error {
+  color: #b73131;
+}
+
+.refresh-status-success {
+  color: #1f7a58;
 }
 
 .roadmap-band {
@@ -693,26 +747,32 @@ h2 {
 
 .campaign-header-tasks {
   display: grid;
-  gap: 7px;
+  gap: 4px;
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
 .campaign-header-tasks li {
-  align-items: center;
-  color: var(--muted);
+  align-items: flex-start;
+  color: var(--text);
   display: flex;
-  font-size: 13px;
+  font-size: 15px;
   gap: 8px;
-  line-height: 1.25;
+  line-height: 1.35;
   min-width: 0;
 }
 
+.campaign-header-tasks .status-dot {
+  margin-top: 4px;
+}
+
 .campaign-header-tasks li span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: normal;
 }
 
 .release-date-field {
