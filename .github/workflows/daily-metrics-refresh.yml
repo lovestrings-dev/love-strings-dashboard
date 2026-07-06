@@ -1,0 +1,23 @@
+name: Daily Metrics Refresh
+
+on:
+  schedule:
+    # 06:05 in Vienna during daylight saving time.
+    - cron: "5 4 * * *"
+    # 06:05 in Vienna during standard time.
+    - cron: "5 5 * * *"
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    name: Refresh platform metric snapshots
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call protected refresh endpoint
+        run: |
+          curl --fail-with-body --show-error --silent \
+            --request GET \
+            --header "Authorization: Bearer $CRON_SECRET" \
+            "https://love-strings-dashboard-love-strings-dashboard.vercel.app/api/metrics/refresh?scheduled=1"
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}

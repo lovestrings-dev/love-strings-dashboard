@@ -119,7 +119,7 @@ Instagram collector:
 
 Refresh modes:
 
-- Daily scheduled refresh: target is 06:00 Europe/Vienna.
+- Daily scheduled refresh: GitHub Actions calls the protected endpoint at 04:05 UTC and 05:05 UTC. The endpoint only runs collectors during the 06:00 hour in Europe/Vienna, so one daily morning snapshot is written across daylight-saving changes.
 - Manual Dashboard Refresh: intentional on-demand update for fresher data.
 - App load: read-only; it should not call external APIs.
 

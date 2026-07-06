@@ -132,6 +132,7 @@ Decision:
 - Do not automatically run API collectors every time the app opens.
 - Keep a visible/manual Dashboard `Refresh` action for intentional fresh pulls.
 - Use a daily 06:00 Europe/Vienna scheduled collector as the official daily snapshot target.
+- Use GitHub Actions for the production scheduler because it can send the required `Authorization: Bearer CRON_SECRET` header to the protected endpoint.
 
 Current working API metrics:
 
@@ -155,4 +156,4 @@ Implementation notes:
 - Local CLI importers still exist for direct testing: `pnpm run import:youtube`, `pnpm run check:instagram`, and `pnpm run import:instagram`.
 - A server-side refresh endpoint exists at `/api/metrics/refresh` for the Dashboard refresh button and future scheduler.
 - Server refresh requires `SUPABASE_SERVICE_ROLE_KEY` because it writes metric snapshots with service-role privileges.
-- A scheduler should call the protected refresh endpoint at 06:00 Europe/Vienna; exact deployed URL and secret setup must be confirmed before adding an automated workflow.
+- The scheduler calls `https://love-strings-dashboard-love-strings-dashboard.vercel.app/api/metrics/refresh?scheduled=1` at 04:05 UTC and 05:05 UTC. The endpoint's Europe/Vienna time guard skips the non-06:00 run so daylight saving time does not break the daily schedule.

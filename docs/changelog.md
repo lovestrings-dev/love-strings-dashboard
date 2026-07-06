@@ -25,7 +25,7 @@ Includes:
 
 ## Beta 1.1
 
-Status: Publish candidate
+Status: Published and verified
 
 Includes:
 - UI polishing after the first shared beta test.
@@ -35,9 +35,10 @@ Includes:
 - Server-side metric refresh endpoint and manual Dashboard refresh button.
 - Album-art URL autosave for Marketing campaign headers.
 - Daily 06:00 Europe/Vienna snapshot policy documented.
+- Vercel deployment verified with the manual refresh returning `Updated 2 data collectors.`
 
 ## Beta 1.2
 
 Candidate scope:
-- Production scheduler for the protected metrics refresh endpoint after exact deployed URL and secrets are confirmed.
+- Production scheduler verification after the first automatic 06:00 Europe/Vienna run.
 - Deployment hardening for recurring API imports.
