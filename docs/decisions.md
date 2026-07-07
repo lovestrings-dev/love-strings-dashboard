@@ -131,8 +131,9 @@ Decision:
 - Normal app open/refresh should only read the latest data already stored in Supabase.
 - Do not automatically run API collectors every time the app opens.
 - Keep a visible/manual Dashboard `Refresh` action for intentional fresh pulls.
-- Use a daily 06:00 Europe/Vienna scheduled collector as the official daily snapshot target.
+- Use the 06:00 Europe/Vienna hour as the official daily scheduled snapshot target.
 - Use GitHub Actions for the production scheduler because it can send the required `Authorization: Bearer CRON_SECRET` header to the protected endpoint.
+- Give GitHub Actions several chances during the target hour because scheduled workflows can be delayed or occasionally skipped.
 
 Current working API metrics:
 
@@ -161,7 +162,8 @@ Implementation notes:
 - Local CLI importers still exist for direct testing: `pnpm run import:youtube`, `pnpm run check:instagram`, and `pnpm run import:instagram`.
 - A server-side refresh endpoint exists at `/api/metrics/refresh` for the Dashboard refresh button and future scheduler.
 - Server refresh requires `SUPABASE_SERVICE_ROLE_KEY` because it writes metric snapshots with service-role privileges.
-- The scheduler calls `https://love-strings-dashboard.vercel.app/api/metrics/refresh?scheduled=1` at 04:05 UTC and 05:05 UTC. The endpoint's Europe/Vienna time guard skips the non-06:00 run so daylight saving time does not break the daily schedule.
+- The scheduler calls `https://love-strings-dashboard.vercel.app/api/metrics/refresh?scheduled=1` at `04:05/04:20/04:35/04:50 UTC` and `05:05/05:20/05:35/05:50 UTC`. The endpoint's Europe/Vienna time guard skips runs outside the 06:00 hour so daylight saving time does not break the daily schedule.
+- Repeated calls during the same day update the same daily metric rows because `platform_metric_snapshots` has a daily uniqueness rule. This avoids duplicate daily snapshots while making the GitHub schedule more resilient.
 - YouTube Music first uses the public Topic channel ID `UCKlfg9lYKyMOg_Oiz-Zb1Fg` with the existing YouTube Data API key. OAuth-based YouTube Analytics may be revisited later if we need deeper artist-only metrics.
 - Spotify first uses artist ID `4CESELwcVlIPnfiWuaxRbF` with the Spotify Web API Client Credentials flow. Exact Spotify stream counts remain manual/export-based until a Spotify for Artists data path is found.
 
@@ -180,3 +182,9 @@ Reason:
 - Apple Music for Artists data is not available to the app as a simple daily API collector.
 - Lifetime snapshots prevent missing first/last campaign-day totals when CSV exports are only downloaded a few times per sprint.
 - Supabase should store the useful structured data, not the raw CSV file, unless an audit/archive requirement appears later.
+
+Verified result:
+
+- The first Apple Music CSV upload/import test worked successfully in the deployed app.
+- The raw CSV is not stored by the app; only parsed metrics are stored in Supabase.
+- The Dashboard card can now be refined visually later without changing the agreed import model.

@@ -11,6 +11,25 @@ This file is written for storytelling first, not engineering precision. Keep it 
 - Keep approximate time even when exact time is unavailable.
 - Separate what Dmitrii did manually from what Codex helped design or implement.
 - Prefer story beats that can become short clips: problem, action, result, lesson.
+- Before changing a visible app module, capture two "before" screenshots: desktop/browser and mobile.
+- When project files are updated after UI changes, or backend changes that affect a UI element, capture two matching "after" screenshots.
+
+## Screenshot Capture Rule
+
+For every module/tab we touch, save visual proof before development starts and after the visible result is ready.
+
+Naming pattern:
+
+- `docs/story-assets/screenshots/<module>/<yyyy-mm-dd>-<module>-before-desktop.png`
+- `docs/story-assets/screenshots/<module>/<yyyy-mm-dd>-<module>-before-mobile.png`
+- `docs/story-assets/screenshots/<module>/<yyyy-mm-dd>-<module>-after-desktop.png`
+- `docs/story-assets/screenshots/<module>/<yyyy-mm-dd>-<module>-after-mobile.png`
+
+Use these screenshots later as before/after material for Reels, Shorts, captions, and behind-the-scenes explanations.
+
+Current screenshot archive:
+
+- Dashboard before development snapshot, 2026-07-06: [desktop](story-assets/screenshots/dashboard/2026-07-06-dashboard-before-desktop.png), [mobile](story-assets/screenshots/dashboard/2026-07-06-dashboard-before-mobile.png).
 
 ## Current Story Arc
 
@@ -34,7 +53,7 @@ Audience framing:
 | Platform metrics connection | 2h 14m + earlier TBD | Connected YouTube and Instagram API importers, tested latest Short/Reel stats, added 30-day reach/views, and stored daily metric snapshots in Supabase. | YouTube API, Instagram API, Meta Developers, Supabase | "Instead of checking every platform manually, the app began collecting the numbers itself." |
 | YouTube Music connection | 0h 20m tracked | Found that the YouTube Music artist page is available as a Topic channel through the existing YouTube Data API and added it to the collector plan. | YouTube Music, YouTube Data API, Supabase | "One more platform moved from manual checking into the dashboard's daily memory." |
 | Spotify connection | 0h 20m tracked | Added the first Spotify Web API connection for artist followers and popularity score, while keeping exact stream counts as a later Spotify for Artists/export problem. | Spotify Developer Dashboard, Spotify Web API, Supabase | "We connected what Spotify allows publicly first, without pretending popularity is the same as streams." |
-| Apple Music CSV import | 0h 35m tracked | Chose a practical manual-import model for Apple Music for Artists CSV exports: upload, parse once, save the numbers, discard the file. | Apple Music for Artists, CSV, Supabase | "Not every platform gives an API, so we built a clean manual bridge instead of waiting for perfect automation." |
+| Apple Music CSV import | 0h 35m tracked | Chose a practical manual-import model for Apple Music for Artists CSV exports: upload, parse once, save the numbers, discard the file. The deployed test worked. | Apple Music for Artists, CSV, Supabase | "Apple Music would not just hand us the data by API, so we built a bridge: export CSV, upload once, keep the numbers, throw away the file." |
 | First deployed beta | 0h 20m + earlier deployment time TBD | Published Beta 1.1 on Vercel, protected it with Basic Auth, verified the live refresh button, and made it usable outside the local computer. | Vercel, GitHub, Supabase | "The prototype became a real private web app that Yuliia could open too." |
 | Daily autopilot setup | 0h 20m tracked | Added GitHub Actions scheduler for the protected daily 06:00 Europe/Vienna metrics refresh. Manual workflow test showed a green checkmark. | GitHub Actions, Vercel, Supabase | "The app now has its first autopilot habit: wake up every morning and update the platform stats." |
 
@@ -106,6 +125,26 @@ Beats:
 - Explain 06:00 Europe/Vienna daily refresh.
 - Show the green checkmark from the manual workflow test.
 - Tomorrow's follow-up: confirm the automatic morning run.
+
+### Reel 6: When Platforms Make Artists Work For Their Own Data
+
+Hook:
+
+Some platforms make it surprisingly hard for artists to use their own stats.
+
+Beats:
+
+- Show Apple Music for Artists with the CSV export idea.
+- Explain simply: YouTube and Instagram can update automatically, Apple Music needs a downloaded file.
+- Show the app's Import CSV button.
+- Show the file being imported once.
+- Show the dashboard numbers updating.
+- Explain the rule: "We keep the numbers, not the file."
+- End with: "Creative independence is not only making music. It is also building better ways to understand what happens after you release it."
+
+Caption angle:
+
+Not every platform gives independent artists a clean API. So instead of waiting for perfect automation, we built a small bridge: download the Apple Music CSV, upload it to our dashboard, save the useful numbers, and discard the file. Tiny workflow improvement, big feeling of control.
 
 ## Open Story Details To Fill Later
 

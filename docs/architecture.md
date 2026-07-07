@@ -141,7 +141,8 @@ Apple Music CSV import:
 
 Refresh modes:
 
-- Daily scheduled refresh: GitHub Actions calls the protected endpoint at 04:05 UTC and 05:05 UTC. The endpoint only runs collectors during the 06:00 hour in Europe/Vienna, so one daily morning snapshot is written across daylight-saving changes.
+- Daily scheduled refresh: GitHub Actions calls the protected endpoint several times during the UTC windows that can map to 06:00 in Europe/Vienna: `04:05/04:20/04:35/04:50 UTC` during daylight saving time and `05:05/05:20/05:35/05:50 UTC` during standard time.
+- The endpoint only runs collectors during the 06:00 hour in Europe/Vienna, so one daily morning snapshot is written across daylight-saving changes. Repeated successful calls update the same daily rows instead of creating duplicate snapshots.
 - Manual Dashboard Refresh: intentional on-demand update for fresher data.
 - App load: read-only; it should not call external APIs.
 

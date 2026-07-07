@@ -29,13 +29,13 @@ This is a practical project-management log, not a strict timesheet. When exact s
 | Stage | Approx. Time | Notes |
 | --- | ---: | --- |
 | Architecture | TBD | Initial app direction, modules, navigation, architecture notes. |
-| Infrastructure | 0h 12m + earlier TBD | GitHub, Supabase, CLI access, migrations, YouTube API setup, Vercel deployment, GitHub Actions scheduler. |
+| Infrastructure | 0h 22m + earlier TBD | GitHub, Supabase, CLI access, migrations, YouTube API setup, Vercel deployment, GitHub Actions scheduler and resilient cron window. |
 | Marketing UI | 0h 45m + earlier TBD | Marketing campaign cards, dashboard previous/current/next previews, task workflow, album-art autosave polish. Earlier UI build still needs historical estimate. |
 | Marketing Backend | 0h 14m + earlier TBD | Supabase campaign schema, seed migration, first UI read/write wiring, album-art persistence. Earlier migration work still needs historical estimate. |
 | Platform APIs | 3h 29m + earlier TBD | YouTube and Instagram importers, YouTube Music Topic channel collector, Spotify Web API collector, Apple Music CSV import, live API verification, 30-day Instagram reach/views, server refresh endpoint, snapshot policy, scheduled refresh wiring. |
 | Production Tracker | 0h 00m | Not started yet. |
-| Content Notes | 0h 10m | Build-story log for future Instagram Reels/Shorts about the dashboard creation process. |
-| Maintenance | 0h 43m | Time tracking setup, changelog/versioning, project context/docs updates. |
+| Content Notes | 0h 30m | Build-story log for future Instagram Reels/Shorts about the dashboard creation process, including the Apple Music CSV data-access story and before/after screenshot workflow. |
+| Maintenance | 0h 58m | Time tracking setup, changelog/versioning, project context/docs updates, and screenshot archive setup. |
 
 Known exact/near-exact time so far:
 
@@ -54,6 +54,9 @@ Known exact/near-exact time so far:
 | 2026-07-06 | TBD | TBD | 0h 20m | estimated | Platform APIs | Tested the Love Strings YouTube Music Topic channel through the existing YouTube Data API and added a server-side YouTube Music collector for subscribers, total plays, and current release plays. |
 | 2026-07-06 | TBD | TBD | 0h 20m | estimated | Platform APIs | Added first Spotify Web API collector for artist followers and popularity score using the public artist ID. Exact stream counts remain a later Spotify for Artists/export task. |
 | 2026-07-06 | TBD | TBD | 0h 35m | estimated | Platform APIs | Added Apple Music CSV upload/import flow that parses Apple Music for Artists song exports, saves all CSV metrics to Supabase, and updates the Dashboard Apple Music widget with last update, total plays, total Shazams, and current release plays/Shazams. |
+| 2026-07-06 | TBD | TBD | 0h 15m | estimated | Content Notes, Maintenance | Recorded the successful Apple Music CSV import test and added a Reel/story angle about platforms making artists work harder to access their own data. Approx split: Content Notes 10m, Maintenance 5m. |
+| 2026-07-06 | TBD | TBD | 0h 20m | estimated | Content Notes, Maintenance | Added the before/after screenshot workflow for future module development and captured the first Dashboard desktop/mobile "before" screenshots for later Reel/Short use. Approx split: Content Notes 10m, Maintenance 10m. |
+| 2026-07-07 | 07:30 | 07:45 | 0h 15m | estimated | Infrastructure, Platform APIs | Checked the first scheduled 06:00 metrics run, found no GitHub scheduled run and no 2026-07-07 Supabase snapshot, then widened the GitHub Actions cron window to retry every 15 minutes during the 06:00 Vienna hour. Approx split: Infrastructure 10m, Platform APIs 5m. |
 
 ## How To Update Totals
 

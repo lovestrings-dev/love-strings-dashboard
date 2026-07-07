@@ -2,10 +2,10 @@ name: Daily Metrics Refresh
 
 on:
   schedule:
-    # 06:05 in Vienna during daylight saving time.
-    - cron: "5 4 * * *"
-    # 06:05 in Vienna during standard time.
-    - cron: "5 5 * * *"
+    # Several attempts during the 06:00 Vienna hour in daylight saving time.
+    - cron: "5,20,35,50 4 * * *"
+    # Several attempts during the 06:00 Vienna hour in standard time.
+    - cron: "5,20,35,50 5 * * *"
   workflow_dispatch:
 
 jobs:
