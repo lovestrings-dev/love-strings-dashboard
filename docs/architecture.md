@@ -47,7 +47,7 @@ YouTube / Instagram / Spotify / Website / Distributor
         |
         v
 Server-side collectors
-Scheduled 06:00 Europe/Vienna job or manual Dashboard Refresh
+Scheduled 01:00 Europe/Vienna job or manual Dashboard Refresh
         |
         v
 Supabase PostgreSQL database
@@ -141,8 +141,9 @@ Apple Music CSV import:
 
 Refresh modes:
 
-- Daily scheduled refresh: GitHub Actions calls the protected endpoint several times during the UTC windows that can map to 06:00 in Europe/Vienna: `04:05/04:20/04:35/04:50 UTC` during daylight saving time and `05:05/05:20/05:35/05:50 UTC` during standard time.
-- The endpoint only runs collectors during the 06:00 hour in Europe/Vienna, so one daily morning snapshot is written across daylight-saving changes. Repeated successful calls update the same daily rows instead of creating duplicate snapshots.
+- Daily scheduled refresh: GitHub Actions calls the protected endpoint several times around 01:00 Europe/Vienna: `23:05/23:20/23:35/23:50 UTC` during daylight saving time and `00:05/00:20/00:35/00:50 UTC` during standard time.
+- The endpoint accepts delayed scheduled calls, because GitHub Actions can run scheduled workflows much later than requested. Repeated successful calls update the same Vienna-date daily rows instead of creating duplicate snapshots.
+- Platform metric snapshots use the Europe/Vienna calendar date so early-morning local runs are stored under the expected local day.
 - Manual Dashboard Refresh: intentional on-demand update for fresher data.
 - App load: read-only; it should not call external APIs.
 

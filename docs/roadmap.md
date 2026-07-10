@@ -14,6 +14,51 @@ The roadmap should not be shown as a static PDF on the main dashboard. It should
 - Are we on track, at risk, or delayed?
 - Which daily tasks support the long-term strategy?
 
+## App Product Roadmap
+
+This app roadmap is separate from the Love Strings music/business roadmap below.
+
+### Version 1.0 - Internal Operating Dashboard
+
+Target meaning:
+
+- A practical private app for Dmitrii and Yuliia to run Love Strings work.
+- Includes platform stats, marketing campaigns, production planning, budget, roadmap, shows, and daily focus.
+- Still optimized for internal use, not public onboarding.
+
+Major remaining areas:
+
+- Platform integrations: Spotify parked, Deezer to investigate, Amazon Music to investigate, website/Google statistics to investigate.
+- Dashboard: estimated total audience, current budget balance, clickable platform links, functional In Focus section.
+- Marketing: add "update Apple Music" default tasks to the first and last campaign day.
+- Platforms: move Apple Music import here, add platform evolution views and audience evolution.
+- Production: first UI-only prototype is built; next step is Supabase schema/wiring plus deadline-risk warnings against Marketing release dates.
+- Budget: first UI-only prototype is built; next step is Supabase schema/wiring and Dashboard balance metric.
+- Roadmap: make strategic plan live and trackable.
+- Shows: decide whether to add a Shows tab for upcoming concerts.
+- Other tasks: define a home for non-marketing/non-production work.
+- UI: tidy and mobile-polish after core workflows are in place.
+
+### Version 2.0 - Voice-Controlled Assistant Layer
+
+Target meaning:
+
+- Let Dmitrii manipulate app data through natural voice or dictated instructions.
+- Voice should create and update real app records, not just store loose notes.
+
+Example voice outcomes:
+
+- New concert record created from spoken date/location.
+- New Reel idea added to a campaign.
+- Production task marked done by voice.
+
+### Version 3.0 - Adaptable Tool For Other Musicians
+
+Target meaning:
+
+- If public storytelling creates demand, adapt the internal Love Strings app into a setup-light tool for other independent musicians.
+- Requires multi-user/product thinking: onboarding, configuration, permissions, templates, and safer data separation.
+
 ## Main Dashboard Roadmap Card
 
 Recommended compact card content:
@@ -38,6 +83,16 @@ Long-term target: 35+ releases by 2028+
 ```
 
 ## Main Roadmap Phases
+
+Current UI note:
+
+- The Roadmap tab now has a first UI-only visual tracker based on `Love Strings Roadmap.pdf`.
+- The top strip shows monthly roadmap boxes from April 2026 to January 2028, grouped by phase.
+- Month boxes are green only when all planned releases in that month are released, yellow when partially released, and white while still planned.
+- Phase 1 is currently modeled as 20 target releases: 4 released and 1 active/current release.
+- Phase 2 is modeled as 10 Russian-cover releases, currently all planned.
+- Phase 3 is modeled as 5+ original-song releases toward the 35+ release target, currently all planned.
+- Later logic should replace these UI seed values with live release, production, and marketing status.
 
 ### Phase 1 - English Covers / Brand Formation
 

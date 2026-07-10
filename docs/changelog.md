@@ -34,11 +34,57 @@ Includes:
 - Instagram API importer for followers, 30-day reach, 30-day views, recent media, and latest Reel/Post views.
 - Server-side metric refresh endpoint and manual Dashboard refresh button.
 - Album-art URL autosave for Marketing campaign headers.
-- Daily 06:00 Europe/Vienna snapshot policy documented.
+- Daily scheduled snapshot policy documented.
 - Vercel deployment verified with the manual refresh returning `Updated 2 data collectors.`
 
 ## Beta 1.2
 
 Candidate scope:
-- Production scheduler verification after the first automatic 06:00 Europe/Vienna run.
+- First UI-only Production module prototype with workbook-based seed data from `Love Strings ADMIN.xlsx`, song cards, production deadlines, production-step progress, editable notes/deadlines, local Add song, and local Add production step.
+- First UI-only Budget module prototype with workbook-based seed data from `Love Strings ADMIN.xlsx`, summary finance cards, editable local ledger, and local Add budget line.
+- First UI-only Events module seeded from the Love Strings website archive, with editable event/name/location/address links and manual Add event flow.
+- Dashboard command-screen consolidation: next event, compact platform snapshot, campaign previews, current/next production song previews, budget balance cards, and Phase 1 roadmap preview.
+- Dashboard Budget preview expanded to four compact cards in one row on desktop: current balance, projected earn, projected spend, and projected balance.
+- Dashboard Production cards can expand from 3 next unfinished tasks to the full song task list and collapse back.
+- Events can feed generated one-off Budget rows for gig earned/spent values while keeping event-origin Budget rows read-only in the Budget ledger.
+- Budget summary cards split actual historical totals from projected future cash flow: actuals include entries through today; projections start tomorrow and look one month ahead.
+- Recurring Budget rows can generate monthly/yearly forecast rows, with generated rows kept compact and safely deletable.
+- Production steps can generate Budget rows, with default License and Distributor spend values and a one-month visibility window in the Budget ledger.
+- Production songs can be safely deleted from the Production catalogue.
+- Production now hosts shared song names and album-art URLs for Marketing: new campaigns are created from a Production-song dropdown, title edits use the Production-song dropdown, and Marketing displays Production artwork or an artwork-pending placeholder.
+- Apple Music CSV import moved from Dashboard to the Apple Music card in Platforms.
+- Apple Music card cleaned up to remove duplicate date/release/file-name text.
+- Dashboard platform cards made more compact while keeping the Platforms tab fuller.
+- Events summary changed from latest archived event to next upcoming event with weekday and days-left logic.
+- Scheduler verification after the next automatic 01:00 Europe/Vienna run.
 - Deployment hardening for recurring API imports.
+
+## Version 1.0
+
+Planned milestone:
+
+- Internal operating dashboard for Love Strings.
+- Platform integrations and platform evolution views.
+- Estimated total audience and current budget balance on Dashboard.
+- Marketing module refined with Apple Music update reminders.
+- Apple Music import moved to Platforms.
+- Production planning module.
+- Budget tracker.
+- Roadmap tracker.
+- Events/show tracking module with future persistence.
+- Functional Dashboard In Focus section.
+- UI tidy-up and mobile polish.
+
+## Version 2.0
+
+Planned milestone:
+
+- Voice-controlled assistant layer for creating and updating real app records.
+- Example commands: add show, add marketing task idea, mark production task done.
+
+## Version 3.0
+
+Planned milestone:
+
+- Adapt the app for other musicians if public storytelling creates demand.
+- Focus on setup-light onboarding, templates, permissions, and per-artist configuration.

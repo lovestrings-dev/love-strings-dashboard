@@ -395,7 +395,7 @@ async function upsertPlatformMetricSnapshots(
   source: string
 ) {
   const supabase = createServiceSupabaseClient();
-  const snapshotDate = new Date().toISOString().slice(0, 10);
+  const snapshotDate = getViennaSnapshotDate();
   const { data: platform, error: platformError } = await supabase
     .from("platforms")
     .upsert(
@@ -454,6 +454,20 @@ async function upsertPlatformMetricSnapshots(
 
     if (error) throw error;
   }
+}
+
+function getViennaSnapshotDate() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "Europe/Vienna",
+    year: "numeric"
+  }).formatToParts(new Date());
+  const valueByType = Object.fromEntries(
+    parts.map((part) => [part.type, part.value])
+  );
+
+  return `${valueByType.year}-${valueByType.month}-${valueByType.day}`;
 }
 
 async function upsertContentPost(

@@ -131,7 +131,7 @@ Decision:
 - Normal app open/refresh should only read the latest data already stored in Supabase.
 - Do not automatically run API collectors every time the app opens.
 - Keep a visible/manual Dashboard `Refresh` action for intentional fresh pulls.
-- Use the 06:00 Europe/Vienna hour as the official daily scheduled snapshot target.
+- Use the 01:00 Europe/Vienna hour as the daily scheduled snapshot target, so data should usually be fresh before morning app use.
 - Use GitHub Actions for the production scheduler because it can send the required `Authorization: Bearer CRON_SECRET` header to the protected endpoint.
 - Give GitHub Actions several chances during the target hour because scheduled workflows can be delayed or occasionally skipped.
 
@@ -162,8 +162,10 @@ Implementation notes:
 - Local CLI importers still exist for direct testing: `pnpm run import:youtube`, `pnpm run check:instagram`, and `pnpm run import:instagram`.
 - A server-side refresh endpoint exists at `/api/metrics/refresh` for the Dashboard refresh button and future scheduler.
 - Server refresh requires `SUPABASE_SERVICE_ROLE_KEY` because it writes metric snapshots with service-role privileges.
-- The scheduler calls `https://love-strings-dashboard.vercel.app/api/metrics/refresh?scheduled=1` at `04:05/04:20/04:35/04:50 UTC` and `05:05/05:20/05:35/05:50 UTC`. The endpoint's Europe/Vienna time guard skips runs outside the 06:00 hour so daylight saving time does not break the daily schedule.
-- Repeated calls during the same day update the same daily metric rows because `platform_metric_snapshots` has a daily uniqueness rule. This avoids duplicate daily snapshots while making the GitHub schedule more resilient.
+- The scheduler calls `https://love-strings-dashboard.vercel.app/api/metrics/refresh?scheduled=1` at `23:05/23:20/23:35/23:50 UTC` for daylight saving time and `00:05/00:20/00:35/00:50 UTC` for standard time.
+- The endpoint no longer skips delayed scheduled calls based on the current hour. If GitHub Actions runs late, the app still collects a daily snapshot.
+- Metric snapshots use the Europe/Vienna calendar date, not the UTC date, so 01:00 Vienna in summer still writes the intended local-day snapshot.
+- Repeated calls during the same Vienna day update the same daily metric rows because `platform_metric_snapshots` has a daily uniqueness rule. This avoids duplicate daily snapshots while making the GitHub schedule more resilient.
 - YouTube Music first uses the public Topic channel ID `UCKlfg9lYKyMOg_Oiz-Zb1Fg` with the existing YouTube Data API key. OAuth-based YouTube Analytics may be revisited later if we need deeper artist-only metrics.
 - Spotify first uses artist ID `4CESELwcVlIPnfiWuaxRbF` with the Spotify Web API Client Credentials flow. Exact Spotify stream counts remain manual/export-based until a Spotify for Artists data path is found.
 
@@ -188,3 +190,140 @@ Verified result:
 - The first Apple Music CSV upload/import test worked successfully in the deployed app.
 - The raw CSV is not stored by the app; only parsed metrics are stored in Supabase.
 - The Dashboard card can now be refined visually later without changing the agreed import model.
+
+## 2026-07-08 - Dashboard As Cross-Module Command Screen
+
+Decision:
+
+- Dashboard should show compact copies of the most useful cards from other modules instead of forcing Dmitrii/Yuliia to open every tab each morning.
+- Keep these Dashboard cards as summaries/drill-down previews, not separate data owners.
+- Source-module tabs remain the place where deeper editing and full workflows live.
+
+Current Dashboard summary sections:
+
+- Next event at the top.
+- Compact platform snapshot cards for Instagram, YouTube Channel, Spotify, YouTube Music, and Apple Music.
+- Marketing previous/current/next campaign cards.
+- Current and next Production song cards with progress and collapsible task lists.
+- Budget current balance and upcoming balance.
+- Roadmap Phase 1 progress card.
+
+Reason:
+
+- The Dashboard should feel like a daily command screen with enough context to decide what matters today.
+- Cross-module copies reduce navigation friction while preserving one source of truth per module.
+- Compact dashboard cards are intentionally denser than the full module views.
+
+Implementation notes:
+
+- Dashboard platform cards use compact styling only on Dashboard; the Platforms tab keeps fuller analytics cards.
+- Dashboard Production cards show up to 3 next unfinished tasks by default and can expand to the full song task list, then collapse back to compact view.
+- The Roadmap Phase 1 card is currently a UI copy of seeded roadmap phase data; later it should read live release/production/marketing status.
+
+## 2026-07-08 - Apple Music Import Belongs In Platforms
+
+Decision:
+
+- Move the Apple Music CSV import control out of Dashboard and into the Apple Music card on the Platforms tab.
+- Keep Apple Music CSV upload as a platform-specific maintenance action, not a daily command-screen action.
+- Clean the Apple Music card so it shows only decision-useful metrics:
+  - Last Update on one compact line.
+  - Total Plays.
+  - Total Shazams.
+  - Current Release Plays with release name as context.
+  - Current Release Shazams with release name as context.
+
+Reason:
+
+- Dashboard should show the result of platform data collection, not all import/admin controls.
+- Apple Music import is manual and occasional, so it belongs near platform details.
+- Removing duplicate date/release/file-name text keeps the card readable on mobile.
+
+## 2026-07-08 - Events Tab And Upcoming Event Logic
+
+Decision:
+
+- Add an Events tab for historical and future Love Strings shows/appearances.
+- Seed historical events from `https://www.lovestrings.at/news`.
+- Allow manual add/edit for event date, event name/link, location name/link, and address/link.
+- Show the Events summary as:
+  - `Next event`, based only on future dates.
+  - `Total events`.
+- If every event is in the past, show `No upcoming events planned yet`.
+- Display weekday in the event date and show days left before the event.
+
+Reason:
+
+- Live shows affect budget, audience growth, content opportunities, and production/marketing priorities.
+- The next event is more actionable than the latest archived event.
+- Manual event entry is enough for the current internal beta; backend persistence can come later.
+
+## 2026-07-09 - Budget Actuals Versus Projections
+
+Decision:
+
+- Budget summary cards should separate historical actuals from future projected money.
+- `Total earned`, `Total spent`, and `Current Balance` include only entries dated up to and including today.
+- `Projected earn` and `Projected spend` include entries dated from tomorrow through one month ahead.
+- `Projected balance` equals current balance plus projected earn minus projected spend.
+- Dashboard Budget preview should show four compact cards in this order:
+  - Current balance.
+  - Projected earn.
+  - Projected spend.
+  - Projected balance.
+
+Reason:
+
+- The first row answers "where are we now?" and should not be distorted by future planned income/spend.
+- The projected row answers "what happens soon?" and is useful for planning the next month.
+- Putting the four Dashboard budget cards in one row makes the command screen more compact without hiding the money picture.
+
+## 2026-07-09 - Events Can Generate Budget Lines
+
+Decision:
+
+- Event cards can store earned/spent values plus optional descriptions.
+- Filled event money fields generate read-only one-off Budget ledger rows.
+- The event remains the source of truth for those generated rows; to change the amount or reason, edit the Event, not the Budget row.
+- Generated event Budget rows remain safely deletable from the Budget ledger.
+- Default generated descriptions use the event name plus `earned` or `spent`; manually entered reasons are shown after the event name.
+
+Reason:
+
+- Gig income and gig expenses belong naturally to Events, but they must affect Budget totals.
+- Keeping generated Budget rows read-only prevents conflicting edits in two places.
+- Showing the event name in the Budget description preserves traceability when reviewing the ledger later.
+
+## 2026-07-09 - Production Can Generate Budget Lines
+
+Decision:
+
+- Production steps can store earned/spent budget rows.
+- Standard production costs can be prefilled on repeated steps:
+  - `License`: EUR 20 spend.
+  - `Distributor`: EUR 10 spend.
+- Production-generated Budget rows are generated from the Production plan rather than manually re-entered in Budget.
+- Budget should only show generated future Production rows within the next one-month planning window, so long-range production plans do not distort the near-term money view.
+- Generated Production Budget rows are informational in the Budget ledger and should be edited from the Production step where they originated.
+
+Reason:
+
+- Production decisions directly create real costs.
+- Re-entering license/distributor expenses for every song is repetitive and error-prone.
+- The Budget tab should help with near-term planning, not overwhelm the user with every planned cost many months ahead.
+
+## 2026-07-10 - Production Owns Release Identity For Marketing
+
+Decision:
+
+- Production is the source of truth for song names used by Marketing.
+- New Marketing campaigns are created by choosing a song from the Production song dropdown.
+- Existing Marketing campaign title editing also uses the Production song dropdown rather than free text.
+- Marketing and Dashboard campaign cards display the matching Production song name when a match is available.
+- Production also owns album-art external URLs. Marketing displays the matching Production artwork, or a generic `Album art pending` placeholder when no Production artwork URL exists.
+
+Reason:
+
+- The song is born in Production before it becomes a Marketing campaign.
+- Keeping names and artwork in Production reduces duplicate fields and avoids small mismatches between modules.
+- This is a first step toward a proper shared song/release id. For now, title matching is acceptable for the internal prototype, but the backend should later use stable ids.

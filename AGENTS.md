@@ -66,12 +66,13 @@ Current Marketing layout:
 - Status options: `Not started`, `In progress`, `Done`.
 - Status dot colors: red = not started, orange = in progress, green = done.
 - The campaign header includes album art, release title, the next three campaign tasks that are not done, editable release date in `dd/mm/yyyy` format, days-before-release countdown above the formatted date, and a dropdown toggle that opens the daily campaign table. The table is collapsed by default.
-- Campaign title can be edited locally with a compact pencil/save control.
+- Production is the current source of truth for shared song names and album-art URLs. Marketing displays the matching Production song name/artwork where possible, and shows `Album art pending` when Production has no artwork URL yet.
+- Campaign title editing uses a Production-song dropdown with the compact pencil/save control. New campaigns are also created from a Production-song dropdown.
 - Release date changes use a compact save icon. Saving a release date recalculates campaign day dates and re-sorts the campaign list.
-- Album art can be set via direct external URL. `Rock and Roll` currently uses a Cloudinary `res.cloudinary.com` delivery URL.
+- Album art is set only in Production via direct external URL. `Rock and Roll` currently uses a Cloudinary `res.cloudinary.com` delivery URL.
 - A compact progress strip is attached under the campaign header: the sprint completion percentage is shown before the day boxes. One square represents one campaign day. Green means all tasks for that day are done; yellow means at least one task is done but not all; red means nothing is done. The current/nearest campaign day square has a black outline.
 - Extra campaign days can be added after day 14 and deleted locally if added by accident. The default 14 days cannot be deleted.
-- New campaigns can be added locally with `Add campaign`. A new campaign has its own title, release date, album art URL, campaign days, tasks, add-day/add-task controls, and progress strip.
+- New campaigns can be added locally with `Add campaign` after selecting a Production song. A new campaign has its own release date, campaign days, tasks, add-day/add-task controls, and progress strip.
 - Campaigns can be deleted locally, but deletion is protected: open the campaign details, expand `Campaign options`, tick the confirmation checkbox, then press `Delete campaign`. This is intentionally hidden from the collapsed mobile header to avoid accidental deletion.
 
 Current Dashboard layout:
@@ -82,6 +83,7 @@ Current Dashboard layout:
   - Current campaign: active if today's date is inside the 14-day campaign window.
   - Next campaign: nearest future release campaign.
 - Dashboard campaign preview uses the same campaign state as Marketing. Campaigns are loaded from Supabase when available, with local fallback.
+- Dashboard campaign cards display matching Production song names when available.
 - Then Focus Queue and System Status panels
 
 Current Platforms layout:
@@ -166,7 +168,25 @@ Current campaign seed source:
 - Historical campaign seed source: Google Sheet `Love Strings ADMIN`, tab `RELEASE MEDIA PLAN`, export gid `1970846657`.
 - The Marketing UI now reads from `marketing_campaigns`, `marketing_campaign_days`, and `marketing_campaign_tasks` when Supabase is available.
 - Campaign title/date changes, campaign deletion, new campaigns, and day/task plan changes are written back to Supabase through prototype anon write policies.
+
+Production seed source:
+
+- A project copy of the workbook lives at `docs/source-data/Love Strings ADMIN.xlsx`.
+- Current Production UI seed data comes from the workbook `PRODUCTION` tab.
+- Production is still UI/local-storage only. It does not write to Supabase yet.
+- Future production deadlines are predicted from the workbook order with a 3-week release rhythm and a production deadline 14 days before release.
+- Production owns song names and album-art URLs that Marketing reuses. This is currently title-matched in the prototype; future backend work should replace it with a stable song/release id.
+- Production steps can carry budget rows. License and Distributor have default spend rows, and generated Production Budget rows are shown in Budget only within the next one-month planning window.
+- Production songs have a protected delete flow to avoid accidental removal on mobile.
 - Browser/local fallback remains useful during development if Supabase is temporarily unavailable.
+
+Budget seed source:
+
+- A project copy of the workbook lives at `docs/source-data/Love Strings ADMIN.xlsx`.
+- Current Budget UI seed data comes from the workbook `BUDGET` tab.
+- Budget is still UI/local-storage only. It does not write to Supabase yet.
+- Seeded totals are `2250` earned, `834` spent, and `1416` balance.
+- Potential earn is a placeholder for the future Events/Shows tab.
 
 ## Useful Commands
 

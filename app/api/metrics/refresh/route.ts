@@ -7,15 +7,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  const scheduled = request.nextUrl.searchParams.get("scheduled") === "1";
-
-  if (scheduled && !isViennaSixAm()) {
-    return NextResponse.json({
-      message: "Skipped because it is not 06:00 in Europe/Vienna.",
-      status: "skipped"
-    });
-  }
-
   const result = await refreshAllMetricCollectors();
   return NextResponse.json({ ...result, status: "ok" });
 }
@@ -83,14 +74,4 @@ function isAuthorizedManualRefreshRequest(request: NextRequest) {
   }
 
   return new URL(origin).host === host;
-}
-
-function isViennaSixAm() {
-  const viennaHour = new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    hour12: false,
-    timeZone: "Europe/Vienna"
-  }).format(new Date());
-
-  return viennaHour === "06";
 }
