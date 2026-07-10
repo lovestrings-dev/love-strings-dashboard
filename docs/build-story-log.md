@@ -112,6 +112,7 @@ Story angle:
 | Roadmap prototype | 0h 25m tracked | Turned the static Love Strings roadmap PDF into a UI-only three-phase tracker with monthly and release progress boxes. | Roadmap PDF, Next.js | "The long-term music plan stopped being just a picture and became something the app can gradually track." |
 | Events prototype | 0h 30m tracked | Created an Events tab from the Love Strings website archive, with editable links and a future-looking Next event card. | Love Strings website, Next.js | "Shows became part of the same operating system: not just memories on the website, but upcoming work the dashboard can plan around." |
 | Dashboard consolidation | 0h 50m tracked | Copied the most useful cards from Events, Marketing, Production, Budget, and Roadmap into Dashboard; compacted platform cards; moved Apple Music import to Platforms. | Next.js, Supabase-backed data, Apple Music CSV flow | "The dashboard stopped being a collection of stats and started feeling like the morning command screen for the whole music project." |
+| Beta 1.2 control-center release | 0h 15m tracked + previous module work | Released the current dashboard-control-center concept: a visible structure for how Marketing, Production, Platforms, Events, Budget, Roadmap, and Focus Queue should work together, while marking which modules still need real Supabase wiring. | GitHub, Vercel, Next.js, Supabase-backed pieces, prototype modules | "This was the moment the app became a map of the whole independent musician workflow, not just one useful tracker." |
 
 ## Reel Ideas From Current Build
 

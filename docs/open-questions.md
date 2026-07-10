@@ -16,6 +16,15 @@
 - Which platform links should be attached to Dashboard card headers?
 - What should the Dashboard In Focus section prioritize when multiple tasks are due?
 
+## Beta 1.2 Follow-Ups
+
+- Production: when adding a new song, default its production deadline to the latest existing song deadline plus 2 weeks so the new card naturally appears at the bottom before editing.
+- Events UI: align the titles of the first two cards with their pictograms.
+- Platforms UI: refine graph visuals before expanding the number of graphs per platform.
+- Platforms integrations: connect remaining available platform data sources.
+- Roadmap: replace manually set progress visuals with automatic logic.
+- Budget future link: allow Marketing campaign expenses, such as ads, photoshoots, or campaign-specific production costs, to feed the Budget module.
+
 ## Marketing
 
 - Should "update Apple Music" appear on both first and last campaign day for every campaign by default?

@@ -39,7 +39,13 @@ Includes:
 
 ## Beta 1.2
 
-Candidate scope:
+Status: Published and verified
+
+Release theme:
+
+Control-center concept release for the independent musician dashboard. This beta shows the intended app shape across Dashboard, Marketing, Production, Platforms, Events, Budget, and Roadmap. Some modules are functional prototypes and still need full Supabase persistence in later betas.
+
+Includes:
 - First UI-only Production module prototype with workbook-based seed data from `Love Strings ADMIN.xlsx`, song cards, production deadlines, production-step progress, editable notes/deadlines, local Add song, and local Add production step.
 - First UI-only Budget module prototype with workbook-based seed data from `Love Strings ADMIN.xlsx`, summary finance cards, editable local ledger, and local Add budget line.
 - First UI-only Events module seeded from the Love Strings website archive, with editable event/name/location/address links and manual Add event flow.
@@ -58,6 +64,15 @@ Candidate scope:
 - Events summary changed from latest archived event to next upcoming event with weekday and days-left logic.
 - Scheduler verification after the next automatic 01:00 Europe/Vienna run.
 - Deployment hardening for recurring API imports.
+
+Post-release notes:
+- Dashboard, Events, Budget, Roadmap, Production-to-Marketing album art, and Production-to-Marketing song selection passed live smoke testing.
+- New Marketing campaign for `Shallow` correctly appeared as 0% complete in production.
+- App label was corrected from `Beta 1.1` to `Beta 1.2` after the initial deployment.
+- Follow-up: new Production songs currently default too high in the sorted list; future logic should set the default deadline to the last song deadline plus 2 weeks.
+- Follow-up: first two Events cards should align titles with pictograms.
+- Follow-up: Platforms graphs need visual refinement, more graph types, and remaining platform connectors.
+- Follow-up: Roadmap currently shows the desired visual state but still needs automatic logic.
 
 ## Version 1.0
 

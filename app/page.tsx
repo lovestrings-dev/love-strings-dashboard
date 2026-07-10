@@ -365,7 +365,7 @@ const platformPlaceholder = {
   ]
 };
 
-const appVersionLabel = "Beta 1.1";
+const appVersionLabel = "Beta 1.2";
 
 const sections = [
   "Dashboard",
