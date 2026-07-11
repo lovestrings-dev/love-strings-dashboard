@@ -68,11 +68,36 @@ Includes:
 Post-release notes:
 - Dashboard, Events, Budget, Roadmap, Production-to-Marketing album art, and Production-to-Marketing song selection passed live smoke testing.
 - New Marketing campaign for `Shallow` correctly appeared as 0% complete in production.
-- App label was corrected from `Beta 1.1` to `Beta 1.2` after the initial deployment.
+- App label was corrected from `Beta 1.1` to `Beta 1.2` after the initial deployment and verified live on the production Vercel URL.
 - Follow-up: new Production songs currently default too high in the sorted list; future logic should set the default deadline to the last song deadline plus 2 weeks.
 - Follow-up: first two Events cards should align titles with pictograms.
 - Follow-up: Platforms graphs need visual refinement, more graph types, and remaining platform connectors.
 - Follow-up: Roadmap currently shows the desired visual state but still needs automatic logic.
+
+## Beta 1.3
+
+Release scope:
+- Production module becomes Supabase-backed instead of local-only.
+- Add normalized Production tables for songs, production steps, extra step tasks, and production budget rows.
+- Load Production from Supabase on app startup with local fallback if the schema is unavailable.
+- Seed Supabase from the existing workbook-backed Production catalogue when the new Production tables are empty.
+- Save Production song title, artwork URL, deadline, steps, statuses, notes, subtasks, and production budget rows through a server-side API route.
+- Delete Production songs through the server-side API route.
+- Keep browser write access closed for the new Production tables; writes use the server Supabase service key instead of broad anon write policies.
+- Fix Add song default deadline so new songs start at the latest existing production deadline plus 2 weeks and naturally stay near the bottom of the Production list.
+- Debounce Production saves so fast note edits do not race and overwrite the final text with an older request.
+- Keep the active Production song in focus after Add song, deadline changes, step edits, and subtask edits while preserving deadline sorting.
+- Keep the active Marketing campaign/day in focus after Add campaign, release date changes, day edits, and task edits while preserving campaign sorting.
+- Pin the most recently edited Production song to the top of the Marketing campaign song picker.
+- Let Production-generated Budget rows include historical costs and one-month-ahead projected costs, while keeping farther future Production costs out of the current Budget view.
+- Add a simple proprietary copyright notice for Dmitrii Baiakin, 1030 Vienna, Austria.
+
+Deployment status:
+- Code and migration prepared locally.
+- Supabase migration `202607100001_create_production_tracker.sql` applied successfully after confirming the remote push role.
+- Local Production persistence verified: notes save to Supabase and remain after refresh.
+- Local Production module smoke test passed for add/edit/delete song, deadline changes, album art, budget rows, subtasks, and generated Budget links.
+- Ready for GitHub/Vercel Beta 1.3 deployment after final local checks.
 
 ## Version 1.0
 

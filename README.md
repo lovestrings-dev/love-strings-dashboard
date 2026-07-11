@@ -2,6 +2,9 @@
 
 This folder is the working home for the Love Strings Sprint Dashboard project.
 
+Copyright (c) 2026 Dmitrii Baiakin, 1030 Vienna, Austria. All rights reserved.
+This project is proprietary. See `LICENSE` for details.
+
 Start here:
 
 - `PROJECT_BRIEF.md` - main product memory and concept

@@ -112,7 +112,8 @@ Story angle:
 | Roadmap prototype | 0h 25m tracked | Turned the static Love Strings roadmap PDF into a UI-only three-phase tracker with monthly and release progress boxes. | Roadmap PDF, Next.js | "The long-term music plan stopped being just a picture and became something the app can gradually track." |
 | Events prototype | 0h 30m tracked | Created an Events tab from the Love Strings website archive, with editable links and a future-looking Next event card. | Love Strings website, Next.js | "Shows became part of the same operating system: not just memories on the website, but upcoming work the dashboard can plan around." |
 | Dashboard consolidation | 0h 50m tracked | Copied the most useful cards from Events, Marketing, Production, Budget, and Roadmap into Dashboard; compacted platform cards; moved Apple Music import to Platforms. | Next.js, Supabase-backed data, Apple Music CSV flow | "The dashboard stopped being a collection of stats and started feeling like the morning command screen for the whole music project." |
-| Beta 1.2 control-center release | 0h 15m tracked + previous module work | Released the current dashboard-control-center concept: a visible structure for how Marketing, Production, Platforms, Events, Budget, Roadmap, and Focus Queue should work together, while marking which modules still need real Supabase wiring. | GitHub, Vercel, Next.js, Supabase-backed pieces, prototype modules | "This was the moment the app became a map of the whole independent musician workflow, not just one useful tracker." |
+| Beta 1.2 control-center release | 0h 20m tracked + previous module work | Released the current dashboard-control-center concept, fixed the visible version label, and verified the live Vercel app now shows Beta 1.2. It gives a visible structure for how Marketing, Production, Platforms, Events, Budget, Roadmap, and Focus Queue should work together, while marking which modules still need real Supabase wiring. | GitHub, Vercel, Next.js, Supabase-backed pieces, prototype modules | "This was the moment the app became a map of the whole independent musician workflow, not just one useful tracker." |
+| Beta 1.3 Production backend start | 0h 45m tracked | Started turning the Production tab from local prototype into shared app memory: normalized database tables, server-side save/delete route, Supabase loading, first-load seeding, and a better Add song default deadline. | Supabase, Next.js API routes, GitHub/Vercel release path | "The production plan stopped being only something my browser remembers and started becoming something the app itself can remember." |
 
 ## Reel Ideas From Current Build
 
@@ -293,6 +294,26 @@ Beats:
 Caption angle:
 
 One of the most satisfying moments in building this dashboard was connecting the modules. A song name belongs in Production first. Album art belongs there too. Campaigns can then use that song, and Budget can see the costs that production creates. For an independent musician, this means fewer repeated notes, fewer forgotten expenses, and a clearer picture of what is happening.
+
+### Reel 11: The App Learns To Remember Production
+
+Hook:
+
+The Production tab stopped being a prototype on my laptop and became shared app memory.
+
+Beats:
+
+- Show Production song notes being edited.
+- Refresh the app and show the note staying there.
+- Explain simply: the Production plan now saves to the database, so it can survive reloads and later work online.
+- Show a new song being created and staying in focus even when sorting moves it.
+- Show Marketing offering the recently edited song first when creating a campaign.
+- Explain the small UX lesson: if the app sorts things automatically, it also has to help the human keep their place.
+- Mention the copyright moment: before publishing the next beta, we added a simple proprietary notice.
+
+Caption angle:
+
+Beta 1.3 was the moment the Production module became real app memory. Notes, deadlines, production steps, subtasks, artwork links, and production costs now save through Supabase instead of living only in the browser. We also fixed a very human problem: when lists sort automatically, the app should not make you hunt for the thing you were just editing.
 
 ## Open Story Details To Fill Later
 

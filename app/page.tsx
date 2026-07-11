@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUpRight,
   CalendarDays,
@@ -71,6 +71,7 @@ type ProductionStep = {
 };
 type ProductionSongConfig = {
   id: string;
+  dbId?: string;
   title: string;
   deadline: string;
   albumArtUrl: string;
@@ -210,6 +211,39 @@ type MarketingCampaignDbRow = {
   release_date: string;
   album_art_url: string;
   marketing_campaign_days: MarketingCampaignDayDbRow[] | null;
+};
+type ProductionSongDbRow = {
+  id: string;
+  slug: string;
+  title: string;
+  production_deadline: string;
+  album_art_url: string;
+};
+type ProductionStepDbRow = {
+  id: string;
+  production_song_id: string;
+  stable_key: string;
+  label: string;
+  step_deadline: string;
+  status: MarketingStatus;
+  notes: string;
+  position: number;
+  is_default_step: boolean;
+};
+type ProductionStepTaskDbRow = {
+  id: string;
+  production_step_id: string;
+  title: string;
+  status: MarketingStatus;
+  position: number;
+};
+type ProductionBudgetLineDbRow = {
+  id: string;
+  production_step_id: string | null;
+  production_step_task_id: string | null;
+  description: string;
+  amount: number | string;
+  position: number;
 };
 
 const platformStats = [
@@ -365,7 +399,7 @@ const platformPlaceholder = {
   ]
 };
 
-const appVersionLabel = "Beta 1.2";
+const appVersionLabel = "Beta 1.3";
 
 const sections = [
   "Dashboard",
@@ -1494,6 +1528,15 @@ function getProductionDeadlineSortTime(deadlineInput: string) {
   return parseCampaignDate(deadlineInput)?.getTime() ?? Number.MAX_SAFE_INTEGER;
 }
 
+function getNextProductionSongDeadline(songs: ProductionSongConfig[]) {
+  const latestDeadline = songs
+    .map((song) => parseCampaignDate(song.deadline))
+    .filter((date): date is Date => Boolean(date))
+    .sort((firstDate, secondDate) => secondDate.getTime() - firstDate.getTime())[0];
+
+  return latestDeadline ? addUtcDays(latestDeadline, 14) : addUtcDays(getTodayUtcDate(), 28);
+}
+
 function createProductionSongSeed({
   albumArtUrl = "",
   deadline,
@@ -1896,7 +1939,7 @@ function getBudgetEntriesWithForecast(
   const productionEntries = productionSongs.flatMap((song) =>
     generateProductionBudgetEntries(song).filter(
       (generatedEntry) =>
-        isBudgetEntryInProjectionWindow(generatedEntry) &&
+        isBudgetEntryInVisibleBudgetWindow(generatedEntry) &&
         !existingIds.has(generatedEntry.id) &&
         !deletedIds.has(generatedEntry.id) &&
         !existingFingerprints.has(getBudgetEntryFingerprint(generatedEntry)) &&
@@ -1914,14 +1957,13 @@ function getBudgetEntriesWithForecast(
   ]);
 }
 
-function isBudgetEntryInProjectionWindow(entry: BudgetEntry) {
+function isBudgetEntryInVisibleBudgetWindow(entry: BudgetEntry) {
   const entryDate = parseFlexibleBudgetDate(entry.date);
   const today = getTodayUtcDate();
   const oneMonthAhead = addMonthsToDate(today, 1);
 
   return (
     entryDate !== null &&
-    entryDate.getTime() > today.getTime() &&
     entryDate.getTime() <= oneMonthAhead.getTime()
   );
 }
@@ -2005,8 +2047,12 @@ function generateEventBudgetEntries(event: EventEntry) {
 
 function generateProductionBudgetEntries(song: ProductionSongConfig) {
   return song.steps.flatMap((step) => {
+    const stepBudgetLines =
+      step.budgetLines && step.budgetLines.length > 0
+        ? step.budgetLines
+        : getFallbackProductionStepBudgetLines(step);
     const stepEntries = generateProductionBudgetLineEntries({
-      budgetLines: step.budgetLines ?? [],
+      budgetLines: stepBudgetLines,
       date: step.deadline,
       itemId: `${song.id}-${step.id}`,
       itemName: step.label,
@@ -2024,6 +2070,14 @@ function generateProductionBudgetEntries(song: ProductionSongConfig) {
 
     return [...stepEntries, ...taskEntries];
   });
+}
+
+function getFallbackProductionStepBudgetLines(step: ProductionStep) {
+  if (!step.isDefaultStep) {
+    return [];
+  }
+
+  return getDefaultProductionStepBudgetLines(step.label);
 }
 
 function generateProductionBudgetLineEntries({
@@ -2398,6 +2452,89 @@ function mapMarketingCampaignDayRows(rows: MarketingCampaignDayDbRow[]) {
     });
 }
 
+function mapProductionRows({
+  budgetLines,
+  songs,
+  steps,
+  tasks
+}: {
+  budgetLines: ProductionBudgetLineDbRow[];
+  songs: ProductionSongDbRow[];
+  steps: ProductionStepDbRow[];
+  tasks: ProductionStepTaskDbRow[];
+}) {
+  const tasksByStepId = new Map<string, ProductionStepTaskDbRow[]>();
+  const stepBudgetLinesByStepId = new Map<string, ProductionBudgetLineDbRow[]>();
+  const taskBudgetLinesByTaskId = new Map<string, ProductionBudgetLineDbRow[]>();
+
+  for (const task of tasks) {
+    tasksByStepId.set(task.production_step_id, [
+      ...(tasksByStepId.get(task.production_step_id) ?? []),
+      task
+    ]);
+  }
+
+  for (const budgetLine of budgetLines) {
+    if (budgetLine.production_step_id) {
+      stepBudgetLinesByStepId.set(budgetLine.production_step_id, [
+        ...(stepBudgetLinesByStepId.get(budgetLine.production_step_id) ?? []),
+        budgetLine
+      ]);
+    }
+
+    if (budgetLine.production_step_task_id) {
+      taskBudgetLinesByTaskId.set(budgetLine.production_step_task_id, [
+        ...(taskBudgetLinesByTaskId.get(budgetLine.production_step_task_id) ?? []),
+        budgetLine
+      ]);
+    }
+  }
+
+  return sortProductionSongsByDeadline(
+    songs.map((song) => ({
+      albumArtUrl: song.album_art_url,
+      dbId: song.id,
+      deadline: formatDateKeyForInput(song.production_deadline),
+      id: song.slug,
+      steps: steps
+        .filter((step) => step.production_song_id === song.id)
+        .sort((firstStep, secondStep) => firstStep.position - secondStep.position)
+        .map((step) => ({
+          budgetLines: mapProductionBudgetLineRows(
+            stepBudgetLinesByStepId.get(step.id) ?? []
+          ),
+          deadline: formatDateKeyForInput(step.step_deadline),
+          extraTasks: (tasksByStepId.get(step.id) ?? [])
+            .sort((firstTask, secondTask) => firstTask.position - secondTask.position)
+            .map((task) => ({
+              budgetLines: mapProductionBudgetLineRows(
+                taskBudgetLinesByTaskId.get(task.id) ?? []
+              ),
+              id: task.id,
+              status: task.status,
+              title: task.title
+            })),
+          id: step.stable_key,
+          isDefaultStep: step.is_default_step,
+          label: step.label,
+          notes: step.notes,
+          status: step.status
+        })),
+      title: song.title
+    }))
+  );
+}
+
+function mapProductionBudgetLineRows(rows: ProductionBudgetLineDbRow[]) {
+  return rows
+    .sort((firstLine, secondLine) => firstLine.position - secondLine.position)
+    .map((line) => ({
+      amount: Number(line.amount),
+      description: line.description,
+      id: line.id
+    }));
+}
+
 function applyCampaignDaySeed(
   day: CampaignDay,
   seedByDate: Map<string, CampaignDaySeed>
@@ -2564,7 +2701,109 @@ async function saveMarketingCampaignDays(
   }
 }
 
+type ProductionSongSaveResult =
+  | { dbId: string; id: string; ok: true }
+  | { error: string; ok: false };
+
+async function saveProductionSongToSupabase(
+  song: ProductionSongConfig
+): Promise<ProductionSongSaveResult> {
+  try {
+    const response = await fetch("/api/production/songs", {
+      body: JSON.stringify({ song }),
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "x-love-strings-production": "write"
+      },
+      method: "POST"
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      return {
+        error: body.error ?? `Production save failed with status ${response.status}.`,
+        ok: false
+      };
+    }
+
+    const result = await response.json();
+    const savedSong = result.savedSongs?.[0] as
+      | { dbId: string; id: string }
+      | undefined;
+
+    if (!savedSong) {
+      return {
+        error: "Production save did not return a saved song.",
+        ok: false
+      };
+    }
+
+    return { ...savedSong, ok: true };
+  } catch (error) {
+    console.warn("Unable to save production song to Supabase.", error);
+    return {
+      error:
+        error instanceof Error
+          ? error.message
+          : "Unable to save production song to Supabase.",
+      ok: false
+    };
+  }
+}
+
+async function saveProductionSongsToSupabase(songs: ProductionSongConfig[]) {
+  try {
+    const response = await fetch("/api/production/songs", {
+      body: JSON.stringify({ songs }),
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "x-love-strings-production": "write"
+      },
+      method: "POST"
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(
+        body.error ?? `Production seed failed with status ${response.status}.`
+      );
+    }
+
+    const result = await response.json();
+    return (result.savedSongs ?? []) as Array<{ dbId: string; id: string }>;
+  } catch (error) {
+    console.warn("Unable to seed production songs in Supabase.", error);
+    return [];
+  }
+}
+
+async function deleteProductionSongFromSupabase(songDbId: string) {
+  try {
+    const response = await fetch("/api/production/songs", {
+      body: JSON.stringify({ dbId: songDbId }),
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "x-love-strings-production": "write"
+      },
+      method: "DELETE"
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(
+        body.error ?? `Production delete failed with status ${response.status}.`
+      );
+    }
+  } catch (error) {
+    console.warn("Unable to delete production song from Supabase.", error);
+  }
+}
+
 export default function Home() {
+  const productionSaveTimers = useRef<Record<string, number>>({});
   const [activeSection, setActiveSection] = useState<Section>("Dashboard");
   const [platformStatsData, setPlatformStatsData] = useState(platformStats);
   const [platformMetricRows, setPlatformMetricRows] = useState<MetricRow[]>([]);
@@ -2577,6 +2816,20 @@ export default function Home() {
       message: "",
       state: "idle"
     });
+  const [productionSaveStatus, setProductionSaveStatus] = useState<RefreshStatus>({
+    message: "",
+    state: "idle"
+  });
+  const [productionFocusTarget, setProductionFocusTarget] = useState<{
+    elementId?: string;
+    songId: string;
+    token: number;
+  } | null>(null);
+  const [marketingFocusTarget, setMarketingFocusTarget] = useState<{
+    campaignId: string;
+    elementId?: string;
+    token: number;
+  } | null>(null);
   const [campaigns, setCampaigns] = useState(() =>
     sortCampaignsByReleaseDate(marketingCampaigns)
   );
@@ -2604,6 +2857,36 @@ export default function Home() {
     productionSongDrafts,
     deletedBudgetForecastIds
   );
+
+  function queueProductionSongSave(song: ProductionSongConfig) {
+    const existingTimer = productionSaveTimers.current[song.id];
+
+    if (existingTimer) {
+      window.clearTimeout(existingTimer);
+    }
+
+    productionSaveTimers.current[song.id] = window.setTimeout(() => {
+      delete productionSaveTimers.current[song.id];
+      setProductionSaveStatus({
+        message: "Saving production changes...",
+        state: "loading"
+      });
+      void saveProductionSongToSupabase(song).then((savedSong) => {
+        if (!savedSong.ok) {
+          setProductionSaveStatus({
+            message: savedSong.error,
+            state: "error"
+          });
+          return;
+        }
+
+        setProductionSaveStatus({
+          message: "Production saved.",
+          state: "success"
+        });
+      });
+    }, 900);
+  }
 
   const loadPlatformStats = useCallback(async () => {
     try {
@@ -2721,6 +3004,7 @@ export default function Home() {
     setCampaigns((currentCampaigns) =>
       sortCampaignsByReleaseDate([...currentCampaigns, localCampaign])
     );
+    setMarketingFocusTarget({ campaignId: localCampaign.id, token: Date.now() });
 
     try {
       const supabase = createBrowserSupabaseClient();
@@ -2755,6 +3039,7 @@ export default function Home() {
           )
         )
       );
+      setMarketingFocusTarget({ campaignId: savedCampaign.id, token: Date.now() });
       await saveMarketingCampaignDays(savedCampaign, savedCampaign.campaignDays ?? []);
     } catch (error) {
       console.warn("Unable to create marketing campaign in Supabase.", error);
@@ -2762,6 +3047,7 @@ export default function Home() {
   }
 
   function updateCampaignReleaseDate(campaignId: string, releaseDate: string) {
+    setMarketingFocusTarget({ campaignId, token: Date.now() });
     setCampaigns((currentCampaigns) =>
       sortCampaignsByReleaseDate(
         currentCampaigns.map((campaign) =>
@@ -2928,7 +3214,7 @@ export default function Home() {
 
   function addProductionSong() {
     const newSongNumber = productionSongDrafts.length + 1;
-    const newDeadline = addUtcDays(getTodayUtcDate(), 28);
+    const newDeadline = getNextProductionSongDeadline(productionSongDrafts);
     const localSong = createProductionSongSeed({
       id: `production-song-${newSongNumber}-${Date.now()}`,
       title: `New Song ${newSongNumber}`,
@@ -2939,30 +3225,66 @@ export default function Home() {
     setProductionSongDrafts((currentSongs) =>
       sortProductionSongsByDeadline([...currentSongs, localSong])
     );
+    setProductionFocusTarget({ songId: localSong.id, token: Date.now() });
+    void saveProductionSongToSupabase(localSong).then((savedSong) => {
+      if (!savedSong.ok) {
+        setProductionSaveStatus({
+          message: savedSong.error,
+          state: "error"
+        });
+        return;
+      }
+
+      setProductionSongDrafts((currentSongs) =>
+        sortProductionSongsByDeadline(
+          currentSongs.map((song) =>
+            song.id === localSong.id
+              ? {
+                  ...song,
+                  dbId: savedSong.dbId,
+                  id: savedSong.id
+                }
+              : song
+          )
+        )
+      );
+      setProductionFocusTarget({ songId: savedSong.id, token: Date.now() });
+    });
   }
 
   function updateProductionSong(songId: string, updates: Partial<ProductionSongConfig>) {
+    const currentSong = productionSongDrafts.find((song) => song.id === songId);
+    const nextSong = currentSong
+      ? {
+          ...currentSong,
+          ...updates,
+          steps: updates.steps
+            ? sortProductionStepsByDeadline(updates.steps)
+            : currentSong.steps
+        }
+      : null;
+
     setProductionSongDrafts((currentSongs) =>
       sortProductionSongsByDeadline(
-        currentSongs.map((song) =>
-          song.id === songId
-            ? {
-                ...song,
-                ...updates,
-                steps: updates.steps
-                  ? sortProductionStepsByDeadline(updates.steps)
-                  : song.steps
-              }
-            : song
-        )
+        currentSongs.map((song) => (song.id === songId && nextSong ? nextSong : song))
       )
     );
+
+    if (nextSong) {
+      queueProductionSongSave(nextSong);
+    }
   }
 
   function deleteProductionSong(songId: string) {
+    const song = productionSongDrafts.find((candidate) => candidate.id === songId);
+
     setProductionSongDrafts((currentSongs) =>
       currentSongs.filter((song) => song.id !== songId)
     );
+
+    if (song?.dbId) {
+      void deleteProductionSongFromSupabase(song.dbId);
+    }
   }
 
   function addBudgetEntry() {
@@ -3044,6 +3366,14 @@ export default function Home() {
       currentEntries.filter((entry) => entry.id !== entryId)
     );
   }
+
+  useEffect(() => {
+    const saveTimers = productionSaveTimers.current;
+
+    return () => {
+      Object.values(saveTimers).forEach((timer) => window.clearTimeout(timer));
+    };
+  }, []);
 
   useEffect(() => {
     let isCancelled = false;
@@ -3339,6 +3669,86 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    async function loadProductionSongs() {
+      try {
+        const supabase = createBrowserSupabaseClient();
+        const [
+          songsResult,
+          stepsResult,
+          tasksResult,
+          budgetLinesResult
+        ] = await Promise.all([
+          supabase
+            .from("production_songs")
+            .select("id, slug, title, production_deadline, album_art_url")
+            .order("production_deadline", { ascending: true }),
+          supabase
+            .from("production_steps")
+            .select(
+              "id, production_song_id, stable_key, label, step_deadline, status, notes, position, is_default_step"
+            )
+            .order("position", { ascending: true }),
+          supabase
+            .from("production_step_tasks")
+            .select("id, production_step_id, title, status, position")
+            .order("position", { ascending: true }),
+          supabase
+            .from("production_budget_lines")
+            .select(
+              "id, production_step_id, production_step_task_id, description, amount, position"
+            )
+            .order("position", { ascending: true })
+        ]);
+
+        if (songsResult.error) throw songsResult.error;
+        if (stepsResult.error) throw stepsResult.error;
+        if (tasksResult.error) throw tasksResult.error;
+        if (budgetLinesResult.error) throw budgetLinesResult.error;
+
+        if ((songsResult.data ?? []).length === 0) {
+          const seedSongs = normalizeProductionSongsWithBudgetDefaults(productionSongs);
+          const savedSongs = await saveProductionSongsToSupabase(seedSongs);
+          const savedSongById = new Map(
+            savedSongs.map((song) => [song.id, song.dbId])
+          );
+          const nextSongs = seedSongs.map((song) => ({
+            ...song,
+            dbId: savedSongById.get(song.id)
+          }));
+
+          setProductionSongDrafts(sortProductionSongsByDeadline(nextSongs));
+          window.localStorage.setItem(
+            productionDraftStorageKey,
+            JSON.stringify(nextSongs)
+          );
+          setHasLoadedProductionDrafts(true);
+          return;
+        }
+
+        const nextSongs = normalizeProductionSongsWithBudgetDefaults(
+          mapProductionRows({
+            budgetLines: (budgetLinesResult.data ?? []) as ProductionBudgetLineDbRow[],
+            songs: (songsResult.data ?? []) as ProductionSongDbRow[],
+            steps: (stepsResult.data ?? []) as ProductionStepDbRow[],
+            tasks: (tasksResult.data ?? []) as ProductionStepTaskDbRow[]
+          })
+        );
+
+        setProductionSongDrafts(nextSongs);
+        window.localStorage.setItem(
+          productionDraftStorageKey,
+          JSON.stringify(nextSongs)
+        );
+        setHasLoadedProductionDrafts(true);
+      } catch (error) {
+        console.warn("Using local production fallback.", error);
+      }
+    }
+
+    loadProductionSongs();
+  }, []);
+
+  useEffect(() => {
     window.setTimeout(() => {
       void loadPlatformStats();
     }, 0);
@@ -3375,11 +3785,16 @@ export default function Home() {
         {activeSection === "Marketing" ? (
           <MarketingView
             campaigns={campaigns}
+            focusTarget={marketingFocusTarget}
             onAddCampaign={addCampaign}
             onCampaignDaysChange={updateCampaignDays}
             onDeleteCampaign={deleteCampaign}
+            onFocusCampaign={(campaignId, elementId) =>
+              setMarketingFocusTarget({ campaignId, elementId, token: Date.now() })
+            }
             onReleaseDateSave={updateCampaignReleaseDate}
             onTitleSave={updateCampaignTitle}
+            recentProductionSongId={productionFocusTarget?.songId}
             productionSongs={productionSongDrafts}
           />
         ) : null}
@@ -3393,9 +3808,14 @@ export default function Home() {
         ) : null}
         {activeSection === "Production" ? (
           <ProductionView
+            focusTarget={productionFocusTarget}
             onAddSong={addProductionSong}
             onDeleteSong={deleteProductionSong}
+            onFocusSong={(songId, elementId) =>
+              setProductionFocusTarget({ elementId, songId, token: Date.now() })
+            }
             onSongChange={updateProductionSong}
+            saveStatus={productionSaveStatus}
             songs={productionSongDrafts}
           />
         ) : null}
@@ -3988,16 +4408,41 @@ function BudgetEntryRow({
 }
 
 function ProductionView({
+  focusTarget,
   onAddSong,
   onDeleteSong,
+  onFocusSong,
   onSongChange,
+  saveStatus,
   songs
 }: {
+  focusTarget: { elementId?: string; songId: string; token: number } | null;
   onAddSong: () => void;
   onDeleteSong: (songId: string) => void;
+  onFocusSong: (songId: string, elementId?: string) => void;
   onSongChange: (songId: string, updates: Partial<ProductionSongConfig>) => void;
+  saveStatus: RefreshStatus;
   songs: ProductionSongConfig[];
 }) {
+  const songElementRefs = useRef<Record<string, HTMLElement | null>>({});
+
+  useEffect(() => {
+    if (!focusTarget) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      const focusedElement = focusTarget.elementId
+        ? document.getElementById(focusTarget.elementId)
+        : null;
+
+      (focusedElement ?? songElementRefs.current[focusTarget.songId])?.scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+      });
+    }, 80);
+  }, [focusTarget]);
+
   return (
     <>
       <header className="topbar">
@@ -4005,17 +4450,31 @@ function ProductionView({
           <p className="eyebrow">Music production</p>
           <h1>Production</h1>
         </div>
-        <button className="icon-button" type="button" aria-label="Open project setup">
-          <ArrowUpRight size={18} aria-hidden />
-        </button>
+        <div className="production-save-control">
+          {saveStatus.message ? (
+            <span className={`refresh-status refresh-status-${saveStatus.state}`}>
+              {saveStatus.message}
+            </span>
+          ) : null}
+          <button className="icon-button" type="button" aria-label="Open project setup">
+            <ArrowUpRight size={18} aria-hidden />
+          </button>
+        </div>
       </header>
 
       <div className="campaign-list">
         {songs.map((song) => (
           <ProductionSongBoard
+            focusToken={
+              focusTarget?.songId === song.id ? focusTarget.token : undefined
+            }
             key={song.id}
             onChange={onSongChange}
             onDelete={onDeleteSong}
+            onFocus={onFocusSong}
+            refCallback={(element) => {
+              songElementRefs.current[song.id] = element;
+            }}
             song={song}
           />
         ))}
@@ -4030,12 +4489,18 @@ function ProductionView({
 }
 
 function ProductionSongBoard({
+  focusToken,
   onChange,
   onDelete,
+  onFocus,
+  refCallback,
   song
 }: {
+  focusToken?: number;
   onChange: (songId: string, updates: Partial<ProductionSongConfig>) => void;
   onDelete: (songId: string) => void;
+  onFocus: (songId: string, elementId?: string) => void;
+  refCallback: (element: HTMLElement | null) => void;
   song: ProductionSongConfig;
 }) {
   const [songTitle, setSongTitle] = useState(song.title);
@@ -4044,6 +4509,7 @@ function ProductionSongBoard({
   const [appliedDeadlineInput, setAppliedDeadlineInput] = useState(song.deadline);
   const [albumArtUrl, setAlbumArtUrl] = useState(song.albumArtUrl);
   const [isAlbumArtEditorOpen, setIsAlbumArtEditorOpen] = useState(false);
+  const [isFocusHighlighted, setIsFocusHighlighted] = useState(false);
   const [isSongOpen, setIsSongOpen] = useState(false);
   const [isSongTitleEditorOpen, setIsSongTitleEditorOpen] = useState(false);
   const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
@@ -4077,6 +4543,26 @@ function ProductionSongBoard({
     return () => window.clearTimeout(saveTimer);
   }, [albumArtUrl, onChange, song.albumArtUrl, song.id]);
 
+  useEffect(() => {
+    if (!focusToken) {
+      return;
+    }
+
+    const focusTimer = window.setTimeout(() => {
+      setIsSongOpen(true);
+      setIsFocusHighlighted(true);
+    }, 0);
+
+    const highlightTimer = window.setTimeout(() => {
+      setIsFocusHighlighted(false);
+    }, 2600);
+
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.clearTimeout(highlightTimer);
+    };
+  }, [focusToken]);
+
   function saveSongTitle() {
     if (!canSaveSongTitle) {
       return;
@@ -4096,6 +4582,7 @@ function ProductionSongBoard({
     }
 
     setAppliedDeadlineInput(deadlineInput);
+    onFocus(song.id);
     onChange(song.id, {
       deadline: deadlineInput,
       steps: shiftProductionStepDeadlines(song.steps, nextDeadline)
@@ -4109,6 +4596,7 @@ function ProductionSongBoard({
   }
 
   function updateStep(stepId: string, updates: Partial<ProductionStep>) {
+    onFocus(song.id, getProductionStepElementId(song.id, stepId));
     updateSteps((currentSteps) =>
       currentSteps.map((step) =>
         step.id === stepId ? { ...step, ...updates } : step
@@ -4125,10 +4613,12 @@ function ProductionSongBoard({
       ? addUtcDays(latestDeadline, 1)
       : parseCampaignDate(appliedDeadlineInput) ?? getTodayUtcDate();
 
+    const newStepId = `extra-step-${Date.now()}`;
+    onFocus(song.id, getProductionStepElementId(song.id, newStepId));
     updateSteps((currentSteps) => [
       ...currentSteps,
       {
-        id: `extra-step-${Date.now()}`,
+        id: newStepId,
         label: "New production step",
         deadline: formatDateForInput(nextDeadline),
         isDefaultStep: false,
@@ -4147,6 +4637,9 @@ function ProductionSongBoard({
   }
 
   function addStepTask(stepId: string) {
+    const currentStep = song.steps.find((step) => step.id === stepId);
+    const newTaskId = `${stepId}-extra-${(currentStep?.extraTasks.length ?? 0) + 1}`;
+    onFocus(song.id, getProductionTaskElementId(song.id, stepId, newTaskId));
     updateSteps((currentSteps) =>
       currentSteps.map((step) =>
         step.id === stepId
@@ -4155,7 +4648,7 @@ function ProductionSongBoard({
               extraTasks: [
                 ...step.extraTasks,
                 {
-                  id: `${step.id}-extra-${step.extraTasks.length + 1}`,
+                  id: newTaskId,
                   budgetLines: [],
                   title: "New task",
                   status: "not-started"
@@ -4172,6 +4665,7 @@ function ProductionSongBoard({
     taskId: string,
     updates: Partial<Pick<ExtraCampaignTask, "budgetLines" | "status" | "title">>
   ) {
+    onFocus(song.id, getProductionTaskElementId(song.id, stepId, taskId));
     updateSteps((currentSteps) =>
       currentSteps.map((step) =>
         step.id === stepId
@@ -4200,7 +4694,13 @@ function ProductionSongBoard({
   }
 
   return (
-    <section className="campaign-board" aria-label={`${songTitle} production plan`}>
+    <section
+      className={`campaign-board production-song-board${
+        isFocusHighlighted ? " production-song-board-focused" : ""
+      }`}
+      aria-label={`${songTitle} production plan`}
+      ref={refCallback}
+    >
       <div className="campaign-board-header production-board-header">
         <div className="album-art-control">
           <button
@@ -4345,6 +4845,7 @@ function ProductionSongBoard({
                   onDeleteTask={deleteStepTask}
                   onStepChange={updateStep}
                   onTaskChange={updateStepTask}
+                  songId={song.id}
                   step={step}
                 />
               ))}
@@ -4420,12 +4921,25 @@ function ProductionProgressStrip({
   );
 }
 
+function getProductionStepElementId(songId: string, stepId: string) {
+  return `production-step-${songId}-${stepId}`;
+}
+
+function getProductionTaskElementId(
+  songId: string,
+  stepId: string,
+  taskId: string
+) {
+  return `production-task-${songId}-${stepId}-${taskId}`;
+}
+
 function ProductionStepRow({
   onAddTask,
   onDeleteStep,
   onDeleteTask,
   onStepChange,
   onTaskChange,
+  songId,
   step
 }: {
   onAddTask: (stepId: string) => void;
@@ -4437,10 +4951,11 @@ function ProductionStepRow({
     taskId: string,
     updates: Partial<Pick<ExtraCampaignTask, "budgetLines" | "status" | "title">>
   ) => void;
+  songId: string;
   step: ProductionStep;
 }) {
   return (
-    <tr>
+    <tr id={getProductionStepElementId(songId, step.id)}>
       <td>
         <label className="production-step-date-field">
           <span>{formatCampaignDateKey(formatInputDateForDatabase(step.deadline) ?? "")}</span>
@@ -4515,6 +5030,7 @@ function ProductionStepRow({
             <ExtraCampaignTaskRow
               budgetIdPrefix={`${step.id}-${task.id}-budget`}
               dayNumber={0}
+              elementId={getProductionTaskElementId(songId, step.id, task.id)}
               key={task.id}
               onChange={(_, taskId, updates) =>
                 onTaskChange(step.id, taskId, updates)
@@ -4668,28 +5184,100 @@ function normalizeProductionBudgetLines(budgetLines: ProductionBudgetLine[]) {
 
 function MarketingView({
   campaigns,
+  focusTarget,
   onAddCampaign,
   onCampaignDaysChange,
   onDeleteCampaign,
+  onFocusCampaign,
   onReleaseDateSave,
   onTitleSave,
+  recentProductionSongId,
   productionSongs
 }: {
   campaigns: MarketingCampaignConfig[];
+  focusTarget: { campaignId: string; elementId?: string; token: number } | null;
   onAddCampaign: (releaseTitle?: string) => void;
   onCampaignDaysChange: (campaignId: string, campaignDays: CampaignDay[]) => void;
   onDeleteCampaign: (campaignId: string) => void;
+  onFocusCampaign: (campaignId: string, elementId?: string) => void;
   onReleaseDateSave: (campaignId: string, releaseDate: string) => void;
   onTitleSave: (campaignId: string, releaseTitle: string) => void;
+  recentProductionSongId?: string;
   productionSongs: ProductionSongConfig[];
 }) {
+  const campaignElementRefs = useRef<Record<string, HTMLElement | null>>({});
   const [selectedProductionSongId, setSelectedProductionSongId] = useState(
     productionSongs[0]?.id ?? ""
   );
+  const recentProductionSong = productionSongs.find(
+    (song) => song.id === recentProductionSongId
+  );
+  const orderedProductionSongs = useMemo(
+    () =>
+      recentProductionSong
+        ? [
+            recentProductionSong,
+            ...productionSongs.filter(
+              (song) => song.id !== recentProductionSong.id
+            )
+          ]
+        : productionSongs,
+    [productionSongs, recentProductionSong]
+  );
   const selectedProductionSong =
     productionSongs.find((song) => song.id === selectedProductionSongId) ??
-    productionSongs[0] ??
+    orderedProductionSongs[0] ??
     null;
+
+  useEffect(() => {
+    if (!recentProductionSongId) {
+      return;
+    }
+
+    if (productionSongs.some((song) => song.id === recentProductionSongId)) {
+      const selectTimer = window.setTimeout(() => {
+        setSelectedProductionSongId(recentProductionSongId);
+      }, 0);
+
+      return () => window.clearTimeout(selectTimer);
+    }
+  }, [productionSongs, recentProductionSongId]);
+
+  useEffect(() => {
+    if (
+      selectedProductionSongId &&
+      productionSongs.some((song) => song.id === selectedProductionSongId)
+    ) {
+      return;
+    }
+
+    if (orderedProductionSongs[0]) {
+      const selectTimer = window.setTimeout(() => {
+        setSelectedProductionSongId(orderedProductionSongs[0].id);
+      }, 0);
+
+      return () => window.clearTimeout(selectTimer);
+    }
+  }, [orderedProductionSongs, productionSongs, selectedProductionSongId]);
+
+  useEffect(() => {
+    if (!focusTarget) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      const focusedElement = focusTarget.elementId
+        ? document.getElementById(focusTarget.elementId)
+        : null;
+
+      (
+        focusedElement ?? campaignElementRefs.current[focusTarget.campaignId]
+      )?.scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+      });
+    }, 80);
+  }, [focusTarget]);
 
   return (
     <>
@@ -4707,12 +5295,19 @@ function MarketingView({
         {campaigns.map((campaign) => (
           <MarketingCampaignBoard
             campaign={campaign}
+            focusToken={
+              focusTarget?.campaignId === campaign.id ? focusTarget.token : undefined
+            }
             key={campaign.id}
             onDaysChange={onCampaignDaysChange}
             onDelete={onDeleteCampaign}
+            onFocus={onFocusCampaign}
             onReleaseDateSave={onReleaseDateSave}
             onTitleSave={onTitleSave}
             productionSongs={productionSongs}
+            refCallback={(element) => {
+              campaignElementRefs.current[campaign.id] = element;
+            }}
           />
         ))}
 
@@ -4723,8 +5318,8 @@ function MarketingView({
             onChange={(event) => setSelectedProductionSongId(event.target.value)}
             value={selectedProductionSong?.id ?? ""}
           >
-            {productionSongs.length > 0 ? (
-              productionSongs.map((song) => (
+            {orderedProductionSongs.length > 0 ? (
+              orderedProductionSongs.map((song) => (
                 <option key={song.id} value={song.id}>
                   {song.title}
                 </option>
@@ -4749,18 +5344,24 @@ function MarketingView({
 
 function MarketingCampaignBoard({
   campaign,
+  focusToken,
   onDaysChange,
   onDelete,
+  onFocus,
   onReleaseDateSave,
   onTitleSave,
-  productionSongs
+  productionSongs,
+  refCallback
 }: {
   campaign: MarketingCampaignConfig;
+  focusToken?: number;
   onDaysChange: (campaignId: string, campaignDays: CampaignDay[]) => void;
   onDelete: (campaignId: string) => void;
+  onFocus: (campaignId: string, elementId?: string) => void;
   onReleaseDateSave: (campaignId: string, releaseDate: string) => void;
   onTitleSave: (campaignId: string, releaseTitle: string) => void;
   productionSongs: ProductionSongConfig[];
+  refCallback: (element: HTMLElement | null) => void;
 }) {
   const [releaseDateInput, setReleaseDateInput] = useState(
     campaign.releaseDate
@@ -4775,6 +5376,7 @@ function MarketingCampaignBoard({
   const [isCampaignTitleEditorOpen, setIsCampaignTitleEditorOpen] =
     useState(false);
   const [isCampaignOpen, setIsCampaignOpen] = useState(false);
+  const [isFocusHighlighted, setIsFocusHighlighted] = useState(false);
   const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
   const [campaignDays, setCampaignDays] = useState(() =>
     campaign.campaignDays ?? buildCampaignDays(campaign.releaseDate, campaign.daySeeds)
@@ -4827,6 +5429,26 @@ function MarketingCampaignBoard({
     }, 0);
   }, [campaign.releaseDate, campaign.releaseTitle]);
 
+  useEffect(() => {
+    if (!focusToken) {
+      return;
+    }
+
+    const focusTimer = window.setTimeout(() => {
+      setIsCampaignOpen(true);
+      setIsFocusHighlighted(true);
+    }, 0);
+
+    const highlightTimer = window.setTimeout(() => {
+      setIsFocusHighlighted(false);
+    }, 2600);
+
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.clearTimeout(highlightTimer);
+    };
+  }, [focusToken]);
+
   function updateCampaignDaysState(
     updater: (currentDays: CampaignDay[]) => CampaignDay[]
   ) {
@@ -4859,6 +5481,7 @@ function MarketingCampaignBoard({
     }
 
     setAppliedReleaseDateInput(releaseDateInput);
+    onFocus(campaign.id);
     onReleaseDateSave(campaign.id, releaseDateInput);
     shiftCampaignDates(nextReleaseDate);
   }
@@ -4889,6 +5512,7 @@ function MarketingCampaignBoard({
   }
 
   function updateClipName(dayNumber: number, clipName: string) {
+    onFocus(campaign.id, getMarketingCampaignDayElementId(campaign.id, dayNumber));
     updateCampaignDaysState((currentDays) =>
       currentDays.map((day) =>
         day.dayNumber === dayNumber ? { ...day, clipName } : day
@@ -4901,6 +5525,7 @@ function MarketingCampaignBoard({
     task: keyof CampaignDay["statuses"],
     status: MarketingStatus
   ) {
+    onFocus(campaign.id, getMarketingCampaignDayElementId(campaign.id, dayNumber));
     updateCampaignDaysState((currentDays) =>
       currentDays.map((day) =>
         day.dayNumber === dayNumber
@@ -4911,6 +5536,7 @@ function MarketingCampaignBoard({
   }
 
   function addExtraTask(dayNumber: number) {
+    onFocus(campaign.id, getMarketingCampaignDayElementId(campaign.id, dayNumber));
     updateCampaignDaysState((currentDays) =>
       currentDays.map((day) =>
         day.dayNumber === dayNumber
@@ -4935,6 +5561,7 @@ function MarketingCampaignBoard({
     taskId: string,
     updates: Partial<Pick<ExtraCampaignTask, "budgetLines" | "status" | "title">>
   ) {
+    onFocus(campaign.id, getMarketingCampaignDayElementId(campaign.id, dayNumber));
     updateCampaignDaysState((currentDays) =>
       currentDays.map((day) =>
         day.dayNumber === dayNumber
@@ -4950,6 +5577,7 @@ function MarketingCampaignBoard({
   }
 
   function deleteExtraTask(dayNumber: number, taskId: string) {
+    onFocus(campaign.id, getMarketingCampaignDayElementId(campaign.id, dayNumber));
     updateCampaignDaysState((currentDays) =>
       currentDays.map((day) =>
         day.dayNumber === dayNumber
@@ -4967,6 +5595,8 @@ function MarketingCampaignBoard({
       parseCampaignDate(appliedReleaseDateInput) ??
       new Date(Date.UTC(2026, 6, 10));
 
+    const nextDayNumber = campaignDays.length + 1;
+    onFocus(campaign.id, getMarketingCampaignDayElementId(campaign.id, nextDayNumber));
     updateCampaignDaysState((currentDays) => [
       ...currentDays,
       buildCampaignDay(releaseDate, currentDays.length)
@@ -4974,6 +5604,7 @@ function MarketingCampaignBoard({
   }
 
   function deleteCampaignDay(dayNumber: number) {
+    onFocus(campaign.id, getMarketingCampaignDayElementId(campaign.id, dayNumber));
     updateCampaignDaysState((currentDays) =>
       currentDays.filter(
         (day) => day.isDefaultDay || day.dayNumber !== dayNumber
@@ -4983,8 +5614,11 @@ function MarketingCampaignBoard({
 
   return (
       <section
-        className="campaign-board"
+        className={`campaign-board marketing-campaign-board${
+          isFocusHighlighted ? " production-song-board-focused" : ""
+        }`}
         aria-label={`${displayedCampaignTitle} marketing campaign`}
+        ref={refCallback}
       >
         <div className="campaign-board-header">
           <div className="album-art-control">
@@ -5106,7 +5740,10 @@ function MarketingCampaignBoard({
               </thead>
               <tbody>
                 {campaignDays.map((day) => (
-                  <tr key={day.dayNumber}>
+                  <tr
+                    id={getMarketingCampaignDayElementId(campaign.id, day.dayNumber)}
+                    key={day.dayNumber}
+                  >
                     <td>
                       <strong>{day.date}</strong>
                       <span>{formatReleaseOffset(day.releaseOffset)}</span>
@@ -5226,6 +5863,10 @@ function CampaignProgressStrip({
   );
 }
 
+function getMarketingCampaignDayElementId(campaignId: string, dayNumber: number) {
+  return `marketing-campaign-day-${campaignId}-${dayNumber}`;
+}
+
 function MarketingCampaignTaskCell({
   day,
   onAddTask,
@@ -5309,12 +5950,14 @@ function MarketingCampaignTaskCell({
 function ExtraCampaignTaskRow({
   budgetIdPrefix,
   dayNumber,
+  elementId,
   onChange,
   onDelete,
   task
 }: {
   budgetIdPrefix?: string;
   dayNumber: number;
+  elementId?: string;
   onChange: (
     dayNumber: number,
     taskId: string,
@@ -5324,7 +5967,7 @@ function ExtraCampaignTaskRow({
   task: ExtraCampaignTask;
 }) {
   return (
-    <div className="extra-campaign-task">
+    <div className="extra-campaign-task" id={elementId}>
       <label className="extra-campaign-task-name">
         <span>
           <StatusDot status={task.status} label={statusLabels[task.status]} />

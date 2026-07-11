@@ -19,6 +19,7 @@ This is a practical project-management log, not a strict timesheet. When exact s
 - `Infrastructure`: GitHub, Supabase, CLI access, migrations, environment setup.
 - `Marketing UI`: Marketing campaign layout, Dashboard campaign previews, campaign workflow UX.
 - `Marketing Backend`: campaign database tables, seed data, Supabase persistence.
+- `Production Backend`: production database tables, Supabase persistence, and server write APIs.
 - `Platform APIs`: YouTube/Instagram/Spotify/etc. API import logic.
 - `Platforms UI`: platform cards, platform import controls, platform analytics layout.
 - `Dashboard UI`: main command-screen summaries, compact cards, cross-module previews.
@@ -37,6 +38,7 @@ This is a practical project-management log, not a strict timesheet. When exact s
 | Infrastructure | 0h 22m + earlier TBD | GitHub, Supabase, CLI access, migrations, YouTube API setup, Vercel deployment, GitHub Actions scheduler and resilient cron window. |
 | Marketing UI | 1h 10m + earlier TBD | Marketing campaign cards, dashboard previous/current/next previews, task workflow, album-art display from Production, and Production-song dropdowns for campaign creation/title edits. Earlier UI build still needs historical estimate. |
 | Marketing Backend | 0h 14m + earlier TBD | Supabase campaign schema, seed migration, first UI read/write wiring, album-art persistence. Earlier migration work still needs historical estimate. |
+| Production Backend | 0h 55m | Beta 1.3 Production persistence work started: normalized Supabase migration, server-side Production write API, browser load/mapping from Supabase, first-table seeding from workbook-backed defaults, Add song deadline rule, and debounced Production saves for notes/status edits. Supabase migration applied successfully. |
 | Platform APIs | 3h 29m + earlier TBD | YouTube and Instagram importers, YouTube Music Topic channel collector, Spotify Web API collector, Apple Music CSV import, live API verification, 30-day Instagram reach/views, server refresh endpoint, snapshot policy, scheduled refresh wiring. |
 | Platforms UI | 0h 25m | Apple Music CSV import moved from Dashboard to Platforms, Apple Music card cleanup, and compact metric display adjustments. |
 | Dashboard UI | 1h 10m | Dashboard command-screen consolidation: latest/next event, compact platform cards, marketing/production previews, four-card budget projection strip, roadmap Phase 1 preview, collapsible production task lists, Production-owned campaign names in previews, and Beta 1.2 rollout polish. |
@@ -45,7 +47,7 @@ This is a practical project-management log, not a strict timesheet. When exact s
 | Roadmap Tracker | 0h 25m | First UI-only Roadmap prototype from `Love Strings Roadmap.pdf`: 3 strategic phases, release progress boxes, monthly progress boxes, phase separators, and before/after screenshots. Backend wiring still pending. |
 | Events Tracker | 0h 40m | First UI-only Events tab from the Love Strings website archive, manual Add event flow, editable event/location/address links, next-event summary logic, and event money fields that feed Budget. |
 | Content Notes | 1h 25m | Build-story log for future Instagram Reels/Shorts about the dashboard creation process, including the origin story, Apple Music CSV data-access story, dashboard consolidation story, budget-planning story, connected-modules story, and before/after screenshot/video workflow. |
-| Maintenance | 2h 40m | Time tracking setup, changelog/versioning, project context/docs updates, decision logs, verification, screenshot/video archive setup, and Beta 1.2 release notes. |
+| Maintenance | 2h 45m | Time tracking setup, changelog/versioning, project context/docs updates, decision logs, verification, screenshot/video archive setup, and Beta 1.2 release notes. |
 
 Known exact/near-exact time so far:
 
@@ -86,6 +88,10 @@ Known exact/near-exact time so far:
 | 2026-07-10 | TBD | TBD | 0h 30m | estimated | Production Tracker, Marketing UI, Dashboard UI, Maintenance | Finished Production-owned album art for Marketing, removed the old Marketing album-art save path, made new Marketing campaigns choose from Production song names, changed Marketing title edits to a Production-song dropdown, and updated Dashboard campaign names from the same Production catalogue. Approx split: Marketing UI 15m, Production Tracker 10m, Dashboard UI 5m. |
 | 2026-07-10 | TBD | TBD | 0h 15m | estimated | Content Notes, Maintenance | Updated project files, decisions, changelog, work log, and build-story notes after the Production/Marketing/Budget linkage work. Approx split: Content Notes 10m, Maintenance 5m. |
 | 2026-07-10 | TBD | TBD | 0h 15m | estimated | Dashboard UI, Maintenance | Published and smoke-tested Beta 1.2, corrected the visible app version label, and recorded follow-ups from production testing: Production default deadline, Events card title alignment, Platforms graph refinement, remaining connectors, Roadmap automation, and future Marketing-to-Budget expense links. Approx split: Dashboard UI 5m, Maintenance 10m. |
+| 2026-07-10 | TBD | TBD | 0h 05m | estimated | Maintenance | Verified the production Vercel app now displays `Beta 1.2` online and finalized release-result notes in project files. |
+| 2026-07-10 | TBD | TBD | 0h 45m | estimated | Production Backend, Production Tracker, Maintenance | Started Beta 1.3 Production wiring: added normalized Supabase migration, server-side Production save/delete API, Supabase load/mapping/first-seed logic in the app, and changed Add song to default to latest production deadline plus 2 weeks. Supabase `db push` attempt hung after login-role initialization, so database application still needed confirmation. Approx split: Production Backend 35m, Production Tracker 5m, Maintenance 5m. |
+| 2026-07-11 | TBD | TBD | 0h 10m | estimated | Production Backend, Maintenance | Confirmed the Production Supabase migration applied successfully after remote push-role confirmation, then fixed a Production notes persistence issue by debouncing per-song saves so rapid note typing does not race older server requests against newer text. Approx split: Production Backend 8m, Maintenance 2m. |
+| 2026-07-11 | TBD | TBD | 1h 20m | estimated | Production Backend, Production Tracker, Marketing UI, Budget Tracker, Maintenance | Finished Beta 1.3 readiness: added local service-role env setup, verified Production notes persist after refresh, fixed default License/Distributor Budget generation, allowed historical Production costs to appear in Budget, added focus-preserving scroll/highlight behavior for Production and Marketing while keeping sorted lists, pinned the most recently edited Production song in the Marketing campaign picker, added proprietary copyright notice, and bumped the visible app label to `Beta 1.3`. Approx split: Production Backend 20m, Production Tracker 25m, Marketing UI 20m, Budget Tracker 10m, Maintenance 5m. |
 
 ## How To Update Totals
 

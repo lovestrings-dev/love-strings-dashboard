@@ -164,7 +164,8 @@ This would require:
 - Production is now the source of truth for song names and album-art URLs used by Marketing.
 - Production steps can carry budget rows that generate corresponding Budget ledger rows. License and Distributor have default spend values for repeated release costs.
 - Production songs can be safely deleted through a protected UI flow.
-- Prototype is local/UI-only for now. Future backend should use normalized song/production-step/production-task records and link to Marketing through a stable song id, not only song title.
+- Beta 1.3 backend direction: Production should use normalized Supabase records for songs, production steps, extra step tasks, and production budget rows. Browser reads are allowed through read policies, while writes go through a server-side API route using the service key.
+- Marketing still links to Production by song-title matching for now. Future backend should add a stable song/release id relationship between Marketing campaigns and Production songs.
 - Current seed includes 27 production rows from the workbook. Future release dates are predicted every 3 weeks after `Rock and Roll`, with production deadlines 14 days before release.
 
 Possible production areas:
