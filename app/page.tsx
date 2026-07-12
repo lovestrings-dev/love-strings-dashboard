@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -178,6 +179,12 @@ type RefreshStatus = {
   message: string;
   state: "error" | "idle" | "loading" | "success";
 };
+type QrCodeLink = {
+  id: string;
+  name: string;
+  qrImageUrl: string;
+  targetUrl: string;
+};
 type AppleMusicImportStatus = RefreshStatus;
 type AppleMusicCsvRow = {
   avgDailyListeners: number;
@@ -250,6 +257,7 @@ const platformStats = [
   {
     platform: "Instagram",
     slug: "instagram",
+    profileUrl: "https://www.instagram.com/lovestringsband/",
     icon: Camera,
     dashboard: true,
     metrics: [
@@ -275,6 +283,7 @@ const platformStats = [
   {
     platform: "YouTube Channel",
     slug: "youtube",
+    profileUrl: "https://www.youtube.com/@LoveStringsBand",
     icon: Video,
     dashboard: true,
     metrics: [
@@ -296,6 +305,8 @@ const platformStats = [
   {
     platform: "YouTube Music",
     slug: "youtube-music",
+    profileUrl:
+      "https://music.youtube.com/channel/UCKlfg9lYKyMOg_Oiz-Zb1Fg?si=E-Vckp5-kB98MZKy",
     icon: Headphones,
     dashboard: true,
     metrics: [
@@ -312,6 +323,8 @@ const platformStats = [
   {
     platform: "Spotify",
     slug: "spotify",
+    profileUrl:
+      "https://open.spotify.com/artist/4CESELwcVlIPnfiWuaxRbF?si=odblVX83T7SBd486lli_sg",
     icon: Headphones,
     dashboard: true,
     metrics: [
@@ -328,6 +341,7 @@ const platformStats = [
   {
     platform: "Apple Music",
     slug: "apple-music",
+    profileUrl: "https://music.apple.com/us/artist/love-strings/1894951732",
     icon: Music2,
     dashboard: true,
     metrics: [
@@ -351,6 +365,8 @@ const platformStats = [
   {
     platform: "Amazon Music",
     slug: "amazon-music",
+    profileUrl:
+      "https://amazon.de/music/player/artists/B0GXX8D1Q6/love-strings?marketplaceId=A1PA6795UKMFR9&musicTerritory=DE&ref=dm_sh_DllfMUlhifqDm8suXQHK2D5tg",
     icon: Headphones,
     dashboard: false,
     metrics: [
@@ -367,6 +383,7 @@ const platformStats = [
   {
     platform: "Deezer",
     slug: "deezer",
+    profileUrl: "https://www.deezer.com/en/artist/9299570",
     icon: Disc3,
     dashboard: false,
     metrics: [
@@ -399,7 +416,28 @@ const platformPlaceholder = {
   ]
 };
 
-const appVersionLabel = "Beta 1.3";
+const defaultQrCodeLinks: QrCodeLink[] = [
+  {
+    id: "website",
+    name: "Website",
+    qrImageUrl: "/love-strings-website-qr.png",
+    targetUrl: "https://www.lovestrings.at/"
+  },
+  {
+    id: "dashboard",
+    name: "Dashboard",
+    qrImageUrl: "",
+    targetUrl: "https://love-strings-dashboard.vercel.app/"
+  },
+  ...platformStats.map((platform) => ({
+    id: `platform-${platform.slug}`,
+    name: platform.platform,
+    qrImageUrl: "",
+    targetUrl: platform.profileUrl
+  }))
+];
+
+const appVersionLabel = "Beta 1.4";
 
 const sections = [
   "Dashboard",
@@ -641,6 +679,7 @@ const productionDraftStorageKey = "love-strings-production-song-drafts-v3";
 const budgetDraftStorageKey = "love-strings-budget-entry-drafts-v2";
 const deletedBudgetForecastStorageKey = "love-strings-budget-deleted-forecast-v1";
 const eventDraftStorageKey = "love-strings-event-entry-drafts-v1";
+const qrCodeLinksStorageKey = "love-strings-qr-code-links-v1";
 
 const newMarketingCampaign: Omit<MarketingCampaignConfig, "id"> = {
   releaseTitle: "New Campaign",
@@ -2281,7 +2320,8 @@ function getDashboardCampaignPreview(campaigns: MarketingCampaignConfig[]) {
 
 function getDashboardFocusQueue(
   campaignPreview: ReturnType<typeof getDashboardCampaignPreview>,
-  productionPreviewSongs: ProductionSongConfig[]
+  productionPreviewSongs: ProductionSongConfig[],
+  otherTasks: FocusQueueItem[] = []
 ) {
   const selectedCampaign = campaignPreview.current ?? campaignPreview.next;
   const selectedSong = productionPreviewSongs[0] ?? productionPreviewSongs[1] ?? null;
@@ -2298,18 +2338,20 @@ function getDashboardFocusQueue(
   const primaryProductionTask = productionTasks[0]
     ? toFocusQueueItem(productionTasks[0], "Production")
     : null;
-  const otherTask =
+  const fallbackOtherTask =
     [...marketingTasks.slice(1), ...productionTasks.slice(1)]
       .sort((firstTask, secondTask) =>
         getTaskDateSortTime(firstTask.label) - getTaskDateSortTime(secondTask.label)
       )
       .map((task) => toFocusQueueItem(task, "Other"))[0] ?? null;
+  const otherTask = otherTasks[0] ?? fallbackOtherTask;
 
   return {
     allTasks: [
       ...marketingTasks.map((task) => toFocusQueueItem(task, "Marketing")),
       ...productionTasks.map((task) => toFocusQueueItem(task, "Production")),
-      ...(otherTask ? [otherTask] : [])
+      ...otherTasks,
+      ...(otherTasks.length === 0 && fallbackOtherTask ? [fallbackOtherTask] : [])
     ],
     visibleTasks: [primaryMarketingTask, primaryProductionTask, otherTask].filter(
       (task): task is FocusQueueItem => Boolean(task)
@@ -2845,10 +2887,13 @@ export default function Home() {
   const [eventEntryDrafts, setEventEntryDrafts] = useState(() =>
     sortEventEntriesByDate(eventEntries)
   );
+  const [qrCodeLinks, setQrCodeLinks] =
+    useState<QrCodeLink[]>(defaultQrCodeLinks);
   const [hasLoadedCampaignDrafts, setHasLoadedCampaignDrafts] = useState(false);
   const [hasLoadedProductionDrafts, setHasLoadedProductionDrafts] =
     useState(false);
   const [hasLoadedBudgetDrafts, setHasLoadedBudgetDrafts] = useState(false);
+  const [hasLoadedQrCodeLinks, setHasLoadedQrCodeLinks] = useState(false);
   const [hasLoadedEventDrafts, setHasLoadedEventDrafts] = useState(false);
   const dashboardPlatformStats = getDashboardPlatformStats(platformStatsData);
   const budgetEntriesWithForecast = getBudgetEntriesWithForecast(
@@ -3367,6 +3412,32 @@ export default function Home() {
     );
   }
 
+  function addQrCodeLink() {
+    setQrCodeLinks((currentLinks) => [
+      ...currentLinks,
+      {
+        id: `qr-code-${Date.now()}`,
+        name: "New QR Code",
+        qrImageUrl: "",
+        targetUrl: ""
+      }
+    ]);
+  }
+
+  function updateQrCodeLink(linkId: string, updates: Partial<QrCodeLink>) {
+    setQrCodeLinks((currentLinks) =>
+      currentLinks.map((link) =>
+        link.id === linkId ? { ...link, ...updates } : link
+      )
+    );
+  }
+
+  function deleteQrCodeLink(linkId: string) {
+    setQrCodeLinks((currentLinks) =>
+      currentLinks.filter((link) => link.id !== linkId)
+    );
+  }
+
   useEffect(() => {
     const saveTimers = productionSaveTimers.current;
 
@@ -3422,6 +3493,73 @@ export default function Home() {
       console.warn("Unable to save local campaign drafts.", error);
     }
   }, [campaigns, hasLoadedCampaignDrafts]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    try {
+      const storedQrLinks = window.localStorage.getItem(qrCodeLinksStorageKey);
+
+      if (storedQrLinks) {
+        const parsedQrLinks = JSON.parse(storedQrLinks);
+
+        if (Array.isArray(parsedQrLinks)) {
+          const nextQrLinks = parsedQrLinks.map((link, index) => ({
+              id:
+                typeof link.id === "string" && link.id
+                  ? link.id
+                  : `qr-${Date.now()}-${index}`,
+              name:
+                typeof link.name === "string" && link.name
+                  ? link.name
+                  : "QR Code",
+              qrImageUrl:
+                typeof link.qrImageUrl === "string" ? link.qrImageUrl : "",
+              targetUrl:
+                typeof link.targetUrl === "string" ? link.targetUrl : ""
+            }));
+
+          window.setTimeout(() => {
+            if (!isCancelled) {
+              setQrCodeLinks(nextQrLinks);
+              setHasLoadedQrCodeLinks(true);
+            }
+          }, 0);
+
+          return () => {
+            isCancelled = true;
+          };
+        }
+      }
+    } catch (error) {
+      console.warn("Unable to load local QR code links.", error);
+    }
+
+    window.setTimeout(() => {
+      if (!isCancelled) {
+        setHasLoadedQrCodeLinks(true);
+      }
+    }, 0);
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedQrCodeLinks) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(
+        qrCodeLinksStorageKey,
+        JSON.stringify(qrCodeLinks)
+      );
+    } catch (error) {
+      console.warn("Unable to save local QR code links.", error);
+    }
+  }, [hasLoadedQrCodeLinks, qrCodeLinks]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -3758,7 +3896,14 @@ export default function Home() {
     <main className="dashboard-shell">
       <aside className="sidebar" aria-label="Primary">
         <div className="brand-mark">
-          <Music2 size={22} aria-hidden />
+          <Image
+            alt=""
+            aria-hidden
+            className="brand-logo"
+            height={44}
+            src="/love-strings-logo.jpeg"
+            width={44}
+          />
           <div>
             <strong>Love Strings</strong>
             <span>Sprint Dashboard</span>
@@ -3801,9 +3946,13 @@ export default function Home() {
         {activeSection === "Platforms" ? (
           <PlatformsView
             appleMusicImportStatus={appleMusicImportStatus}
+            onAddQrCode={addQrCodeLink}
             onAppleMusicCsvImport={importAppleMusicCsv}
+            onDeleteQrCode={deleteQrCodeLink}
+            onQrCodeChange={updateQrCodeLink}
             platformMetricRows={platformMetricRows}
             platformStatsData={platformStatsData}
+            qrCodeLinks={qrCodeLinks}
           />
         ) : null}
         {activeSection === "Production" ? (
@@ -3846,8 +3995,13 @@ export default function Home() {
             campaigns={campaigns}
             dashboardPlatformStats={dashboardPlatformStats}
             eventEntries={eventEntryDrafts}
+            onAddQrCode={addQrCodeLink}
+            onDeleteQrCode={deleteQrCodeLink}
+            onQrCodeChange={updateQrCodeLink}
             onRefreshPlatformStats={refreshPlatformStats}
+            platformMetricRows={platformMetricRows}
             productionSongs={productionSongDrafts}
+            qrCodeLinks={qrCodeLinks}
             refreshStatus={refreshStatus}
           />
         ) : null}
@@ -3885,8 +4039,10 @@ function EventsView({
 
       <section className="events-summary-grid" aria-label="Events summary">
         <article className="metric-card event-summary-card">
-          <MapPin size={18} aria-hidden />
-          <span>Next event</span>
+          <div className="event-summary-card-title">
+            <MapPin size={18} aria-hidden />
+            <span>Next event</span>
+          </div>
           <strong>
             {nextEventDate ? formatCampaignDate(nextEventDate) : "No upcoming events planned yet"}
           </strong>
@@ -3897,8 +4053,10 @@ function EventsView({
           </p>
         </article>
         <article className="metric-card event-summary-card">
-          <CalendarDays size={18} aria-hidden />
-          <span>Total events</span>
+          <div className="event-summary-card-title">
+            <CalendarDays size={18} aria-hidden />
+            <span>Total events</span>
+          </div>
           <strong>{entries.length}</strong>
           <p>Seeded from the Love Strings News page.</p>
         </article>
@@ -4165,36 +4323,30 @@ function BudgetView({
         <article className="metric-card budget-metric-card">
           <span>Total earned</span>
           <strong className="amount-positive">{formatCurrency(summary.totalEarned)}</strong>
-          <p>Since start.</p>
         </article>
         <article className="metric-card budget-metric-card">
           <span>Total spent</span>
           <strong className="amount-expense">{formatCurrency(summary.totalSpent)}</strong>
-          <p>Since start.</p>
         </article>
         <article className="metric-card budget-metric-card">
           <span>Current Balance</span>
           <strong className={getAmountToneClass(summary.balance)}>
             {formatCurrency(summary.balance)}
           </strong>
-          <p>Earned minus spent.</p>
         </article>
         <article className="metric-card budget-metric-card">
-          <span>Projected earn</span>
+          <span>Projected earn month ahead</span>
           <strong>{formatCurrency(summary.potentialEarn)}</strong>
-          <p>From tomorrow, one month ahead.</p>
         </article>
         <article className="metric-card budget-metric-card">
-          <span>Projected spend</span>
+          <span>Projected spend month ahead</span>
           <strong>{formatCurrency(summary.upcomingSpend)}</strong>
-          <p>From tomorrow, one month ahead.</p>
         </article>
         <article className="metric-card budget-metric-card">
-          <span>Projected balance</span>
+          <span>Projected balance month ahead</span>
           <strong className={getAmountToneClass(summary.upcomingBalance)}>
             {formatCurrency(summary.upcomingBalance)}
           </strong>
-          <p>Current balance plus projected earn minus projected spend.</p>
         </article>
       </section>
 
@@ -4250,13 +4402,25 @@ function BudgetEntryRow({
   const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
   const [isActionsOpen, setIsActionsOpen] = useState(false);
   const [amountInput, setAmountInput] = useState(String(getBudgetSignedAmount(entry)));
+  const descriptionInputRef = useRef<HTMLTextAreaElement | null>(null);
   const signedAmount = getBudgetSignedAmount(entry);
   const paymentType = getBudgetPaymentType(entry);
   const isAutoRecurringEntry = Boolean(entry.generated && entry.sourceRecurringEntryId);
 
+  useEffect(() => {
+    const input = descriptionInputRef.current;
+
+    if (!input) {
+      return;
+    }
+
+    input.style.height = "auto";
+    input.style.height = `${input.scrollHeight}px`;
+  }, [entry.description]);
+
   return (
     <tr className={entry.generated ? "budget-generated-row" : undefined}>
-      <td>
+      <td className="budget-date-cell" data-label="Date">
         <input
           aria-label={`${entry.description} date`}
           disabled={entry.generated}
@@ -4267,19 +4431,22 @@ function BudgetEntryRow({
           value={entry.date}
         />
       </td>
-      <td>
-        <input
+      <td className="budget-description-cell" data-label="Description">
+        <textarea
           aria-label={`${entry.description} description`}
           disabled={entry.generated}
-          onChange={(event) =>
+          onChange={(event) => {
+            event.target.style.height = "auto";
+            event.target.style.height = `${event.target.scrollHeight}px`;
             onEntryChange(entry.id, {
               description: event.target.value
-            })
-          }
+            });
+          }}
+          ref={descriptionInputRef}
           value={entry.description}
         />
       </td>
-      <td>
+      <td className="budget-amount-cell" data-label="Amount">
         <input
           aria-label={`${entry.description} amount`}
           className={getTransactionAmountToneClass(signedAmount)}
@@ -4307,7 +4474,7 @@ function BudgetEntryRow({
           value={amountInput}
         />
       </td>
-      <td>
+      <td className="budget-type-column" data-label="Type">
         <div className="budget-type-cell">
           <select
             aria-label={`${entry.description} type`}
@@ -4362,7 +4529,7 @@ function BudgetEntryRow({
           ) : null}
         </div>
       </td>
-      <td>
+      <td className="budget-actions-column" data-label="Actions">
         <div className="budget-actions-cell">
           <button
             aria-expanded={isActionsOpen}
@@ -6121,23 +6288,42 @@ function DashboardView({
   campaigns,
   dashboardPlatformStats,
   eventEntries,
+  onAddQrCode,
+  onDeleteQrCode,
+  onQrCodeChange,
   onRefreshPlatformStats,
+  platformMetricRows,
   productionSongs,
+  qrCodeLinks,
   refreshStatus
 }: {
   budgetEntries: BudgetEntry[];
   campaigns: MarketingCampaignConfig[];
   dashboardPlatformStats: typeof platformStats;
   eventEntries: EventEntry[];
+  onAddQrCode: () => void;
+  onDeleteQrCode: (linkId: string) => void;
+  onQrCodeChange: (linkId: string, updates: Partial<QrCodeLink>) => void;
   onRefreshPlatformStats: () => void;
+  platformMetricRows: MetricRow[];
   productionSongs: ProductionSongConfig[];
+  qrCodeLinks: QrCodeLink[];
   refreshStatus: RefreshStatus;
 }) {
   const campaignPreview = getDashboardCampaignPreview(campaigns);
   const budgetSummary = getBudgetSummary(budgetEntries);
   const nextEvent = getNextUpcomingEvent(eventEntries);
   const productionPreviewSongs = productionSongs.slice(0, 2);
-  const focusQueue = getDashboardFocusQueue(campaignPreview, productionPreviewSongs);
+  const appleMusicLastUpdate = getAppleMusicLastUpdateDate(
+    dashboardPlatformStats,
+    platformMetricRows
+  );
+  const appleMusicUpdateTask = getAppleMusicUpdateTask(appleMusicLastUpdate);
+  const focusQueue = getDashboardFocusQueue(
+    campaignPreview,
+    productionPreviewSongs,
+    appleMusicUpdateTask ? [appleMusicUpdateTask] : []
+  );
   const phaseOne = roadmapPhases[0];
 
   return (
@@ -6170,10 +6356,23 @@ function DashboardView({
       <DashboardFocusQueueCard focusQueue={focusQueue} />
 
       <PlatformStatsSection
+        hideHeading
         platforms={dashboardPlatformStats}
         title="Platform Snapshot"
         description="Key audience and consumption signals from the main platforms."
         variant="dashboard"
+        renderCardHeaderMeta={(platform) => {
+          const updateDate =
+            platform.slug === "apple-music"
+              ? appleMusicLastUpdate
+              : getPlatformLastSnapshotDate(platformMetricRows, platform.slug);
+
+          return updateDate ? (
+            <span className={getPlatformUpdateMetaClass(platform.slug, updateDate)}>
+              Last update: {formatDateWithDots(updateDate)}
+            </span>
+          ) : null;
+        }}
       />
 
       <DashboardCampaignPreview
@@ -6186,6 +6385,13 @@ function DashboardView({
       <DashboardBudgetPreview summary={budgetSummary} />
 
       <DashboardRoadmapPhasePreview phase={phaseOne} />
+
+      <QrCodeLinksSection
+        links={qrCodeLinks}
+        onAddLink={onAddQrCode}
+        onDeleteLink={onDeleteQrCode}
+        onLinkChange={onQrCodeChange}
+      />
     </>
   );
 }
@@ -6203,12 +6409,6 @@ function DashboardCampaignPreview({
 }) {
   return (
     <section className="dashboard-campaigns" aria-label="Campaign preview">
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">Campaigns</p>
-          <h2>Now & Next</h2>
-        </div>
-      </div>
       <div className="dashboard-campaign-grid">
         <DashboardCampaignCard
           campaign={preview.benchmark}
@@ -6319,13 +6519,17 @@ function DashboardNextEventCard({ event }: { event: EventEntry | null }) {
   return (
     <section className="dashboard-latest-event" aria-label="Next event">
       <article className="metric-card event-summary-card dashboard-event-card">
-        <MapPin size={18} aria-hidden />
-        <span>Next event</span>
-        <strong>
-          {eventDate ? formatCampaignDate(eventDate) : "No upcoming events planned yet"}
-        </strong>
-        <p>
-          {event && daysLeft !== null ? (
+        <div className="event-summary-card-title">
+          <MapPin size={18} aria-hidden />
+          <span>Next event</span>
+        </div>
+        {eventDate ? (
+          <strong>{formatCampaignDate(eventDate)}</strong>
+        ) : (
+          <p className="dashboard-event-empty">No upcoming events planned yet</p>
+        )}
+        {event && daysLeft !== null ? (
+          <p>
             <>
               <EventMaybeLink label={event.name} url={event.nameUrl} />
               <span className="dashboard-event-location">
@@ -6336,10 +6540,8 @@ function DashboardNextEventCard({ event }: { event: EventEntry | null }) {
                 {` - ${formatEventDaysLeft(daysLeft)}`}
               </span>
             </>
-          ) : (
-            "No upcoming events planned yet"
-          )}
-        </p>
+          </p>
+        ) : null}
       </article>
     </section>
   );
@@ -6358,14 +6560,11 @@ function DashboardFocusQueueCard({
   const hiddenTaskCount = focusQueue.allTasks.length - focusQueue.visibleTasks.length;
 
   return (
-    <section className="dashboard-focus" aria-label="Today focus queue">
+    <section className="dashboard-focus" aria-label="Focus queue">
       <article className="dashboard-focus-card">
         <div className="dashboard-focus-card-header">
-          <div>
-            <p className="eyebrow">Today</p>
-            <h2>Focus Queue</h2>
-          </div>
           <Clock3 size={18} aria-hidden />
+          <h2>Focus Queue</h2>
         </div>
         {tasks.length > 0 ? (
           <ul className="dashboard-focus-list">
@@ -6407,12 +6606,6 @@ function DashboardProductionPreview({
 
   return (
     <section className="dashboard-production" aria-label="Production preview">
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">Production</p>
-          <h2>Current & Next Songs</h2>
-        </div>
-      </div>
       <div className="dashboard-production-grid">
         <DashboardProductionCard
           emptyText="No current production song yet."
@@ -6514,36 +6707,26 @@ function DashboardBudgetPreview({
 }) {
   return (
     <section className="dashboard-budget" aria-label="Budget preview">
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">Budget</p>
-          <h2>Balance Snapshot</h2>
-        </div>
-      </div>
       <div className="dashboard-budget-grid">
-        <article className="metric-card budget-metric-card">
+        <article className="metric-card budget-metric-card dashboard-budget-current">
           <span>Current balance</span>
           <strong className={getAmountToneClass(summary.balance)}>
             {formatCurrency(summary.balance)}
           </strong>
-          <p>Earned minus spent.</p>
         </article>
-        <article className="metric-card budget-metric-card">
-          <span>Projected earn</span>
+        <article className="metric-card budget-metric-card dashboard-budget-projected-earn">
+          <span>Projected earn month ahead</span>
           <strong>{formatCurrency(summary.potentialEarn)}</strong>
-          <p>From tomorrow, one month ahead.</p>
         </article>
-        <article className="metric-card budget-metric-card">
-          <span>Projected spend</span>
+        <article className="metric-card budget-metric-card dashboard-budget-projected-spend">
+          <span>Projected spend month ahead</span>
           <strong>{formatCurrency(summary.upcomingSpend)}</strong>
-          <p>From tomorrow, one month ahead.</p>
         </article>
-        <article className="metric-card budget-metric-card">
-          <span>Projected balance</span>
+        <article className="metric-card budget-metric-card dashboard-budget-projected-balance">
+          <span>Projected balance month ahead</span>
           <strong className={getAmountToneClass(summary.upcomingBalance)}>
             {formatCurrency(summary.upcomingBalance)}
           </strong>
-          <p>Current balance plus projected earn minus projected spend.</p>
         </article>
       </div>
     </section>
@@ -6553,12 +6736,6 @@ function DashboardBudgetPreview({
 function DashboardRoadmapPhasePreview({ phase }: { phase: RoadmapPhase }) {
   return (
     <section className="dashboard-roadmap" aria-label="Roadmap phase preview">
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">Roadmap</p>
-          <h2>Phase 1</h2>
-        </div>
-      </div>
       <article className={`roadmap-phase-card roadmap-phase-${phase.accent}`}>
         <div className="roadmap-phase-heading">
           <div>
@@ -6588,14 +6765,22 @@ function DashboardRoadmapPhasePreview({ phase }: { phase: RoadmapPhase }) {
 
 function PlatformsView({
   appleMusicImportStatus,
+  onAddQrCode,
   onAppleMusicCsvImport,
+  onDeleteQrCode,
+  onQrCodeChange,
   platformMetricRows,
-  platformStatsData
+  platformStatsData,
+  qrCodeLinks
 }: {
   appleMusicImportStatus: AppleMusicImportStatus;
+  onAddQrCode: () => void;
   onAppleMusicCsvImport: (file: File) => void;
+  onDeleteQrCode: (linkId: string) => void;
+  onQrCodeChange: (linkId: string, updates: Partial<QrCodeLink>) => void;
   platformMetricRows: MetricRow[];
   platformStatsData: typeof platformStats;
+  qrCodeLinks: QrCodeLink[];
 }) {
   const instagramFollowerTrend = getPlatformMetricTrend(
     platformMetricRows,
@@ -6625,9 +6810,10 @@ function PlatformsView({
     platformMetricRows,
     "youtube-music"
   );
-  const appleMusicLastUpdate =
-    getPlatformMetric(platformStatsData, "apple-music", "last_update_date")?.value ??
-    getPlatformLastSnapshotDate(platformMetricRows, "apple-music");
+  const appleMusicLastUpdate = getAppleMusicLastUpdateDate(
+    platformStatsData,
+    platformMetricRows
+  );
 
   return (
     <>
@@ -6642,6 +6828,7 @@ function PlatformsView({
       </header>
 
       <PlatformStatsSection
+        hideHeading
         platforms={getPlatformsViewStats(platformStatsData)}
         title="All Platform Metrics"
         description="Manual seed values now; later these cards will read daily snapshots from Supabase."
@@ -6692,7 +6879,14 @@ function PlatformsView({
           ) : platform.slug === "apple-music" ? (
             <div className="platform-card-header-meta apple-import-actions">
               {appleMusicLastUpdate ? (
-                <span>Last update: {formatDateWithDots(appleMusicLastUpdate)}</span>
+                <span
+                  className={getPlatformUpdateMetaClass(
+                    platform.slug,
+                    appleMusicLastUpdate
+                  )}
+                >
+                  Last update: {formatDateWithDots(appleMusicLastUpdate)}
+                </span>
               ) : null}
               <AppleMusicCsvImportControl
                 hideTitle
@@ -6704,7 +6898,157 @@ function PlatformsView({
           ) : null
         }
       />
+
+      <QrCodeLinksSection
+        links={qrCodeLinks}
+        onAddLink={onAddQrCode}
+        onDeleteLink={onDeleteQrCode}
+        onLinkChange={onQrCodeChange}
+      />
     </>
+  );
+}
+
+function QrCodeLinksSection({
+  links,
+  onAddLink,
+  onDeleteLink,
+  onLinkChange
+}: {
+  links: QrCodeLink[];
+  onAddLink: () => void;
+  onDeleteLink: (linkId: string) => void;
+  onLinkChange: (linkId: string, updates: Partial<QrCodeLink>) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [deleteConfirmations, setDeleteConfirmations] = useState<
+    Record<string, boolean>
+  >({});
+
+  function setDeleteConfirmation(linkId: string, checked: boolean) {
+    setDeleteConfirmations((currentConfirmations) => ({
+      ...currentConfirmations,
+      [linkId]: checked
+    }));
+  }
+
+  function deleteLink(linkId: string) {
+    onDeleteLink(linkId);
+    setDeleteConfirmations((currentConfirmations) => {
+      const nextConfirmations = { ...currentConfirmations };
+      delete nextConfirmations[linkId];
+      return nextConfirmations;
+    });
+  }
+
+  return (
+    <section className="qr-links-section" aria-label="QR code links">
+      <button
+        aria-expanded={isOpen}
+        className="qr-links-toggle"
+        onClick={() => setIsOpen((currentIsOpen) => !currentIsOpen)}
+        type="button"
+      >
+        <span>
+          <LinkIcon size={18} aria-hidden />
+          QR Codes
+        </span>
+        <ChevronDown size={18} aria-hidden />
+      </button>
+
+      {isOpen ? (
+        <div className="qr-links-panel">
+          <div className="qr-links-grid">
+            {links.map((link) => {
+              const canDelete = Boolean(deleteConfirmations[link.id]);
+
+              return (
+                <article className="qr-link-card" key={link.id}>
+                  {link.qrImageUrl ? (
+                    <a
+                      aria-label={`Open ${link.name || "QR code"} link`}
+                      className="qr-code-preview"
+                      href={link.targetUrl || link.qrImageUrl}
+                      rel="noreferrer"
+                      style={{ backgroundImage: `url("${link.qrImageUrl}")` }}
+                      target="_blank"
+                    />
+                  ) : (
+                    <div className="qr-code-placeholder">
+                      <LinkIcon size={26} aria-hidden />
+                      <span>QR image URL needed</span>
+                    </div>
+                  )}
+
+                  <div className="qr-link-fields">
+                    <label>
+                      Name
+                      <input
+                        onChange={(event) =>
+                          onLinkChange(link.id, { name: event.target.value })
+                        }
+                        value={link.name}
+                      />
+                    </label>
+                    <label>
+                      QR image URL
+                      <input
+                        onChange={(event) =>
+                          onLinkChange(link.id, {
+                            qrImageUrl: event.target.value
+                          })
+                        }
+                        placeholder="https://..."
+                        value={link.qrImageUrl}
+                      />
+                    </label>
+                    <label>
+                      Link opens
+                      <input
+                        onChange={(event) =>
+                          onLinkChange(link.id, {
+                            targetUrl: event.target.value
+                          })
+                        }
+                        placeholder="https://..."
+                        value={link.targetUrl}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="qr-link-delete-row">
+                    <label>
+                      <input
+                        checked={canDelete}
+                        onChange={(event) =>
+                          setDeleteConfirmation(link.id, event.target.checked)
+                        }
+                        type="checkbox"
+                      />
+                      Confirm delete
+                    </label>
+                    <button
+                      className="danger-action"
+                      disabled={!canDelete}
+                      onClick={() => deleteLink(link.id)}
+                      type="button"
+                    >
+                      <Trash2 size={14} aria-hidden />
+                      Delete
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+
+          <button className="add-task-button qr-add-button" onClick={onAddLink} type="button">
+            <Plus size={16} aria-hidden />
+            Add QR code
+          </button>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -6774,6 +7118,59 @@ function getPlatformLastSnapshotDate(rows: MetricRow[], platformSlug: string) {
     .filter((row) => getSingle(row.platforms)?.slug === platformSlug)
     .map((row) => row.snapshot_date)
     .sort((firstDate, secondDate) => secondDate.localeCompare(firstDate))[0];
+}
+
+function getAppleMusicLastUpdateDate(
+  platformStatsData: typeof platformStats,
+  platformMetricRows: MetricRow[]
+) {
+  return (
+    getPlatformMetric(platformStatsData, "apple-music", "last_update_date")?.value ??
+    getPlatformLastSnapshotDate(platformMetricRows, "apple-music")
+  );
+}
+
+function getAppleMusicUpdateTask(updateDate?: string): FocusQueueItem | null {
+  if (!isPlatformUpdateStale(updateDate)) {
+    return null;
+  }
+
+  return {
+    id: "other-apple-music-csv-update",
+    label: `Update Apple Music CSV${
+      updateDate ? ` - last update ${formatDateWithDots(updateDate)}` : ""
+    }`,
+    source: "Other",
+    status: "not-started"
+  };
+}
+
+function getPlatformUpdateMetaClass(platformSlug: string, updateDate?: string) {
+  return [
+    "platform-card-header-meta",
+    platformSlug === "apple-music" && isPlatformUpdateStale(updateDate)
+      ? "platform-card-header-meta-stale"
+      : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function isPlatformUpdateStale(updateDate?: string) {
+  const parsedDate = updateDate ? parsePlatformUpdateDate(updateDate) : null;
+
+  if (!parsedDate) {
+    return false;
+  }
+
+  const ageInDays =
+    (getTodayUtcDate().getTime() - parsedDate.getTime()) / (24 * 60 * 60 * 1000);
+
+  return ageInDays > 7;
+}
+
+function parsePlatformUpdateDate(value: string) {
+  return parseCampaignDateKey(value) ?? parseFlexibleBudgetDate(value);
 }
 
 function PlatformTrendPanel({
@@ -7624,6 +8021,7 @@ function formatReleaseOffset(offset: number) {
 
 function PlatformStatsSection({
   description,
+  hideHeading = false,
   platforms,
   renderCardAddon,
   renderCardHeaderMeta,
@@ -7631,6 +8029,7 @@ function PlatformStatsSection({
   variant
 }: {
   description: string;
+  hideHeading?: boolean;
   platforms: Array<(typeof platformStats)[number] | typeof platformPlaceholder>;
   renderCardAddon?: (
     platform: (typeof platformStats)[number] | typeof platformPlaceholder
@@ -7643,13 +8042,15 @@ function PlatformStatsSection({
 }) {
   return (
     <section className="platform-section" aria-label={title}>
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">Platform statistics</p>
-          <h2>{title}</h2>
+      {hideHeading ? null : (
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Platform statistics</p>
+            <h2>{title}</h2>
+          </div>
+          <p>{description}</p>
         </div>
-        <p>{description}</p>
-      </div>
+      )}
 
       <div className={`platform-grid platform-grid-${variant}`}>
         {platforms.map((platform) => {
@@ -7665,7 +8066,19 @@ function PlatformStatsSection({
               <div className="platform-card-header">
                 <div className="platform-card-title">
                   <Icon size={20} aria-hidden />
-                  <h3>{platform.platform}</h3>
+                  <h3>
+                    {"profileUrl" in platform && platform.profileUrl ? (
+                      <a
+                        href={platform.profileUrl}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        {platform.platform}
+                      </a>
+                    ) : (
+                      platform.platform
+                    )}
+                  </h3>
                 </div>
                 {cardHeaderMeta}
               </div>
@@ -7674,7 +8087,6 @@ function PlatformStatsSection({
                   .filter(
                     (metric) =>
                       !(
-                        variant === "full" &&
                         platform.slug === "apple-music" &&
                         metric.metricName === "last_update_date"
                       )

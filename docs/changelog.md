@@ -76,6 +76,8 @@ Post-release notes:
 
 ## Beta 1.3
 
+Status: Published and verified
+
 Release scope:
 - Production module becomes Supabase-backed instead of local-only.
 - Add normalized Production tables for songs, production steps, extra step tasks, and production budget rows.
@@ -97,7 +99,36 @@ Deployment status:
 - Supabase migration `202607100001_create_production_tracker.sql` applied successfully after confirming the remote push role.
 - Local Production persistence verified: notes save to Supabase and remain after refresh.
 - Local Production module smoke test passed for add/edit/delete song, deadline changes, album art, budget rows, subtasks, and generated Budget links.
-- Ready for GitHub/Vercel Beta 1.3 deployment after final local checks.
+- GitHub/Vercel deployment completed successfully.
+
+Post-release mobile QA notes:
+- Beta 1.4 should focus on mobile layout polish across Dashboard, Marketing, Platforms, Budget, and Roadmap before adding the next major module wiring.
+
+## Beta 1.4
+
+Release candidate theme:
+
+Mobile polish, readability, and shareability pass after real phone testing of Beta 1.3.
+
+Included:
+- Visible app label bumped to `Beta 1.4`.
+- Love Strings logo added to the app header in place of the note icon.
+- Platform names on Dashboard and Platforms are clickable profile links for Instagram, YouTube, YouTube Music, Spotify, Apple Music, Amazon Music, and Deezer.
+- Dashboard and Platforms now include a bottom QR Codes dropdown section with editable QR name, QR image URL, and target URL.
+- QR Codes section includes default entries for Website, Dashboard, and all current platform profile links; the Website QR is seeded from `public/love-strings-website-qr.png`.
+- QR Codes section supports Add QR code and protected Delete with a confirm checkbox.
+- QR layout uses four cards per row on desktop and one card per row on mobile.
+- Dashboard and Platforms platform cards now use metric subcards for improved readability.
+- Platforms metric subcards use two cards per row on mobile instead of horizontal scrolling.
+- Marketing tab mobile overflow fixed so campaign cards fit the screen width.
+- Dashboard event/focus/platform/marketing/production/budget/roadmap sections were simplified by removing repeated section headings.
+- Dashboard Budget preview is arranged as current balance, projected earn/spend, and projected balance for mobile readability.
+- Budget tab mobile ledger rows were reworked so long descriptions grow vertically instead of overflowing.
+- Roadmap monthly progress no longer shows phase separator lines and reflows more naturally on mobile.
+
+Known follow-ups:
+- QR code edits are currently local-browser state; wire to Supabase later if the same QR list should sync across Dmitrii and Yuliia devices.
+- Real-phone QA should confirm Dashboard, Marketing, Platforms, Budget, and Roadmap mobile layouts before deeper Beta 1.5 work.
 
 ## Version 1.0
 

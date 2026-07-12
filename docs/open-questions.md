@@ -67,6 +67,27 @@
 - How should the app prevent accidental destructive voice changes?
 - Which data modules must be stable before voice control begins?
 
-## UI Cleanup
+## Beta 1.4 Mobile Polish
 
 - The 2026-07-07 mobile full-page screenshot set shows that some current sections compress or overflow awkwardly on narrow mobile width. Decide whether the next UI tidy-up should first address navigation overflow, card width behavior, or long campaign/task content wrapping.
+- Real mobile phone testing after Beta 1.3 found the next concrete polish list:
+  - Next session: test the first Beta 1.4 mobile pass on a real phone and compare against the checklist before starting deeper feature work.
+  - Marketing cards should fit mobile screen width on the Marketing tab.
+  - Marketing campaign day dates and Production step dates should stay as left-side section markers on desktop, but become top headers for each day/step on mobile.
+  - Dashboard Budget snapshot should become: current balance row, projected earn/spend row, projected balance row.
+  - Dashboard should not scroll beyond the bottom of the last card into blank space.
+  - Dashboard should visually split its main sections into clear unified blocks: Events, In Focus, Platform Stats, Marketing, Production, Budget, and Roadmap.
+  - Dashboard section headers should use a unified placement/style across all dashboard blocks.
+  - Dashboard platform cards should show last update dates where platform data has automatic or manual update timestamps.
+  - Dashboard Marketing card fonts should be increased or returned closer to the other card font sizes.
+  - Marketing tab header/nav should not appear clipped; Marketing tab font sizes should match Dashboard/Production readability.
+  - Marketing tab should not scroll into unnecessary blank bottom space.
+  - Platforms metric subcards should use two cards per row on mobile instead of horizontal scrolling inside platform cards.
+  - Platforms tab should not scroll into unnecessary blank bottom space.
+  - Budget summary cards should keep three cards per row on mobile if practical.
+  - Budget ledger rows should split into two sub-lines on mobile: date/description first, amount/type/actions second, with long descriptions wrapping taller instead of overflowing.
+  - Roadmap monthly progress should reflow into natural four-month rows on mobile, with first/last partial rows aligned to preserve the season-like rhythm.
+
+## QR Codes
+
+- QR Codes dropdown on Dashboard and Platforms is useful for sharing Love Strings links from a phone screen, but the current Beta 1.4 implementation stores QR edits in local browser state only. Decide when to move QR code records into Supabase so Dmitrii and Yuliia share the same QR list across devices.
