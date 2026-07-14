@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUpRight,
+  ArrowUp,
   CalendarDays,
   Camera,
   ChevronDown,
@@ -108,10 +109,12 @@ type BudgetEntry = {
   generated?: boolean;
   sourceRecurringEntryId?: string;
   sourceEventEntryId?: string;
+  sourceMarketingCampaignId?: string;
   sourceProductionItemId?: string;
 };
 type EventEntry = {
   id: string;
+  dbId?: string;
   date: string;
   name: string;
   nameUrl: string;
@@ -119,10 +122,22 @@ type EventEntry = {
   locationUrl: string;
   address: string;
   addressUrl: string;
+  budgetLines?: ProductionBudgetLine[];
   earnedAmount?: number;
   earnedDescription?: string;
   spentAmount?: number;
   spentDescription?: string;
+};
+type LocationAddressBookEntry = {
+  id: string;
+  dbId?: string;
+  locationName: string;
+  locationUrl: string;
+  address: string;
+  addressUrl: string;
+  contactName: string;
+  contactPhone: string;
+  contactNotes: string;
 };
 type RoadmapBoxStatus = "done" | "active" | "planned" | "partial";
 type RoadmapMonth = {
@@ -156,6 +171,7 @@ type MarketingCampaignConfig = {
   releaseTitle: string;
   releaseDate: string;
   albumArtUrl: string;
+  budgetLines?: ProductionBudgetLine[];
   campaignDays?: CampaignDay[];
   daySeeds?: CampaignDaySeed[];
 };
@@ -251,6 +267,40 @@ type ProductionBudgetLineDbRow = {
   description: string;
   amount: number | string;
   position: number;
+};
+type EventLocationDbRow = {
+  id: string;
+  stable_key: string;
+  location_name: string;
+  location_url: string;
+  address: string;
+  address_url: string;
+  contact_name: string;
+  contact_phone: string;
+  contact_notes: string;
+};
+type EventDbRow = {
+  id: string;
+  stable_key: string;
+  event_date: string;
+  event_name: string;
+  event_url: string;
+  location_id: string | null;
+  location_name: string;
+  location_url: string;
+  address: string;
+  address_url: string;
+};
+type EventBudgetLineDbRow = {
+  id: string;
+  event_id: string;
+  description: string;
+  amount: number | string;
+  position: number;
+};
+type EventsSnapshot = {
+  entries: EventEntry[];
+  locations: LocationAddressBookEntry[];
 };
 
 const platformStats = [
@@ -437,7 +487,7 @@ const defaultQrCodeLinks: QrCodeLink[] = [
   }))
 ];
 
-const appVersionLabel = "Beta 1.4";
+const appVersionLabel = "Beta 1.5";
 
 const sections = [
   "Dashboard",
@@ -679,6 +729,7 @@ const productionDraftStorageKey = "love-strings-production-song-drafts-v3";
 const budgetDraftStorageKey = "love-strings-budget-entry-drafts-v2";
 const deletedBudgetForecastStorageKey = "love-strings-budget-deleted-forecast-v1";
 const eventDraftStorageKey = "love-strings-event-entry-drafts-v1";
+const locationAddressBookStorageKey = "love-strings-location-address-book-v1";
 const qrCodeLinksStorageKey = "love-strings-qr-code-links-v1";
 
 const newMarketingCampaign: Omit<MarketingCampaignConfig, "id"> = {
@@ -1849,6 +1900,365 @@ function sortEventEntriesByDate(entries: EventEntry[]) {
   );
 }
 
+function normalizeEventEntries(entries: EventEntry[]) {
+  return sortEventEntriesByDate(entries.map(normalizeEventBudgetLines));
+}
+
+function normalizeEventBudgetLines(entry: EventEntry): EventEntry {
+  const existingBudgetLines = normalizeProductionBudgetLines(
+    entry.budgetLines ?? []
+  );
+  const migratedBudgetLines: ProductionBudgetLine[] = [];
+
+  if (entry.earnedAmount && entry.earnedAmount > 0) {
+    migratedBudgetLines.push({
+      id: "event-budget-earned",
+      amount: Math.abs(entry.earnedAmount),
+      description: entry.earnedDescription?.trim() || "earned"
+    });
+  }
+
+  if (entry.spentAmount && entry.spentAmount > 0) {
+    migratedBudgetLines.push({
+      id: "event-budget-spent",
+      amount: -Math.abs(entry.spentAmount),
+      description: entry.spentDescription?.trim() || "spent"
+    });
+  }
+
+  return {
+    ...entry,
+    budgetLines:
+      existingBudgetLines.length > 0
+        ? existingBudgetLines
+        : migratedBudgetLines.length > 0
+          ? migratedBudgetLines
+          : [{ id: "event-budget-line-default", amount: 0, description: "" }]
+  };
+}
+
+function buildLocationAddressBookEntries(events: EventEntry[]) {
+  const locationsByKey = new Map<string, LocationAddressBookEntry>();
+
+  sortEventEntriesByDate(events).forEach((event) => {
+    const locationName = event.locationName.trim();
+    const address = event.address.trim();
+    const key = getLocationConsolidationKey(locationName, address);
+
+    if (!key) {
+      return;
+    }
+
+    const nextLocation = {
+      id: `location-${key}`,
+      locationName: locationName || "Location name",
+      locationUrl: event.locationUrl,
+      address: address || "Address",
+      addressUrl: event.addressUrl,
+      contactName: "",
+      contactPhone: "",
+      contactNotes: ""
+    };
+
+    locationsByKey.set(
+      key,
+      mergeLocationAddressBookEntry(locationsByKey.get(key), nextLocation)
+    );
+  });
+
+  return [...locationsByKey.values()].sort((firstLocation, secondLocation) =>
+    firstLocation.locationName.localeCompare(secondLocation.locationName)
+  );
+}
+
+function normalizeLocationAddressBookEntries(entries: unknown[]) {
+  const normalizedEntries = entries
+    .filter((entry): entry is Partial<LocationAddressBookEntry> =>
+      Boolean(entry && typeof entry === "object")
+    )
+    .map((entry, index) => ({
+      id:
+        typeof entry.id === "string" && entry.id
+          ? entry.id
+          : `location-${Date.now()}-${index}`,
+      locationName:
+        typeof entry.locationName === "string" && entry.locationName
+          ? entry.locationName
+          : "Location name",
+      locationUrl: typeof entry.locationUrl === "string" ? entry.locationUrl : "",
+      address:
+        typeof entry.address === "string" && entry.address ? entry.address : "Address",
+      addressUrl: typeof entry.addressUrl === "string" ? entry.addressUrl : "",
+      contactName: typeof entry.contactName === "string" ? entry.contactName : "",
+      contactPhone: typeof entry.contactPhone === "string" ? entry.contactPhone : "",
+      contactNotes: typeof entry.contactNotes === "string" ? entry.contactNotes : ""
+    }));
+
+  return consolidateLocationAddressBookEntries(normalizedEntries);
+}
+
+function mergeLocationAddressBookWithEvents(
+  locations: LocationAddressBookEntry[],
+  events: EventEntry[]
+) {
+  const existingKeys = new Set(
+    locations.map((location) =>
+      getLocationConsolidationKey(location.locationName, location.address)
+    )
+  );
+  const missingLocations = buildLocationAddressBookEntries(events).filter(
+    (location) =>
+      !existingKeys.has(
+        getLocationConsolidationKey(location.locationName, location.address)
+      )
+  );
+
+  return consolidateLocationAddressBookEntries([...locations, ...missingLocations]);
+}
+
+function consolidateLocationAddressBookEntries(
+  locations: LocationAddressBookEntry[]
+) {
+  const locationsByKey = new Map<string, LocationAddressBookEntry>();
+
+  locations.forEach((location) => {
+    const key = getLocationConsolidationKey(
+      location.locationName,
+      location.address
+    );
+
+    if (!key) {
+      return;
+    }
+
+    locationsByKey.set(
+      key,
+      mergeLocationAddressBookEntry(locationsByKey.get(key), {
+        ...location,
+        id: `location-${key}`
+      })
+    );
+  });
+
+  return [...locationsByKey.values()].sort((firstLocation, secondLocation) =>
+    firstLocation.locationName.localeCompare(secondLocation.locationName)
+  );
+}
+
+function mergeLocationAddressBookEntry(
+  currentLocation: LocationAddressBookEntry | undefined,
+  nextLocation: LocationAddressBookEntry
+) {
+  if (!currentLocation) {
+    return nextLocation;
+  }
+
+  return {
+    ...currentLocation,
+    locationName: getPreferredLocationName(
+      currentLocation.locationName,
+      nextLocation.locationName
+    ),
+    locationUrl: getPreferredLocationValue(
+      currentLocation.locationUrl,
+      nextLocation.locationUrl
+    ),
+    address: getPreferredLocationAddress(
+      currentLocation.address,
+      nextLocation.address
+    ),
+    addressUrl: getPreferredLocationValue(
+      currentLocation.addressUrl,
+      nextLocation.addressUrl
+    ),
+    contactName: getPreferredLocationValue(
+      currentLocation.contactName,
+      nextLocation.contactName
+    ),
+    contactPhone: getPreferredLocationValue(
+      currentLocation.contactPhone,
+      nextLocation.contactPhone
+    ),
+    contactNotes: mergeLocationNotes(
+      currentLocation.contactNotes,
+      nextLocation.contactNotes
+    )
+  };
+}
+
+function getPreferredLocationName(currentValue: string, nextValue: string) {
+  if (!currentValue.trim()) {
+    return nextValue;
+  }
+
+  if (!nextValue.trim()) {
+    return currentValue;
+  }
+
+  if (currentValue === currentValue.toUpperCase() && nextValue !== nextValue.toUpperCase()) {
+    return nextValue;
+  }
+
+  return currentValue.length >= nextValue.length ? currentValue : nextValue;
+}
+
+function getPreferredLocationAddress(currentValue: string, nextValue: string) {
+  if (isBroadLocationAddress(currentValue)) {
+    return nextValue || currentValue;
+  }
+
+  if (!currentValue.trim()) {
+    return nextValue;
+  }
+
+  return currentValue.length >= nextValue.length ? currentValue : nextValue;
+}
+
+function getPreferredLocationValue(currentValue: string, nextValue: string) {
+  return currentValue.trim() || nextValue.trim();
+}
+
+function mergeLocationNotes(currentValue: string, nextValue: string) {
+  const currentNotes = currentValue.trim();
+  const nextNotes = nextValue.trim();
+
+  if (!currentNotes) {
+    return nextNotes;
+  }
+
+  if (!nextNotes || currentNotes.includes(nextNotes)) {
+    return currentNotes;
+  }
+
+  return `${currentNotes}\n${nextNotes}`;
+}
+
+function getLocationConsolidationKey(locationName: string, address: string) {
+  const venueAlias = getLocationVenueAlias(locationName);
+  const normalizedAddress = normalizeLocationText(address);
+
+  if (venueAlias) {
+    return `venue-${venueAlias}`;
+  }
+
+  if (normalizedAddress && !isBroadLocationAddress(address)) {
+    return `address-${canonicalizeLocationAddress(address)}`;
+  }
+
+  return getLocationAddressBookKey(locationName, address);
+}
+
+function getLocationAddressBookKey(locationName: string, address: string) {
+  const normalizedLocationName = normalizeLocationText(locationName);
+  const normalizedAddress = canonicalizeLocationAddress(address);
+
+  if (!normalizedLocationName && !normalizedAddress) {
+    return "";
+  }
+
+  return `${normalizedLocationName}-${normalizedAddress}`;
+}
+
+function normalizeLocationText(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ß/g, "ss")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function canonicalizeLocationAddress(address: string) {
+  return normalizeLocationText(
+    address
+      .replace(/\bstr\.\b/gi, "strasse")
+      .replace(/\bstraße\b/gi, "strasse")
+      .replace(/\bstrasse\b/gi, "strasse")
+      .replace(/\bösterreich\b/gi, "austria")
+      .replace(/,\s*austria$/i, "")
+  );
+}
+
+function isBroadLocationAddress(address: string) {
+  const normalizedAddress = normalizeLocationText(address);
+
+  return (
+    !normalizedAddress ||
+    normalizedAddress === "address" ||
+    normalizedAddress === "vienna-austria" ||
+    normalizedAddress === "vienna" ||
+    normalizedAddress === "slovakia" ||
+    normalizedAddress === "zadar-croatia"
+  );
+}
+
+function getLocationVenueAlias(locationName: string) {
+  const normalizedName = normalizeLocationText(locationName);
+  const aliases: Record<string, string> = {
+    "gradus": "gradus-club-wien",
+    "gradus-club-wien": "gradus-club-wien",
+    "mickey-finn-s-irish-pub": "mickey-finns-irish-pub",
+    "mickey-finns-irish-pub": "mickey-finns-irish-pub",
+    "pickwicks-international-bar-vienna": "pickwicks-international-bar-vienna",
+    "saloon": "saloon-wien",
+    "saloon-wien": "saloon-wien",
+    "the-church-international-pub": "the-church-international-pub"
+  };
+
+  return aliases[normalizedName] ?? null;
+}
+
+function getPastEventsForLocation(
+  location: LocationAddressBookEntry,
+  events: EventEntry[]
+) {
+  const locationKey = getLocationAddressBookKey(
+    location.locationName,
+    location.address
+  );
+  const consolidatedLocationKey = getLocationConsolidationKey(
+    location.locationName,
+    location.address
+  );
+  const todayTime = getTodayUtcDate().getTime();
+
+  return sortEventEntriesByDate(events).filter((event) => {
+    const eventDate = parseFlexibleBudgetDate(event.date);
+
+    return (
+      eventDate !== null &&
+      eventDate.getTime() <= todayTime &&
+      (getLocationConsolidationKey(event.locationName, event.address) ===
+        consolidatedLocationKey ||
+        getLocationAddressBookKey(event.locationName, event.address) === locationKey)
+    );
+  });
+}
+
+function getMatchingLocationAddressBookEntry(
+  event: EventEntry,
+  locations: LocationAddressBookEntry[]
+) {
+  const eventLocationKey = getLocationAddressBookKey(
+    event.locationName,
+    event.address
+  );
+  const eventConsolidatedLocationKey = getLocationConsolidationKey(
+    event.locationName,
+    event.address
+  );
+
+  return locations.find(
+    (location) =>
+      getLocationConsolidationKey(location.locationName, location.address) ===
+        eventConsolidatedLocationKey ||
+      getLocationAddressBookKey(location.locationName, location.address) ===
+        eventLocationKey
+  );
+}
+
 function getNextUpcomingEvent(entries: EventEntry[]) {
   const todayTime = getTodayUtcDate().getTime();
 
@@ -1947,6 +2357,7 @@ function getBudgetSummary(entries: BudgetEntry[]) {
 function getBudgetEntriesWithForecast(
   entries: BudgetEntry[],
   events: EventEntry[],
+  marketingCampaigns: MarketingCampaignConfig[],
   productionSongs: ProductionSongConfig[],
   deletedForecastIds: string[]
 ) {
@@ -1975,6 +2386,14 @@ function getBudgetEntriesWithForecast(
         !existingFingerprints.has(getBudgetEntryFingerprint(generatedEntry))
     )
   );
+  const marketingEntries = marketingCampaigns.flatMap((campaign) =>
+    generateMarketingCampaignBudgetEntries(campaign).filter(
+      (generatedEntry) =>
+        !existingIds.has(generatedEntry.id) &&
+        !deletedIds.has(generatedEntry.id) &&
+        !existingFingerprints.has(getBudgetEntryFingerprint(generatedEntry))
+    )
+  );
   const productionEntries = productionSongs.flatMap((song) =>
     generateProductionBudgetEntries(song).filter(
       (generatedEntry) =>
@@ -1992,6 +2411,7 @@ function getBudgetEntriesWithForecast(
     ...entries,
     ...recurringEntries,
     ...eventEntries,
+    ...marketingEntries,
     ...productionEntries
   ]);
 }
@@ -2047,41 +2467,56 @@ function getBudgetGeneratedEntryId(entryId: string, occurrenceDate: Date) {
 }
 
 function generateEventBudgetEntries(event: EventEntry) {
-  const generatedEntries: BudgetEntry[] = [];
-
-  if (event.earnedAmount && event.earnedAmount > 0) {
-    generatedEntries.push({
-      amount: Math.abs(event.earnedAmount),
+  return (event.budgetLines ?? [])
+    .filter((line) => line.amount !== 0)
+    .map((line) => ({
+      amount: line.amount,
       date: event.date,
-      description: getEventBudgetDescription(
-        event.name,
-        "earned",
-        event.earnedDescription
+      description: getEventBudgetDescription(event.name, line),
+      generated: true,
+      id: getBudgetEventGeneratedEntryId(event.id, line),
+      sourceEventEntryId: event.id,
+      type: "one-off" as const
+    }));
+}
+
+function generateMarketingCampaignBudgetEntries(
+  campaign: MarketingCampaignConfig
+) {
+  return (campaign.budgetLines ?? [])
+    .filter((line) => line.amount !== 0)
+    .map((line) => ({
+      amount: line.amount,
+      date: campaign.releaseDate,
+      description: getMarketingCampaignBudgetDescription(
+        campaign.releaseTitle,
+        line
       ),
       generated: true,
-      id: getBudgetEventGeneratedEntryId(event.id, "earned", event.earnedAmount),
-      sourceEventEntryId: event.id,
-      type: "one-off"
-    });
+      id: getBudgetMarketingCampaignGeneratedEntryId(campaign.id, line),
+      sourceMarketingCampaignId: campaign.id,
+      type: "one-off" as const
+    }));
+}
+
+function getBudgetMarketingCampaignGeneratedEntryId(
+  campaignId: string,
+  line: ProductionBudgetLine
+) {
+  return `budget-marketing-${campaignId}-${line.id}-${line.amount.toFixed(2)}`;
+}
+
+function getMarketingCampaignBudgetDescription(
+  campaignTitle: string,
+  line: ProductionBudgetLine
+) {
+  const cleanDescription = line.description.trim();
+
+  if (!cleanDescription) {
+    return `${campaignTitle} marketing ${line.amount > 0 ? "earned" : "spent"}`;
   }
 
-  if (event.spentAmount && event.spentAmount > 0) {
-    generatedEntries.push({
-      amount: -Math.abs(event.spentAmount),
-      date: event.date,
-      description: getEventBudgetDescription(
-        event.name,
-        "spent",
-        event.spentDescription
-      ),
-      generated: true,
-      id: getBudgetEventGeneratedEntryId(event.id, "spent", event.spentAmount),
-      sourceEventEntryId: event.id,
-      type: "one-off"
-    });
-  }
-
-  return generatedEntries;
+  return `${campaignTitle} marketing - ${cleanDescription}`;
 }
 
 function generateProductionBudgetEntries(song: ProductionSongConfig) {
@@ -2165,21 +2600,19 @@ function getProductionBudgetDescription(
 
 function getBudgetEventGeneratedEntryId(
   eventId: string,
-  moneyType: "earned" | "spent",
-  amount: number
+  line: ProductionBudgetLine
 ) {
-  return `budget-event-${eventId}-${moneyType}-${Math.abs(amount).toFixed(2)}`;
+  return `budget-event-${eventId}-${line.id}-${line.amount.toFixed(2)}`;
 }
 
 function getEventBudgetDescription(
   eventName: string,
-  moneyType: "earned" | "spent",
-  description?: string
+  line: ProductionBudgetLine
 ) {
-  const cleanDescription = description?.trim();
+  const cleanDescription = line.description.trim();
 
   if (!cleanDescription) {
-    return `${eventName} ${moneyType}`;
+    return `${eventName} ${line.amount > 0 ? "earned" : "spent"}`;
   }
 
   return `${eventName} - ${cleanDescription}`;
@@ -2430,6 +2863,20 @@ function getTodayUtcDate() {
   );
 }
 
+function getViennaDateKey() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "Europe/Vienna",
+    year: "numeric"
+  }).formatToParts(new Date());
+  const valueByType = Object.fromEntries(
+    parts.map((part) => [part.type, part.value])
+  );
+
+  return `${valueByType.year}-${valueByType.month}-${valueByType.day}`;
+}
+
 function buildCampaignDays(
   releaseDateInput: string,
   daySeeds: CampaignDaySeed[] = []
@@ -2453,6 +2900,35 @@ function mapMarketingCampaignRows(rows: MarketingCampaignDbRow[]) {
       albumArtUrl: campaign.album_art_url,
       campaignDays: mapMarketingCampaignDayRows(campaign.marketing_campaign_days ?? [])
     }))
+  );
+}
+
+function mergeMarketingCampaignLocalBudgetLines(
+  nextCampaigns: MarketingCampaignConfig[],
+  currentCampaigns: MarketingCampaignConfig[]
+) {
+  const campaignByKey = new Map<string, MarketingCampaignConfig>();
+
+  currentCampaigns.forEach((campaign) => {
+    [campaign.id, campaign.dbId, campaign.releaseTitle]
+      .filter(Boolean)
+      .forEach((key) => {
+        campaignByKey.set(key as string, campaign);
+      });
+  });
+
+  return sortCampaignsByReleaseDate(
+    nextCampaigns.map((campaign) => {
+      const localCampaign =
+        campaignByKey.get(campaign.id) ??
+        (campaign.dbId ? campaignByKey.get(campaign.dbId) : undefined) ??
+        campaignByKey.get(campaign.releaseTitle);
+
+      return {
+        ...campaign,
+        budgetLines: localCampaign?.budgetLines ?? campaign.budgetLines ?? []
+      };
+    })
   );
 }
 
@@ -2568,6 +3044,67 @@ function mapProductionRows({
 }
 
 function mapProductionBudgetLineRows(rows: ProductionBudgetLineDbRow[]) {
+  return rows
+    .sort((firstLine, secondLine) => firstLine.position - secondLine.position)
+    .map((line) => ({
+      amount: Number(line.amount),
+      description: line.description,
+      id: line.id
+    }));
+}
+
+function mapEventsSnapshotRows({
+  budgetLines,
+  entries,
+  locations
+}: {
+  budgetLines: EventBudgetLineDbRow[];
+  entries: EventDbRow[];
+  locations: EventLocationDbRow[];
+}): EventsSnapshot {
+  const budgetLinesByEventId = new Map<string, EventBudgetLineDbRow[]>();
+
+  budgetLines.forEach((line) => {
+    budgetLinesByEventId.set(line.event_id, [
+      ...(budgetLinesByEventId.get(line.event_id) ?? []),
+      line
+    ]);
+  });
+
+  return {
+    entries: normalizeEventEntries(
+      entries.map((entry) => ({
+        address: entry.address,
+        addressUrl: entry.address_url,
+        budgetLines: mapEventBudgetLineRows(
+          budgetLinesByEventId.get(entry.id) ?? []
+        ),
+        date: formatDateKeyForInput(entry.event_date),
+        dbId: entry.id,
+        id: entry.stable_key,
+        locationName: entry.location_name,
+        locationUrl: entry.location_url,
+        name: entry.event_name,
+        nameUrl: entry.event_url
+      }))
+    ),
+    locations: normalizeLocationAddressBookEntries(
+      locations.map((location) => ({
+        address: location.address,
+        addressUrl: location.address_url,
+        contactName: location.contact_name,
+        contactNotes: location.contact_notes,
+        contactPhone: location.contact_phone,
+        dbId: location.id,
+        id: location.stable_key,
+        locationName: location.location_name,
+        locationUrl: location.location_url
+      }))
+    )
+  };
+}
+
+function mapEventBudgetLineRows(rows: EventBudgetLineDbRow[]) {
   return rows
     .sort((firstLine, secondLine) => firstLine.position - secondLine.position)
     .map((line) => ({
@@ -2844,8 +3381,66 @@ async function deleteProductionSongFromSupabase(songDbId: string) {
   }
 }
 
+async function loadEventsSnapshotFromSupabase(): Promise<EventsSnapshot | null> {
+  try {
+    const response = await fetch("/api/events", {
+      credentials: "same-origin",
+      method: "GET"
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error ?? `Events load failed with status ${response.status}.`);
+    }
+
+    const result = (await response.json()) as EventsSnapshot;
+
+    return {
+      entries: normalizeEventEntries(result.entries ?? []),
+      locations: normalizeLocationAddressBookEntries(result.locations ?? [])
+    };
+  } catch (error) {
+    console.warn("Unable to load events from Supabase.", error);
+    return null;
+  }
+}
+
+async function saveEventsSnapshotToSupabase({
+  entries,
+  locations
+}: EventsSnapshot): Promise<EventsSnapshot | null> {
+  try {
+    const response = await fetch("/api/events", {
+      body: JSON.stringify({ entries, locations }),
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "x-love-strings-events": "write"
+      },
+      method: "POST"
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error ?? `Events save failed with status ${response.status}.`);
+    }
+
+    const result = (await response.json()) as EventsSnapshot;
+
+    return {
+      entries: normalizeEventEntries(result.entries ?? []),
+      locations: normalizeLocationAddressBookEntries(result.locations ?? [])
+    };
+  } catch (error) {
+    console.warn("Unable to save events to Supabase.", error);
+    return null;
+  }
+}
+
 export default function Home() {
   const productionSaveTimers = useRef<Record<string, number>>({});
+  const eventSaveTimer = useRef<number | null>(null);
+  const hasRequestedEventSupabaseLoad = useRef(false);
   const [activeSection, setActiveSection] = useState<Section>("Dashboard");
   const [platformStatsData, setPlatformStatsData] = useState(platformStats);
   const [platformMetricRows, setPlatformMetricRows] = useState<MetricRow[]>([]);
@@ -2885,7 +3480,10 @@ export default function Home() {
   );
   const [deletedBudgetForecastIds, setDeletedBudgetForecastIds] = useState<string[]>([]);
   const [eventEntryDrafts, setEventEntryDrafts] = useState(() =>
-    sortEventEntriesByDate(eventEntries)
+    normalizeEventEntries(eventEntries)
+  );
+  const [locationAddressBook, setLocationAddressBook] = useState(() =>
+    buildLocationAddressBookEntries(eventEntries)
   );
   const [qrCodeLinks, setQrCodeLinks] =
     useState<QrCodeLink[]>(defaultQrCodeLinks);
@@ -2895,10 +3493,16 @@ export default function Home() {
   const [hasLoadedBudgetDrafts, setHasLoadedBudgetDrafts] = useState(false);
   const [hasLoadedQrCodeLinks, setHasLoadedQrCodeLinks] = useState(false);
   const [hasLoadedEventDrafts, setHasLoadedEventDrafts] = useState(false);
+  const [hasLoadedLocationAddressBook, setHasLoadedLocationAddressBook] =
+    useState(false);
+  const [hasLoadedEventSupabaseSnapshot, setHasLoadedEventSupabaseSnapshot] =
+    useState(false);
+  const hasCheckedOpeningMetricRefresh = useRef(false);
   const dashboardPlatformStats = getDashboardPlatformStats(platformStatsData);
   const budgetEntriesWithForecast = getBudgetEntriesWithForecast(
     budgetEntryDrafts,
     eventEntryDrafts,
+    campaigns,
     productionSongDrafts,
     deletedBudgetForecastIds
   );
@@ -2933,6 +3537,17 @@ export default function Home() {
     }, 900);
   }
 
+  function queueEventsSnapshotSave(snapshot: EventsSnapshot) {
+    if (eventSaveTimer.current) {
+      window.clearTimeout(eventSaveTimer.current);
+    }
+
+    eventSaveTimer.current = window.setTimeout(() => {
+      eventSaveTimer.current = null;
+      void saveEventsSnapshotToSupabase(snapshot);
+    }, 900);
+  }
+
   const loadPlatformStats = useCallback(async () => {
     try {
       const supabase = createBrowserSupabaseClient();
@@ -2956,15 +3571,17 @@ export default function Home() {
 
       if (error) {
         console.warn("Unable to load platform metrics from Supabase.", error);
-        return;
+        return [];
       }
 
       setPlatformMetricRows((data ?? []) as MetricRow[]);
       setPlatformStatsData((currentStats) =>
         mergePlatformMetricRows(currentStats, (data ?? []) as MetricRow[])
       );
+      return (data ?? []) as MetricRow[];
     } catch (error) {
       console.warn("Using local platform metric fallback.", error);
+      return [];
     }
   }, []);
 
@@ -3043,6 +3660,7 @@ export default function Home() {
       ...newMarketingCampaign,
       id: `campaign-${campaigns.length + 1}-${Date.now()}`,
       releaseTitle: campaignReleaseTitle,
+      budgetLines: [],
       campaignDays: buildCampaignDays(newMarketingCampaign.releaseDate)
     };
 
@@ -3117,6 +3735,22 @@ export default function Home() {
     void saveMarketingCampaignHeader(campaignId, { releaseTitle });
   }
 
+  function updateCampaignBudgetLines(
+    campaignId: string,
+    budgetLines: ProductionBudgetLine[]
+  ) {
+    setCampaigns((currentCampaigns) =>
+      currentCampaigns.map((campaign) =>
+        campaign.id === campaignId
+          ? {
+              ...campaign,
+              budgetLines
+            }
+          : campaign
+      )
+    );
+  }
+
   async function refreshPlatformStats() {
     setRefreshStatus({
       message: "Collecting latest platform stats...",
@@ -3172,6 +3806,44 @@ export default function Home() {
       });
     }
   }
+
+  const refreshPlatformStatsOnOpenIfMissing = useCallback(async () => {
+    if (hasCheckedOpeningMetricRefresh.current) {
+      return;
+    }
+
+    hasCheckedOpeningMetricRefresh.current = true;
+    const todayKey = getViennaDateKey();
+    const autoRefreshStorageKey = `love-strings-last-auto-metric-refresh-${todayKey}`;
+    const metricRows = await loadPlatformStats();
+
+    if (
+      metricRows.some((row) => row.snapshot_date === todayKey) ||
+      window.localStorage.getItem(autoRefreshStorageKey) === "done"
+    ) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(autoRefreshStorageKey, "done");
+      const response = await fetch("/api/metrics/refresh", {
+        credentials: "same-origin",
+        headers: {
+          "x-love-strings-refresh": "manual"
+        },
+        method: "POST"
+      });
+
+      if (!response.ok) {
+        throw new Error(`Opening refresh failed with status ${response.status}.`);
+      }
+
+      await loadPlatformStats();
+    } catch (error) {
+      window.localStorage.removeItem(autoRefreshStorageKey);
+      console.warn("Unable to refresh platform metrics on app open.", error);
+    }
+  }, [loadPlatformStats]);
 
   async function importAppleMusicCsv(file: File) {
     setAppleMusicImportStatus({
@@ -3361,6 +4033,7 @@ export default function Home() {
     if (
       entryId.startsWith("budget-forecast-") ||
       entryId.startsWith("budget-event-") ||
+      entryId.startsWith("budget-marketing-") ||
       entryId.startsWith("budget-production-")
     ) {
       setDeletedBudgetForecastIds((currentIds) =>
@@ -3386,10 +4059,13 @@ export default function Home() {
           locationUrl: "",
           address: "Address",
           addressUrl: "",
-          earnedAmount: 0,
-          earnedDescription: "",
-          spentAmount: 0,
-          spentDescription: ""
+          budgetLines: [
+            {
+              id: `event-budget-line-${Date.now()}`,
+              amount: 0,
+              description: ""
+            }
+          ]
         },
         ...currentEntries
       ])
@@ -3409,6 +4085,39 @@ export default function Home() {
   function deleteEventEntry(entryId: string) {
     setEventEntryDrafts((currentEntries) =>
       currentEntries.filter((entry) => entry.id !== entryId)
+    );
+  }
+
+  function addLocationAddressBookEntry() {
+    setLocationAddressBook((currentLocations) => [
+      {
+        id: `location-${Date.now()}`,
+        locationName: "New location",
+        locationUrl: "",
+        address: "Address",
+        addressUrl: "",
+        contactName: "",
+        contactPhone: "",
+        contactNotes: ""
+      },
+      ...currentLocations
+    ]);
+  }
+
+  function updateLocationAddressBookEntry(
+    locationId: string,
+    updates: Partial<LocationAddressBookEntry>
+  ) {
+    setLocationAddressBook((currentLocations) =>
+      currentLocations.map((location) =>
+        location.id === locationId ? { ...location, ...updates } : location
+      )
+    );
+  }
+
+  function deleteLocationAddressBookEntry(locationId: string) {
+    setLocationAddressBook((currentLocations) =>
+      currentLocations.filter((location) => location.id !== locationId)
     );
   }
 
@@ -3443,6 +4152,9 @@ export default function Home() {
 
     return () => {
       Object.values(saveTimers).forEach((timer) => window.clearTimeout(timer));
+      if (eventSaveTimer.current) {
+        window.clearTimeout(eventSaveTimer.current);
+      }
     };
   }, []);
 
@@ -3702,7 +4414,7 @@ export default function Home() {
         if (Array.isArray(parsedEntries)) {
           window.setTimeout(() => {
             if (!isCancelled) {
-              setEventEntryDrafts(sortEventEntriesByDate(parsedEntries));
+              setEventEntryDrafts(normalizeEventEntries(parsedEntries));
               setHasLoadedEventDrafts(true);
             }
           }, 0);
@@ -3740,6 +4452,141 @@ export default function Home() {
       console.warn("Unable to save local event drafts.", error);
     }
   }, [eventEntryDrafts, hasLoadedEventDrafts]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    try {
+      const storedLocationAddressBook = window.localStorage.getItem(
+        locationAddressBookStorageKey
+      );
+
+      if (storedLocationAddressBook) {
+        const parsedLocations = JSON.parse(storedLocationAddressBook);
+
+        if (Array.isArray(parsedLocations)) {
+          window.setTimeout(() => {
+            if (!isCancelled) {
+              setLocationAddressBook(
+                mergeLocationAddressBookWithEvents(
+                  normalizeLocationAddressBookEntries(parsedLocations),
+                  eventEntryDrafts
+                )
+              );
+              setHasLoadedLocationAddressBook(true);
+            }
+          }, 0);
+
+          return () => {
+            isCancelled = true;
+          };
+        }
+      }
+    } catch (error) {
+      console.warn("Unable to load local location address book.", error);
+    }
+
+    window.setTimeout(() => {
+      if (!isCancelled) {
+        setLocationAddressBook(buildLocationAddressBookEntries(eventEntryDrafts));
+        setHasLoadedLocationAddressBook(true);
+      }
+    }, 0);
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [eventEntryDrafts]);
+
+  useEffect(() => {
+    if (!hasLoadedLocationAddressBook) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(
+        locationAddressBookStorageKey,
+        JSON.stringify(locationAddressBook)
+      );
+    } catch (error) {
+      console.warn("Unable to save local location address book.", error);
+    }
+  }, [hasLoadedLocationAddressBook, locationAddressBook]);
+
+  useEffect(() => {
+    if (
+      !hasLoadedEventDrafts ||
+      !hasLoadedLocationAddressBook ||
+      hasRequestedEventSupabaseLoad.current
+    ) {
+      return;
+    }
+
+    hasRequestedEventSupabaseLoad.current = true;
+
+    async function loadEventsSnapshot() {
+      const snapshot = await loadEventsSnapshotFromSupabase();
+
+      if (!snapshot) {
+        setHasLoadedEventSupabaseSnapshot(true);
+        return;
+      }
+
+      if (snapshot.entries.length === 0 && snapshot.locations.length === 0) {
+        const seedSnapshot = await saveEventsSnapshotToSupabase({
+          entries: eventEntryDrafts,
+          locations: locationAddressBook
+        });
+
+        if (seedSnapshot) {
+          setEventEntryDrafts(seedSnapshot.entries);
+          setLocationAddressBook(
+            mergeLocationAddressBookWithEvents(
+              seedSnapshot.locations,
+              seedSnapshot.entries
+            )
+          );
+        }
+
+        setHasLoadedEventSupabaseSnapshot(true);
+        return;
+      }
+
+      setEventEntryDrafts(snapshot.entries);
+      setLocationAddressBook(
+        mergeLocationAddressBookWithEvents(snapshot.locations, snapshot.entries)
+      );
+      setHasLoadedEventSupabaseSnapshot(true);
+    }
+
+    void loadEventsSnapshot();
+  }, [
+    eventEntryDrafts,
+    hasLoadedEventDrafts,
+    hasLoadedLocationAddressBook,
+    locationAddressBook
+  ]);
+
+  useEffect(() => {
+    if (
+      !hasLoadedEventDrafts ||
+      !hasLoadedLocationAddressBook ||
+      !hasLoadedEventSupabaseSnapshot
+    ) {
+      return;
+    }
+
+    queueEventsSnapshotSave({
+      entries: eventEntryDrafts,
+      locations: locationAddressBook
+    });
+  }, [
+    eventEntryDrafts,
+    hasLoadedEventDrafts,
+    hasLoadedEventSupabaseSnapshot,
+    hasLoadedLocationAddressBook,
+    locationAddressBook
+  ]);
 
   useEffect(() => {
     async function loadMarketingCampaigns() {
@@ -3792,11 +4639,19 @@ export default function Home() {
         );
 
         if (nextCampaigns.length > 0) {
-          setCampaigns(nextCampaigns);
-          window.localStorage.setItem(
-            campaignDraftStorageKey,
-            JSON.stringify(nextCampaigns)
-          );
+          setCampaigns((currentCampaigns) => {
+            const mergedCampaigns = mergeMarketingCampaignLocalBudgetLines(
+              nextCampaigns,
+              currentCampaigns
+            );
+
+            window.localStorage.setItem(
+              campaignDraftStorageKey,
+              JSON.stringify(mergedCampaigns)
+            );
+
+            return mergedCampaigns;
+          });
         }
       } catch (error) {
         console.warn("Using local marketing campaign fallback.", error);
@@ -3888,9 +4743,9 @@ export default function Home() {
 
   useEffect(() => {
     window.setTimeout(() => {
-      void loadPlatformStats();
+      void refreshPlatformStatsOnOpenIfMissing();
     }, 0);
-  }, [loadPlatformStats]);
+  }, [refreshPlatformStatsOnOpenIfMissing]);
 
   return (
     <main className="dashboard-shell">
@@ -3932,6 +4787,7 @@ export default function Home() {
             campaigns={campaigns}
             focusTarget={marketingFocusTarget}
             onAddCampaign={addCampaign}
+            onCampaignBudgetLinesChange={updateCampaignBudgetLines}
             onCampaignDaysChange={updateCampaignDays}
             onDeleteCampaign={deleteCampaign}
             onFocusCampaign={(campaignId, elementId) =>
@@ -3979,9 +4835,13 @@ export default function Home() {
         {activeSection === "Events" ? (
           <EventsView
             entries={eventEntryDrafts}
+            locations={locationAddressBook}
             onAddEntry={addEventEntry}
+            onAddLocation={addLocationAddressBookEntry}
             onDeleteEntry={deleteEventEntry}
+            onDeleteLocation={deleteLocationAddressBookEntry}
             onEntryChange={updateEventEntry}
+            onLocationChange={updateLocationAddressBookEntry}
           />
         ) : null}
         {activeSection !== "Roadmap" &&
@@ -4006,20 +4866,67 @@ export default function Home() {
           />
         ) : null}
       </section>
+      <ScrollAssistButton />
     </main>
+  );
+}
+
+function ScrollAssistButton() {
+  function scrollToOpenCardOrTop() {
+    const scrollTargetTop = 96;
+    const openCards = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-scroll-anchor='open-card']")
+    )
+      .filter((element) => !element.hidden && element.offsetParent !== null)
+      .map((element) => ({
+        element,
+        top: element.getBoundingClientRect().top
+      }))
+      .filter((candidate) => candidate.top <= scrollTargetTop + 16)
+      .sort((firstCandidate, secondCandidate) => secondCandidate.top - firstCandidate.top);
+    const target = openCards[0];
+
+    if (target && Math.abs(target.top - scrollTargetTop) > 18) {
+      target.element.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    window.scrollTo({ behavior: "smooth", top: 0 });
+  }
+
+  return (
+    <button
+      aria-label="Scroll to open card or top"
+      className="scroll-assist-button"
+      onClick={scrollToOpenCardOrTop}
+      type="button"
+    >
+      <ArrowUp size={20} aria-hidden />
+    </button>
   );
 }
 
 function EventsView({
   entries,
+  locations,
   onAddEntry,
+  onAddLocation,
   onDeleteEntry,
-  onEntryChange
+  onDeleteLocation,
+  onEntryChange,
+  onLocationChange
 }: {
   entries: EventEntry[];
+  locations: LocationAddressBookEntry[];
   onAddEntry: () => void;
+  onAddLocation: () => void;
   onDeleteEntry: (entryId: string) => void;
+  onDeleteLocation: (locationId: string) => void;
   onEntryChange: (entryId: string, updates: Partial<EventEntry>) => void;
+  onLocationChange: (
+    locationId: string,
+    updates: Partial<LocationAddressBookEntry>
+  ) => void;
 }) {
   const nextEvent = getNextUpcomingEvent(entries);
   const nextEventDate = nextEvent ? parseFlexibleBudgetDate(nextEvent.date) : null;
@@ -4062,6 +4969,14 @@ function EventsView({
         </article>
       </section>
 
+      <LocationAddressBook
+        events={entries}
+        locations={locations}
+        onAddLocation={onAddLocation}
+        onDeleteLocation={onDeleteLocation}
+        onLocationChange={onLocationChange}
+      />
+
       <section className="events-panel panel" aria-label="Events list">
         <div className="events-header">
           <div>
@@ -4079,6 +4994,7 @@ function EventsView({
             <EventCard
               entry={entry}
               key={entry.id}
+              locations={locations}
               onDelete={onDeleteEntry}
               onEntryChange={onEntryChange}
             />
@@ -4089,17 +5005,264 @@ function EventsView({
   );
 }
 
+function LocationAddressBook({
+  events,
+  locations,
+  onAddLocation,
+  onDeleteLocation,
+  onLocationChange
+}: {
+  events: EventEntry[];
+  locations: LocationAddressBookEntry[];
+  onAddLocation: () => void;
+  onDeleteLocation: (locationId: string) => void;
+  onLocationChange: (
+    locationId: string,
+    updates: Partial<LocationAddressBookEntry>
+  ) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <section className="location-address-book" aria-label="Location address book">
+      <button
+        aria-expanded={isOpen}
+        className="location-address-book-toggle"
+        onClick={() => setIsOpen((currentIsOpen) => !currentIsOpen)}
+        type="button"
+      >
+        <span>
+          <MapPin size={18} aria-hidden />
+          Location address book
+        </span>
+        <ChevronDown size={18} aria-hidden />
+      </button>
+
+      {isOpen ? (
+        <div className="location-address-book-panel">
+          <div className="location-address-book-toolbar">
+            <span>{locations.length} locations</span>
+            <button className="add-campaign-button" onClick={onAddLocation} type="button">
+              <Plus size={16} aria-hidden />
+              Add location
+            </button>
+          </div>
+
+          <div className="location-address-book-list">
+            {locations.map((location) => (
+              <LocationAddressBookCard
+                events={events}
+                key={location.id}
+                location={location}
+                onDeleteLocation={onDeleteLocation}
+                onLocationChange={onLocationChange}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function LocationAddressBookCard({
+  events,
+  location,
+  onDeleteLocation,
+  onLocationChange
+}: {
+  events: EventEntry[];
+  location: LocationAddressBookEntry;
+  onDeleteLocation: (locationId: string) => void;
+  onLocationChange: (
+    locationId: string,
+    updates: Partial<LocationAddressBookEntry>
+  ) => void;
+}) {
+  const pastEvents = getPastEventsForLocation(location, events);
+  const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
+
+  return (
+    <article className="location-address-book-card">
+      <div className="location-address-book-fields">
+        <label>
+          Location name
+          <input
+            onChange={(event) =>
+              onLocationChange(location.id, { locationName: event.target.value })
+            }
+            value={location.locationName}
+          />
+        </label>
+        <label>
+          Location link
+          <input
+            onChange={(event) =>
+              onLocationChange(location.id, { locationUrl: event.target.value })
+            }
+            placeholder="https://..."
+            value={location.locationUrl}
+          />
+        </label>
+        <label>
+          Address
+          <input
+            onChange={(event) =>
+              onLocationChange(location.id, { address: event.target.value })
+            }
+            value={location.address}
+          />
+        </label>
+        <label>
+          Address link
+          <input
+            onChange={(event) =>
+              onLocationChange(location.id, { addressUrl: event.target.value })
+            }
+            placeholder="https://..."
+            value={location.addressUrl}
+          />
+        </label>
+        <label>
+          Contact name
+          <input
+            onChange={(event) =>
+              onLocationChange(location.id, { contactName: event.target.value })
+            }
+            placeholder="Booker / manager"
+            value={location.contactName}
+          />
+        </label>
+        <label>
+          Contact phone
+          <input
+            onChange={(event) =>
+              onLocationChange(location.id, { contactPhone: event.target.value })
+            }
+            inputMode="tel"
+            placeholder="+43..."
+            value={location.contactPhone}
+          />
+        </label>
+        <label className="location-contact-notes-field">
+          Contact notes
+          <textarea
+            onChange={(event) =>
+              onLocationChange(location.id, { contactNotes: event.target.value })
+            }
+            placeholder="Booking notes, stage details, payment habits..."
+            value={location.contactNotes}
+          />
+        </label>
+      </div>
+
+      <div className="location-event-history">
+        <strong>Past events here</strong>
+        {pastEvents.length > 0 ? (
+          <ul>
+            {pastEvents.map((event) => (
+              <li key={event.id}>
+                <span>{event.date}</span>
+                <EventMaybeLink label={event.name} url={event.nameUrl} />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>No past events linked yet.</p>
+        )}
+      </div>
+
+      <div className="location-delete-row">
+        <label>
+          <input
+            checked={isDeleteConfirmed}
+            onChange={(event) => setIsDeleteConfirmed(event.target.checked)}
+            type="checkbox"
+          />
+          Confirm delete
+        </label>
+        <button
+          className="danger-action"
+          disabled={!isDeleteConfirmed}
+          onClick={() => onDeleteLocation(location.id)}
+          type="button"
+        >
+          <Trash2 size={14} aria-hidden />
+          Delete location
+        </button>
+      </div>
+    </article>
+  );
+}
+
 function EventCard({
   entry,
+  locations,
   onDelete,
   onEntryChange
 }: {
   entry: EventEntry;
+  locations: LocationAddressBookEntry[];
   onDelete: (entryId: string) => void;
   onEntryChange: (entryId: string, updates: Partial<EventEntry>) => void;
 }) {
   const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
   const [isEventOpen, setIsEventOpen] = useState(false);
+  const selectedLocation = getMatchingLocationAddressBookEntry(entry, locations);
+  const eventBudgetLines =
+    entry.budgetLines && entry.budgetLines.length > 0
+      ? entry.budgetLines
+      : [{ id: "event-budget-line-default", amount: 0, description: "" }];
+
+  function selectLocation(locationId: string) {
+    const location = locations.find((candidate) => candidate.id === locationId);
+
+    if (!location) {
+      return;
+    }
+
+    onEntryChange(entry.id, {
+      locationName: location.locationName,
+      locationUrl: location.locationUrl,
+      address: location.address,
+      addressUrl: location.addressUrl
+    });
+  }
+
+  function updateEventBudgetLine(
+    lineId: string,
+    updates: Partial<ProductionBudgetLine>
+  ) {
+    onEntryChange(entry.id, {
+      budgetLines: eventBudgetLines.map((line) =>
+        line.id === lineId ? { ...line, ...updates } : line
+      )
+    });
+  }
+
+  function addEventBudgetLine() {
+    onEntryChange(entry.id, {
+      budgetLines: [
+        ...eventBudgetLines,
+        {
+          id: `event-budget-line-${Date.now()}`,
+          amount: 0,
+          description: ""
+        }
+      ]
+    });
+  }
+
+  function deleteEventBudgetLine(lineId: string) {
+    const remainingLines = eventBudgetLines.filter((line) => line.id !== lineId);
+
+    onEntryChange(entry.id, {
+      budgetLines:
+        remainingLines.length > 0
+          ? remainingLines
+          : [{ id: `event-budget-line-${Date.now()}`, amount: 0, description: "" }]
+    });
+  }
 
   return (
     <article className="event-card">
@@ -4173,12 +5336,18 @@ function EventCard({
           </label>
           <label>
             Location name
-            <input
-              onChange={(event) =>
-                onEntryChange(entry.id, { locationName: event.target.value })
-              }
-              value={entry.locationName}
-            />
+            <select
+              aria-label={`${entry.name} location`}
+              onChange={(event) => selectLocation(event.target.value)}
+              value={selectedLocation?.id ?? ""}
+            >
+              <option value="">Choose location</option>
+              {locations.map((location) => (
+                <option key={location.id} value={location.id}>
+                  {location.locationName}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             Location link
@@ -4209,50 +5378,28 @@ function EventCard({
               value={entry.addressUrl}
             />
           </label>
-          <label>
-            Earned
-            <input
-              inputMode="decimal"
-              onChange={(event) =>
-                onEntryChange(entry.id, {
-                  earnedAmount: Number(event.target.value) || 0
-                })
-              }
-              value={String(entry.earnedAmount ?? 0)}
-            />
-          </label>
-          <label>
-            Earned reason
-            <input
-              onChange={(event) =>
-                onEntryChange(entry.id, { earnedDescription: event.target.value })
-              }
-              placeholder="Event income reason"
-              value={entry.earnedDescription ?? ""}
-            />
-          </label>
-          <label>
-            Spent
-            <input
-              inputMode="decimal"
-              onChange={(event) =>
-                onEntryChange(entry.id, {
-                  spentAmount: Number(event.target.value) || 0
-                })
-              }
-              value={String(entry.spentAmount ?? 0)}
-            />
-          </label>
-          <label>
-            Spent reason
-            <input
-              onChange={(event) =>
-                onEntryChange(entry.id, { spentDescription: event.target.value })
-              }
-              placeholder="Event expense reason"
-              value={entry.spentDescription ?? ""}
-            />
-          </label>
+        </div>
+
+        <div className="event-budget-section">
+          <strong>Budget</strong>
+          <div className="event-budget-lines">
+            {eventBudgetLines.map((line) => (
+              <EventBudgetLineRow
+                key={line.id}
+                line={line}
+                onDelete={deleteEventBudgetLine}
+                onUpdate={updateEventBudgetLine}
+              />
+            ))}
+          </div>
+          <button
+            className="add-campaign-task-button production-budget-add-button"
+            onClick={addEventBudgetLine}
+            type="button"
+          >
+            <Plus size={16} aria-hidden />
+            Add new budget line
+          </button>
         </div>
 
         <div className="event-danger-zone">
@@ -4276,6 +5423,75 @@ function EventCard({
         </div>
       </div>
     </article>
+  );
+}
+
+function EventBudgetLineRow({
+  line,
+  onDelete,
+  onUpdate
+}: {
+  line: ProductionBudgetLine;
+  onDelete: (lineId: string) => void;
+  onUpdate: (lineId: string, updates: Partial<ProductionBudgetLine>) => void;
+}) {
+  const [isActionsOpen, setIsActionsOpen] = useState(false);
+  const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
+
+  return (
+    <div className="event-budget-line">
+      <label>
+        Budget reason
+        <input
+          onChange={(event) =>
+            onUpdate(line.id, {
+              description: event.target.value
+            })
+          }
+          placeholder="Income, travel, food, parking..."
+          value={line.description}
+        />
+      </label>
+      <label>
+        Amount
+        <ProductionBudgetAmountInput
+          amount={line.amount}
+          onChange={(amount) => onUpdate(line.id, { amount })}
+        />
+      </label>
+      <div className="event-budget-actions-cell">
+        <button
+          aria-expanded={isActionsOpen}
+          aria-label={`${isActionsOpen ? "Hide" : "Show"} event budget line actions`}
+          className="budget-row-action-button"
+          onClick={() => setIsActionsOpen((current) => !current)}
+          type="button"
+        >
+          <Pencil size={15} aria-hidden />
+        </button>
+        {isActionsOpen ? (
+          <div className="event-budget-action-panel">
+            <label>
+              <input
+                checked={isDeleteConfirmed}
+                onChange={(event) => setIsDeleteConfirmed(event.target.checked)}
+                type="checkbox"
+              />
+              Confirm delete
+            </label>
+            <button
+              aria-label="Delete event budget line"
+              className="delete-campaign-task-button"
+              disabled={!isDeleteConfirmed}
+              onClick={() => onDelete(line.id)}
+              type="button"
+            >
+              <Trash2 size={15} aria-hidden />
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -4866,6 +6082,7 @@ function ProductionSongBoard({
         isFocusHighlighted ? " production-song-board-focused" : ""
       }`}
       aria-label={`${songTitle} production plan`}
+      data-scroll-anchor={isSongOpen ? "open-card" : undefined}
       ref={refCallback}
     >
       <div className="campaign-board-header production-board-header">
@@ -5353,6 +6570,7 @@ function MarketingView({
   campaigns,
   focusTarget,
   onAddCampaign,
+  onCampaignBudgetLinesChange,
   onCampaignDaysChange,
   onDeleteCampaign,
   onFocusCampaign,
@@ -5364,6 +6582,10 @@ function MarketingView({
   campaigns: MarketingCampaignConfig[];
   focusTarget: { campaignId: string; elementId?: string; token: number } | null;
   onAddCampaign: (releaseTitle?: string) => void;
+  onCampaignBudgetLinesChange: (
+    campaignId: string,
+    budgetLines: ProductionBudgetLine[]
+  ) => void;
   onCampaignDaysChange: (campaignId: string, campaignDays: CampaignDay[]) => void;
   onDeleteCampaign: (campaignId: string) => void;
   onFocusCampaign: (campaignId: string, elementId?: string) => void;
@@ -5466,6 +6688,7 @@ function MarketingView({
               focusTarget?.campaignId === campaign.id ? focusTarget.token : undefined
             }
             key={campaign.id}
+            onBudgetLinesChange={onCampaignBudgetLinesChange}
             onDaysChange={onCampaignDaysChange}
             onDelete={onDeleteCampaign}
             onFocus={onFocusCampaign}
@@ -5512,6 +6735,7 @@ function MarketingView({
 function MarketingCampaignBoard({
   campaign,
   focusToken,
+  onBudgetLinesChange,
   onDaysChange,
   onDelete,
   onFocus,
@@ -5522,6 +6746,10 @@ function MarketingCampaignBoard({
 }: {
   campaign: MarketingCampaignConfig;
   focusToken?: number;
+  onBudgetLinesChange: (
+    campaignId: string,
+    budgetLines: ProductionBudgetLine[]
+  ) => void;
   onDaysChange: (campaignId: string, campaignDays: CampaignDay[]) => void;
   onDelete: (campaignId: string) => void;
   onFocus: (campaignId: string, elementId?: string) => void;
@@ -5575,6 +6803,16 @@ function MarketingCampaignBoard({
   const releaseDateDisplay = releaseDate ? formatCampaignDate(releaseDate) : null;
   const daysToRelease = releaseDate ? getDaysToRelease(releaseDate) : null;
   const nextCampaignTasks = getNextCampaignTasks(campaignDays).slice(0, 3);
+  const campaignBudgetLines =
+    campaign.budgetLines && campaign.budgetLines.length > 0
+      ? campaign.budgetLines
+      : [
+          {
+            amount: 0,
+            description: "",
+            id: `${campaign.id}-marketing-budget-line-1`
+          }
+        ];
   const hasPendingReleaseDate = releaseDateInput !== appliedReleaseDateInput;
   const canUpdateReleaseDate = Boolean(parseCampaignDate(releaseDateInput));
   const canSaveCampaignTitle = campaignTitleInput.trim().length > 0;
@@ -5627,6 +6865,78 @@ function MarketingCampaignBoard({
       }, 0);
 
       return nextDays;
+    });
+  }
+
+  function updateCampaignBudgetLine(
+    lineId: string,
+    updates: Partial<ProductionBudgetLine>
+  ) {
+    const nextBudgetLines = campaignBudgetLines.map((line) =>
+      line.id === lineId ? { ...line, ...updates } : line
+    );
+
+    onBudgetLinesChange(campaign.id, nextBudgetLines);
+  }
+
+  function addCampaignBudgetLine() {
+    onBudgetLinesChange(campaign.id, [
+      ...normalizeProductionBudgetLines(campaignBudgetLines),
+      {
+        amount: 0,
+        description: "",
+        id: `${campaign.id}-marketing-budget-line-${Date.now()}`
+      }
+    ]);
+  }
+
+  function deleteCampaignBudgetLine(lineId: string) {
+    const nextBudgetLines = campaignBudgetLines.filter(
+      (line) => line.id !== lineId
+    );
+
+    onBudgetLinesChange(
+      campaign.id,
+      nextBudgetLines.length > 0
+        ? nextBudgetLines
+        : [
+            {
+              amount: 0,
+              description: "",
+              id: `${campaign.id}-marketing-budget-line-${Date.now()}`
+            }
+          ]
+    );
+  }
+
+  function scrollToCurrentCampaignDay() {
+    const activeDayNumber = getActiveCampaignDayNumber(campaignDays);
+
+    if (!activeDayNumber) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      document
+        .getElementById(
+          getMarketingCampaignDayElementId(campaign.id, activeDayNumber)
+        )
+        ?.scrollIntoView({
+          behavior: "smooth",
+          block: "start"
+        });
+    }, 120);
+  }
+
+  function toggleCampaignDetails() {
+    setIsCampaignOpen((current) => {
+      const nextIsOpen = !current;
+
+      if (nextIsOpen) {
+        scrollToCurrentCampaignDay();
+      }
+
+      return nextIsOpen;
     });
   }
 
@@ -5785,6 +7095,7 @@ function MarketingCampaignBoard({
           isFocusHighlighted ? " production-song-board-focused" : ""
         }`}
         aria-label={`${displayedCampaignTitle} marketing campaign`}
+        data-scroll-anchor={isCampaignOpen ? "open-card" : undefined}
         ref={refCallback}
       >
         <div className="campaign-board-header">
@@ -5880,7 +7191,7 @@ function MarketingCampaignBoard({
             aria-expanded={isCampaignOpen}
             aria-label={isCampaignOpen ? "Hide campaign details" : "Show campaign details"}
             className="campaign-toggle"
-            onClick={() => setIsCampaignOpen((current) => !current)}
+            onClick={toggleCampaignDetails}
             type="button"
           >
             <ChevronDown size={20} aria-hidden />
@@ -5897,6 +7208,27 @@ function MarketingCampaignBoard({
           hidden={!isCampaignOpen}
           id={`${campaign.id}-details`}
         >
+          <div className="event-budget-section marketing-budget-section">
+            <strong>Budget</strong>
+            <div className="event-budget-lines">
+              {campaignBudgetLines.map((line) => (
+                <EventBudgetLineRow
+                  key={line.id}
+                  line={line}
+                  onDelete={deleteCampaignBudgetLine}
+                  onUpdate={updateCampaignBudgetLine}
+                />
+              ))}
+            </div>
+            <button
+              className="add-campaign-task-button production-budget-add-button"
+              onClick={addCampaignBudgetLine}
+              type="button"
+            >
+              <Plus size={16} aria-hidden />
+              Add new budget line
+            </button>
+          </div>
           <div className="campaign-table-wrap">
             <table className="campaign-table">
               <thead>
@@ -7208,7 +8540,10 @@ function PlatformTrendPanelGroup({
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <div className="platform-trend-panel">
+    <div
+      className="platform-trend-panel"
+      data-scroll-anchor={isOpen ? "open-card" : undefined}
+    >
       <button
         aria-expanded={isOpen}
         className="platform-trend-toggle"

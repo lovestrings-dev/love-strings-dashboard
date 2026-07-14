@@ -239,6 +239,39 @@ Reason:
 - Apple Music import is manual and occasional, so it belongs near platform details.
 - Removing duplicate date/release/file-name text keeps the card readable on mobile.
 
+## 2026-07-14 - Beta 1.5 Events Persistence Direction
+
+Decision:
+
+- Make Events the next module to become fully Supabase-backed.
+- Keep the Events tab as the source of truth for show/event details, location details, and event-specific income/spend.
+- Keep generated Budget rows from Events read-only in the Budget tab.
+- Update event-generated Budget values by editing the source Event, not by editing the generated Budget row.
+- Add a Location Address Book as a real supporting entity for Events instead of repeating the same venue/contact information in every event.
+- Reuse the same protected delete and repeatable budget-line patterns across Events, Marketing, Production, and Budget.
+
+Current local Events model:
+
+- Events can be added, edited, and deleted locally.
+- Each event has date, name/link, location name/link, address/link.
+- Each event can contain repeatable budget lines with reason and positive/negative amount.
+- Budget rows generated from Events use the event as the source and are deletable in Budget only as hidden/generated rows.
+- Location Address Book records include venue name/link, address/link, contact name, contact phone, contact notes, and event history for that location.
+- New event location name is a dropdown from the Address Book and autofills related links/address fields.
+
+Reason:
+
+- Events are a natural next persistence target because they now affect both Dashboard and Budget.
+- Yuliia and Dmitrii should see the same show archive, upcoming events, venue contacts, and event-related money records.
+- Wiring Events before Budget reduces confusion because Budget can then rely on a stable event source instead of local-only generated rows.
+
+Beta 1.5 open implementation notes:
+
+- Prefer the Production-module persistence style: server-side writes using Supabase service role where broad browser write policies are not needed.
+- Events tables are private-by-default with no anonymous Supabase read policies; the app reads and writes through `/api/events` behind the existing app access protection.
+- Marketing campaign budget lines are included in the app/Budget logic locally, but can be held for a later Marketing/Budget persistence pass if Beta 1.5 should stay focused on Events.
+- Preserve localStorage fallback during migration so current local event data is not lost if Supabase is temporarily unavailable.
+
 ## 2026-07-08 - Events Tab And Upcoming Event Logic
 
 Decision:
@@ -327,3 +360,21 @@ Reason:
 - The song is born in Production before it becomes a Marketing campaign.
 - Keeping names and artwork in Production reduces duplicate fields and avoids small mismatches between modules.
 - This is a first step toward a proper shared song/release id. For now, title matching is acceptable for the internal prototype, but the backend should later use stable ids.
+
+## 2026-07-14 - Metrics Refresh Reliability
+
+Decision:
+
+- Move the primary daily platform metrics scheduler from GitHub Actions to Vercel Cron.
+- Keep the old GitHub Actions workflow as a manual fallback only by removing its scheduled triggers.
+- Schedule Vercel Cron at `05:00 UTC`, which targets the morning in Vienna: about 07:00 during daylight saving time and 06:00 during standard time.
+- Add an app-open safety check: when the app opens, it reads Supabase first and triggers one refresh only if today's Europe/Vienna snapshot is missing.
+- Keep the manual Dashboard Refresh button for intentional fresh pulls during active checks.
+- Keep the Vercel Cron endpoint narrow and quiet: it accepts only the expected Vercel cron schedule headers and returns collector counts rather than detailed metric data.
+
+Reason:
+
+- GitHub scheduled workflows proved unreliable for this project, with several expected overnight runs delayed or skipped.
+- Vercel Cron lives next to the deployed app and should be easier to observe in Vercel logs.
+- The app-open check gives Dmitrii and Yuliia a practical self-healing fallback: if the scheduled run misses, opening the app can still create today's snapshot.
+- Same-day Supabase upsert rules still prevent duplicate daily snapshot rows.

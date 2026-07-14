@@ -106,7 +106,9 @@ Post-release mobile QA notes:
 
 ## Beta 1.4
 
-Release candidate theme:
+Status: Published and verified
+
+Release theme:
 
 Mobile polish, readability, and shareability pass after real phone testing of Beta 1.3.
 
@@ -129,6 +131,56 @@ Included:
 Known follow-ups:
 - QR code edits are currently local-browser state; wire to Supabase later if the same QR list should sync across Dmitrii and Yuliia devices.
 - Real-phone QA should confirm Dashboard, Marketing, Platforms, Budget, and Roadmap mobile layouts before deeper Beta 1.5 work.
+- Metrics scheduler reliability remains under observation after moving from GitHub Actions to Vercel Cron.
+
+Release result:
+- GitHub commit/push completed successfully.
+- Vercel deployment completed successfully.
+- Live app verification passed after deployment.
+
+Post-release reliability update:
+- Added Vercel Cron configuration for daily platform metrics refresh at `05:00 UTC`.
+- Disabled the GitHub Actions scheduled triggers while keeping manual workflow dispatch as fallback.
+- Added an app-open refresh safety check that runs only when today's Europe/Vienna metric snapshot is missing.
+
+## Beta 1.5
+
+Status: Release candidate prepared locally; Supabase migration applied; local Events smoke test still needed before deploy
+
+Release theme:
+
+Fully functional Events module plus the smaller workflow refinements added after Beta 1.4.
+
+Core scope:
+- Wire Events to Supabase so event records, location/address-book details, and event-linked Budget lines can sync across Dmitrii and Yuliia devices.
+- Keep Events read/write access server-controlled, following the safer Production-module pattern from Beta 1.3.
+- Preserve local fallback behavior while Supabase is unavailable.
+- Verify deployed create/edit/delete event flows after release.
+
+Already added locally since Beta 1.4:
+- Floating scroll assist button for returning to the opened card header or top of the active tab.
+- Events Location Address Book above the Events archive, seeded from existing event data.
+- Location records include location name/link, address/link, contact name, contact phone, contact notes, and past event history for the same location.
+- New events can choose an existing location from a dropdown; location link, address, and address link autofill from the address book.
+- Events budget fields were consolidated into repeatable Budget lines with reason and positive/negative amount, matching the Production budget-line pattern.
+- Event-generated Budget rows remain read-only in Budget and should be updated from the Event record.
+- Event and event-budget delete actions use protected confirmation flows and mobile-safe layout.
+- Marketing campaign details now include a repeatable campaign-level Budget section that generates Budget rows for campaign-related income/spend.
+- Opening an active Marketing campaign scrolls to the current campaign day.
+- Marketing campaign budget delete controls were aligned and verified on desktop/mobile.
+- Visible app label bumped to `Beta 1.5`.
+
+Implementation prepared:
+- Added private-by-default Supabase migration `202607140001_create_events_tracker.sql` for `event_locations`, `events`, and `event_budget_lines`.
+- Added server route `/api/events` for loading and saving Events data with the Supabase service role.
+- App now loads Events/Locations from `/api/events`, seeds Supabase from current local data when the remote Events tables are empty, and debounces snapshot saves after local edits.
+- Events tables intentionally do not expose anonymous Supabase read policies because location contacts, notes, and event money are private app data.
+
+Beta 1.5 release checklist:
+- Supabase migration `202607140001_create_events_tracker.sql` applied successfully after retrying `supabase db push`.
+- Smoke-test Events tab on local desktop and mobile widths.
+- Smoke-test deployed app with Basic Auth after Vercel release.
+- Commit/push and deploy through Vercel.
 
 ## Version 1.0
 

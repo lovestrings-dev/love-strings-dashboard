@@ -1,11 +1,6 @@
 name: Daily Metrics Refresh
 
 on:
-  schedule:
-    # Several attempts around 01:00 Vienna in daylight saving time.
-    - cron: "5,20,35,50 23 * * *"
-    # Several attempts around 01:00 Vienna in standard time.
-    - cron: "5,20,35,50 0 * * *"
   workflow_dispatch:
 
 jobs:

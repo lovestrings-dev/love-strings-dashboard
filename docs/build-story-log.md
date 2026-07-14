@@ -114,6 +114,7 @@ Story angle:
 | Dashboard consolidation | 0h 50m tracked | Copied the most useful cards from Events, Marketing, Production, Budget, and Roadmap into Dashboard; compacted platform cards; moved Apple Music import to Platforms. | Next.js, Supabase-backed data, Apple Music CSV flow | "The dashboard stopped being a collection of stats and started feeling like the morning command screen for the whole music project." |
 | Beta 1.2 control-center release | 0h 20m tracked + previous module work | Released the current dashboard-control-center concept, fixed the visible version label, and verified the live Vercel app now shows Beta 1.2. It gives a visible structure for how Marketing, Production, Platforms, Events, Budget, Roadmap, and Focus Queue should work together, while marking which modules still need real Supabase wiring. | GitHub, Vercel, Next.js, Supabase-backed pieces, prototype modules | "This was the moment the app became a map of the whole independent musician workflow, not just one useful tracker." |
 | Beta 1.3 Production backend start | 0h 45m tracked | Started turning the Production tab from local prototype into shared app memory: normalized database tables, server-side save/delete route, Supabase loading, first-load seeding, and a better Add song default deadline. | Supabase, Next.js API routes, GitHub/Vercel release path | "The production plan stopped being only something my browser remembers and started becoming something the app itself can remember." |
+| Beta 1.4 mobile and sharing release | 1h 20m tracked | Released the mobile/readability polish pass with the Love Strings logo, clickable platform profile links, compact metric cards, better mobile wrapping, and QR Codes dropdowns for Website, Dashboard, and music/social platforms. | Next.js, GitHub, Vercel, QR codes, mobile QA | "The dashboard became something I can open on my phone and use in conversation: show the numbers, show the plan, then let someone scan the exact link." |
 
 ## Reel Ideas From Current Build
 
@@ -314,6 +315,68 @@ Beats:
 Caption angle:
 
 Beta 1.3 was the moment the Production module became real app memory. Notes, deadlines, production steps, subtasks, artwork links, and production costs now save through Supabase instead of living only in the browser. We also fixed a very human problem: when lists sort automatically, the app should not make you hunt for the thing you were just editing.
+
+### Reel: The Dashboard Became Shareable
+
+Hook:
+
+I wanted my music dashboard to be useful on my phone, not only on my laptop.
+
+Beats:
+
+- Show the Love Strings logo in the app header.
+- Show platform cards with cleaner metric blocks.
+- Tap the new QR Codes dropdown.
+- Show QR cards for Website, Dashboard, Instagram, YouTube, music platforms.
+- Explain simply: if someone asks where to listen or follow, the dashboard can become the link hub too.
+- Show the mobile view as the real-life use case: open phone, show QR, another phone scans.
+- Mention the next step: sync QR edits to the database so the same list appears for everyone using the app.
+
+Caption angle:
+
+Beta 1.4 was not about adding a huge new backend. It was about making the app feel usable in real life: cleaner on mobile, branded with the Love Strings logo, and ready to share links by QR code straight from the phone screen. Sometimes a dashboard is not only for looking at numbers. It can also become the place you use when someone asks, "Where can I find your music?"
+
+### Reel: Events Become More Than A Calendar
+
+Hook:
+
+At first, the Events tab was just a list of gigs. Then it started becoming an address book, budget source, and memory of where the band has already played.
+
+Beats:
+
+- Show the Events archive with historical Love Strings appearances.
+- Open the new Location Address Book.
+- Explain simply: if we play the same venue again, we should not retype the same address, link, and contact notes every time.
+- Show creating/editing an event and choosing a location from the dropdown.
+- Show the location/address fields autofilling.
+- Show the event Budget section with a reason and positive/negative amount.
+- Show the generated Budget row in the Budget tab.
+- Explain the rule: "Edit the event where the real thing happened; Budget reflects it."
+- Mention the next beta: wire Events to Supabase so Dmitrii and Yuliia share the same event memory.
+
+Caption angle:
+
+For independent musicians, events are not only dates. They are venues, contacts, travel costs, income, memories, and future opportunities. The dashboard started turning the Events tab into a small band CRM: where we played, who to contact, what it cost, what we earned, and what should appear in the Budget automatically.
+
+### Reel: Campaigns Start Tracking Money Too
+
+Hook:
+
+Marketing is not free, even when you do most of it yourself.
+
+Beats:
+
+- Show a Marketing campaign card.
+- Open campaign details and show the new Budget section under the progress bar.
+- Explain that campaign expenses can be entered directly inside the campaign.
+- Use examples: ads, photoshoot, travel, props, promo tools.
+- Show the generated Budget row.
+- Explain the product idea: campaign progress and campaign spending should live close together.
+- End with the thought: "A useful app is not just a pretty dashboard. It helps you notice what every creative decision costs."
+
+Caption angle:
+
+We added campaign-level budget lines to the Marketing tab. The idea is simple: if spending belongs to a release campaign, record it inside that campaign and let Budget collect the financial picture. This is still beta logic, but it is exactly how the app starts becoming useful in real creative work.
 
 ## Open Story Details To Fill Later
 

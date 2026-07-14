@@ -29,15 +29,19 @@ Target meaning:
 Major remaining areas:
 
 - Platform integrations: Spotify parked, Deezer to investigate, Amazon Music to investigate, website/Google statistics to investigate.
-- Dashboard: estimated total audience, current budget balance, clickable platform links, functional In Focus section.
+- Dashboard: estimated total audience, deeper In Focus logic, and section polish after more modules become data-backed.
 - Marketing: add "update Apple Music" default tasks to the first and last campaign day.
-- Platforms: move Apple Music import here, add platform evolution views and audience evolution.
-- Production: first UI-only prototype is built; next step is Supabase schema/wiring plus deadline-risk warnings against Marketing release dates.
-- Budget: first UI-only prototype is built; next step is Supabase schema/wiring and Dashboard balance metric.
+- Platforms: add more platform evolution views, audience evolution, and remaining connectors.
+- Production: Supabase-backed in Beta 1.3; next step is deadline-risk warnings against Marketing release dates.
+- Events: next Beta 1.5 focus is Supabase wiring for event records, Location Address Book records, location dropdown/autofill, and event-linked Budget lines.
+- Budget: functional local/generated logic exists; next step is Supabase schema/wiring after Event and Production sources are stable.
 - Roadmap: make strategic plan live and trackable.
-- Shows: decide whether to add a Shows tab for upcoming concerts.
 - Other tasks: define a home for non-marketing/non-production work.
 - UI: tidy and mobile-polish after core workflows are in place.
+
+Next beta step:
+
+- Beta 1.5 should release the fully functional Events module plus the smaller verified improvements added after Beta 1.4: floating scroll assist, Events protected delete flow, campaign-level Marketing budget lines, and active-campaign-day scroll.
 
 ### Version 2.0 - Voice-Controlled Assistant Layer
 

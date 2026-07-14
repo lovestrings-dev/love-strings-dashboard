@@ -5,7 +5,10 @@ const appPassword = process.env.APP_BASIC_AUTH_PASSWORD;
 const cronSecret = process.env.CRON_SECRET;
 
 export function proxy(request: NextRequest) {
-  if (isAuthorizedCronRefreshRequest(request)) {
+  if (
+    isAuthorizedCronRefreshRequest(request) ||
+    isAuthorizedVercelCronRefreshRequest(request)
+  ) {
     return NextResponse.next();
   }
 
@@ -42,6 +45,17 @@ function isAuthorizedCronRefreshRequest(request: NextRequest) {
     cronSecret &&
       request.nextUrl.pathname === "/api/metrics/refresh" &&
       authorization === `Bearer ${cronSecret}`
+  );
+}
+
+function isAuthorizedVercelCronRefreshRequest(request: NextRequest) {
+  const userAgent = request.headers.get("user-agent") ?? "";
+  const cronSchedule = request.headers.get("x-vercel-cron-schedule");
+
+  return (
+    request.nextUrl.pathname === "/api/cron/metrics-refresh" &&
+    userAgent.includes("vercel-cron/1.0") &&
+    cronSchedule === "0 5 * * *"
   );
 }
 
