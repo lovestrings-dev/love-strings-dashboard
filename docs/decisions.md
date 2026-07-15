@@ -345,6 +345,65 @@ Reason:
 - Re-entering license/distributor expenses for every song is repetitive and error-prone.
 - The Budget tab should help with near-term planning, not overwhelm the user with every planned cost many months ahead.
 
+## 2026-07-15 - Budget Persistence Model
+
+Decision:
+
+- Persist editable manual Budget ledger rows in dedicated Supabase tables through a server-side `/api/budget` route.
+- Keep generated Budget rows from Events, Production, Marketing, and recurring plans derived from their source modules instead of storing them as duplicate manual ledger rows.
+- Persist hidden/deleted generated-row IDs as user cleanup preferences.
+- Keep browser local storage as a fallback, but use Supabase as the shared Budget source once available.
+
+Reason:
+
+- Budget contains sensitive money data, so direct browser writes to Supabase should be avoided.
+- Generated rows should stay traceable to the source module that created them.
+- Avoiding duplicate generated records keeps Supabase lighter and reduces future reconciliation problems.
+- Persisting hidden generated rows lets the Budget view remain tidy across refresh and devices.
+
+## 2026-07-15 - Budget Source Buckets
+
+Decision:
+
+- Add a future Budget analysis layer based on source buckets:
+  - `Events`
+  - `Production`
+  - `Marketing`
+- Generated Budget rows should inherit their bucket from the module that created them.
+- Manual one-off and recurring Budget rows should get a bucket selector, because recurring tools can belong to different business areas.
+- Marketing bucket should include campaign budget lines, marketing-related event spends, and manual marketing rows such as Canva.
+- Production bucket should include Production module costs and manual production rows such as SUNO or other production tools.
+- Events bucket should include event income and event expenses, excluding event spends that are explicitly marketing-related.
+- Budget should later add six bucket summary cards:
+  - Events total since start
+  - Production total since start
+  - Marketing total since start
+  - Events projected one month ahead
+  - Production projected one month ahead
+  - Marketing projected one month ahead
+
+Reason:
+
+- Overall Budget answers "Are we positive or negative?"
+- Bucket analysis answers "Which part of the music project creates or consumes the money?"
+- Independent musicians need to see whether shows, releases, and promotion are each moving in a healthy direction.
+- Adding bucket metadata now keeps later charts and decisions from relying on fragile description parsing.
+
+## 2026-07-15 - Budget Ledger Source Of Truth
+
+Decision:
+
+- Budget ledger rows generated from Events, Marketing campaigns, and Production plans are read-only in the Budget ledger.
+- Those source-module rows cannot be hidden or deleted from Budget; to remove or correct them, edit/delete the budget record in the source module.
+- Recurring-payment forecast rows remain hideable/deletable from Budget because they represent expected future payments that may stop before the parent recurring plan is edited.
+- Manual Budget rows remain editable/deletable directly in Budget.
+
+Reason:
+
+- Events, Marketing, and Production are the source of truth for their own financial records.
+- Hiding source-generated rows inside Budget can create silent gaps in analytical cards and make totals look cleaner than reality.
+- Recurring forecasts are different: they are projections, so deleting a future forecast row can reflect that a planned payment will not actually happen.
+
 ## 2026-07-10 - Production Owns Release Identity For Marketing
 
 Decision:
@@ -378,3 +437,9 @@ Reason:
 - Vercel Cron lives next to the deployed app and should be easier to observe in Vercel logs.
 - The app-open check gives Dmitrii and Yuliia a practical self-healing fallback: if the scheduled run misses, opening the app can still create today's snapshot.
 - Same-day Supabase upsert rules still prevent duplicate daily snapshot rows.
+
+Verification:
+
+- On 2026-07-15, Supabase contained fresh platform metric snapshots for the Europe/Vienna date `2026-07-15`.
+- Rows were imported around `2026-07-15T05:04:06-08Z`, which is about 07:04 in Vienna during daylight saving time.
+- The successful automated snapshot included Instagram, YouTube Channel, and YouTube Music metrics, confirming that the Vercel-based autopilot path worked.

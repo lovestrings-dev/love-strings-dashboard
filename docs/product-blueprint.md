@@ -62,6 +62,17 @@ Start with manual/workbook-style data and useful screens before adding APIs. API
 
 ## Version Plan
 
+Beta release pattern:
+
+- Each `Beta 1.x` release should have one main functional-module headline.
+- The same beta can also include backlog fixes, UI polish, small cross-module improvements, and bug fixes found while testing earlier releases.
+- For storytelling, describe each beta as one clear capability step plus the real-world cleanup that made the app more usable.
+
+Current near-term sequence:
+
+- Beta 1.5: Events module persistence and event-linked Budget flow.
+- Beta 1.6: Budget module persistence, plus Address Book persistence fix and other small post-Beta 1.5 refinements.
+
 ### Version 1.0 - Internal Operating Dashboard
 
 Goal:
@@ -183,10 +194,16 @@ Possible production areas:
 ### Budget Module
 
 - First UI-only budget tracker is built from `Love Strings ADMIN.xlsx`, sheet `BUDGET`.
-- Header tracks total earned, total spent, current balance, potential future earn, and upcoming balance.
-- Ledger rows support local add/edit for date, description, amount, and type: spent or earned.
-- Potential earn is currently a placeholder for the future Events/Shows tab.
-- Backend persistence and Dashboard budget-balance metric are still pending.
+- Header tracks total earned, total spent, current balance, projected earn month ahead, projected spend month ahead, and projected balance month ahead.
+- Editable manual ledger rows are persisted through the Budget API and Supabase tables, with browser local storage kept as a fallback.
+- Recurring rows generate near-term forecast rows without storing every generated occurrence as a manual ledger entry.
+- Events, Marketing, and Production can generate read-only Budget rows from their own source records.
+- Hidden/deleted generated Budget rows are persisted as preferences so the Budget view can stay tidy across refresh and devices.
+- Hidden/deleted generated-row preferences now apply only to recurring forecast rows; Events/Marketing/Production generated rows must be corrected in their source module so analytical cards do not silently lose source data.
+- First Budget source-bucket analysis layer is implemented with `Events`, `Production`, and `Marketing` buckets.
+- Budget shows six bucket summary cards: three since-start totals and three one-month-forward projections.
+- Manual Budget rows have a bucket selector so costs like Canva or SUNO can be assigned to the correct business area.
+- Generated rows inherit their bucket from the source module: Events, Marketing campaigns, or Production songs.
 
 ### Roadmap Module
 

@@ -199,6 +199,27 @@ Beats:
 - Show the green checkmark from the manual workflow test.
 - Tomorrow's follow-up: confirm the automatic morning run.
 
+### Reel: The Autopilot Finally Woke Up
+
+Hook:
+
+Automation sounds simple until you need it to work every morning.
+
+Beats:
+
+- Show the Dashboard platform stats and the idea: the app should collect one daily "photo" of the numbers automatically.
+- Explain that we first placed the scheduler in GitHub Actions.
+- Show the real problem in plain language: it sometimes waited in a queue, ran late, skipped, or did not create the morning snapshot.
+- Mention that for several days we checked logs, adjusted times, widened the schedule window, and kept manual refresh as a fallback.
+- Show the decision: move the scheduler to Vercel, closer to where the app already lives.
+- Show the successful Supabase snapshot for 2026-07-15, imported around 07:04 Vienna time.
+- Explain the outcome: Instagram, YouTube, and YouTube Music numbers appeared without pressing the Refresh button.
+- End with: "This was the moment the app got its first real autopilot habit."
+
+Caption angle:
+
+One of the funniest parts of building the dashboard was automation. We thought: just run the collectors every morning. Easy, right? First we placed the scheduler in GitHub Actions, then spent several days dancing around delays, skipped runs, timing windows, and manual fallbacks. Finally we moved the scheduler to Vercel, where the app itself lives. And then it happened: the platform numbers appeared in Supabase automatically. Not glamorous, but very satisfying.
+
 ### Reel 6: When Platforms Make Artists Work For Their Own Data
 
 Hook:
@@ -238,6 +259,25 @@ Beats:
 Caption angle:
 
 The breakthrough was not adding more screens. It was deciding what belongs on the first screen. For an independent musician, that means: next event, platform numbers, campaign progress, production tasks, budget, and long-term roadmap.
+
+### Reel: The First Module Was Already Useful
+
+Hook:
+
+The app did not become useful only when it was "finished." The Marketing module started being useful first.
+
+Beats:
+
+- Show the Marketing tab with campaign cards, release dates, progress boxes, and daily tasks.
+- Explain that this was the first module that became truly operational.
+- Show that while Dmitrii and Codex continued building Production, Events, Budget, Platforms, and Roadmap, Yuliia could already use the Marketing tracker for daily campaign work.
+- Emphasize the product lesson: you do not need the whole app finished before one part starts creating value.
+- Show the Dashboard campaign preview pulling the Marketing campaign state into the daily command screen.
+- End with: "The app was growing while already being used."
+
+Caption angle:
+
+One of the most encouraging moments was realizing that the app did not have to be complete to be useful. Marketing became the first working module: campaign dates, daily content tasks, upload status, and progress. While we kept developing the rest of the system, Yuliia could already use this part in daily Love Strings work. That changed the feeling of the project from "prototype" to "real tool in progress."
 
 ### Reel 8: Shows Join The Dashboard
 
@@ -385,3 +425,52 @@ We added campaign-level budget lines to the Marketing tab. The idea is simple: i
 - Screenshots or screen recordings from Vercel, Supabase, GitHub Actions, and the app.
 - Dmitrii's spoken reflections: what felt surprising, confusing, or exciting.
 - Yuliia's first feedback after opening the deployed beta.
+
+## Storytelling Release Pattern
+
+Use the same rhythm as the product beta strategy:
+
+- One beta = one main functional module or capability.
+- Also mention the smaller fixes and UI lessons discovered in real use.
+- Keep the audience-facing language practical: "we added the main thing, then real testing showed what needed cleanup."
+
+Examples:
+
+- Beta 1.5: Events became shared app memory; the real-use cleanup includes safer event delete flows, address book behavior, and event money feeding Budget.
+- Beta 1.6: Budget becomes the headline module; the cleanup includes the Address Book persistence fix and other small issues found after Beta 1.5.
+
+### Reel: The App Learns Money Properly
+
+Core story:
+- Budget started as a useful local prototype: totals, recurring costs, event income, production costs, and campaign costs were visible, but the editable ledger was still mostly browser memory.
+- For Beta 1.6, we gave Budget its own Supabase-backed memory so Dmitrii and Yuliia can work from the same financial picture.
+- The smart part is that the app does not store every generated line as duplicate data: Event, Production, Marketing, and recurring rows stay connected to their source logic.
+- We tightened the rule after testing: Event, Production, and Marketing money lines should be corrected in their source module, not hidden inside Budget, because hiding source rows can distort analytical cards.
+- Recurring forecast rows are the exception: they can still be hidden from Budget when a future expected payment will not happen.
+
+Short script:
+- "At first, Budget was just a local finance tracker inside the dashboard."
+- "Then Events, Production, and Marketing started creating money lines automatically."
+- "For Beta 1.6, we connected the Budget itself to the database."
+- "Now the app can remember real ledger edits, projected costs, recurring payments, and cleanup choices across devices."
+
+Shot ideas:
+- Show the Budget summary cards.
+- Add a manual Budget line and refresh.
+- Show a generated row from Events or Production and explain that the source module remains the source of truth.
+- Show the app as a shared working tool, not just a spreadsheet replacement.
+
+Follow-up story angle:
+- The next Budget idea became real: stop looking only at the total balance and start asking where the money comes from.
+- Three practical buckets make sense for Love Strings: Events, Production, and Marketing.
+- Events are usually the main earning source, but they can also have travel or venue-related costs.
+- Production is where release costs and tools like SUNO belong.
+- Marketing includes campaign spends, ads, Canva, and promotion costs, including promotion linked to events.
+- This turns Budget from a ledger into a simple business mirror: are shows funding the project, are releases costing what we expected, and how much are we investing in attention?
+- First implementation step: Budget now has source buckets, six analytical cards, and a manual bucket selector.
+
+Short script add-on:
+- "Once the money was finally stored properly, the next question became more interesting."
+- "Not just: are we positive or negative?"
+- "But: where does the money come from, and where does it go?"
+- "For musicians, that means three buckets: shows, production, and marketing."

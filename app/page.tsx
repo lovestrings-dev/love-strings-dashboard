@@ -31,6 +31,7 @@ type CampaignDayProgressStatus = "empty" | "partial" | "complete";
 type ProductionBudgetLine = {
   id: string;
   amount: number;
+  bucket?: BudgetSourceBucket;
   description: string;
 };
 type ExtraCampaignTask = {
@@ -97,13 +98,18 @@ type ProductionWorkbookSeed = {
   vocal?: string;
 };
 type BudgetEntryType = "earned" | "spent" | "one-off" | "recurring";
+type BudgetSourceBucket = "events" | "production" | "marketing" | "other";
+type BudgetLedgerSortKey = "date" | "bucket" | "description" | "amount" | "type";
 type BudgetRecurringCadence = "monthly" | "yearly";
+type SortDirection = "ascending" | "descending";
 type BudgetEntry = {
   id: string;
+  dbId?: string;
   date: string;
   description: string;
   amount: number;
   type: BudgetEntryType;
+  bucket?: BudgetSourceBucket;
   recurringCadence?: BudgetRecurringCadence;
   paymentPlanEndDate?: string;
   generated?: boolean;
@@ -266,6 +272,7 @@ type ProductionBudgetLineDbRow = {
   production_step_task_id: string | null;
   description: string;
   amount: number | string;
+  budget_bucket?: BudgetSourceBucket | null;
   position: number;
 };
 type EventLocationDbRow = {
@@ -296,6 +303,7 @@ type EventBudgetLineDbRow = {
   event_id: string;
   description: string;
   amount: number | string;
+  budget_bucket?: BudgetSourceBucket | null;
   position: number;
 };
 type EventsSnapshot = {
@@ -487,7 +495,7 @@ const defaultQrCodeLinks: QrCodeLink[] = [
   }))
 ];
 
-const appVersionLabel = "Beta 1.5";
+const appVersionLabel = "Beta 1.6";
 
 const sections = [
   "Dashboard",
@@ -1716,6 +1724,7 @@ function getDefaultProductionStepBudgetLines(stepLabel: string): ProductionBudge
     return [
       {
         amount: -20,
+        bucket: "production",
         description: "License",
         id: "default-license-budget"
       }
@@ -1726,6 +1735,7 @@ function getDefaultProductionStepBudgetLines(stepLabel: string): ProductionBudge
     return [
       {
         amount: -10,
+        bucket: "production",
         description: "Distributor",
         id: "default-distributor-budget"
       }
@@ -1893,6 +1903,60 @@ function sortBudgetEntriesByDate(entries: BudgetEntry[]) {
   );
 }
 
+function sortBudgetEntriesForLedger(
+  entries: BudgetEntry[],
+  sortKey: BudgetLedgerSortKey,
+  sortDirection: SortDirection
+) {
+  const directionMultiplier = sortDirection === "ascending" ? 1 : -1;
+
+  return [...entries].sort((firstEntry, secondEntry) => {
+    const comparison = compareBudgetEntries(firstEntry, secondEntry, sortKey);
+
+    if (comparison !== 0) {
+      return comparison * directionMultiplier;
+    }
+
+    return (
+      getBudgetDateSortTime(secondEntry.date) - getBudgetDateSortTime(firstEntry.date)
+    );
+  });
+}
+
+function compareBudgetEntries(
+  firstEntry: BudgetEntry,
+  secondEntry: BudgetEntry,
+  sortKey: BudgetLedgerSortKey
+) {
+  if (sortKey === "date") {
+    return getBudgetDateSortTime(firstEntry.date) - getBudgetDateSortTime(secondEntry.date);
+  }
+
+  if (sortKey === "amount") {
+    return getBudgetSignedAmount(firstEntry) - getBudgetSignedAmount(secondEntry);
+  }
+
+  if (sortKey === "bucket") {
+    return compareText(
+      getBudgetSourceBucket(firstEntry),
+      getBudgetSourceBucket(secondEntry)
+    );
+  }
+
+  if (sortKey === "type") {
+    return compareText(getBudgetPaymentType(firstEntry), getBudgetPaymentType(secondEntry));
+  }
+
+  return compareText(firstEntry.description, secondEntry.description);
+}
+
+function compareText(firstValue: string, secondValue: string) {
+  return firstValue.localeCompare(secondValue, undefined, {
+    numeric: true,
+    sensitivity: "base"
+  });
+}
+
 function sortEventEntriesByDate(entries: EventEntry[]) {
   return [...entries].sort(
     (firstEntry, secondEntry) =>
@@ -1914,6 +1978,7 @@ function normalizeEventBudgetLines(entry: EventEntry): EventEntry {
     migratedBudgetLines.push({
       id: "event-budget-earned",
       amount: Math.abs(entry.earnedAmount),
+      bucket: "events",
       description: entry.earnedDescription?.trim() || "earned"
     });
   }
@@ -1922,6 +1987,7 @@ function normalizeEventBudgetLines(entry: EventEntry): EventEntry {
     migratedBudgetLines.push({
       id: "event-budget-spent",
       amount: -Math.abs(entry.spentAmount),
+      bucket: "events",
       description: entry.spentDescription?.trim() || "spent"
     });
   }
@@ -1933,7 +1999,14 @@ function normalizeEventBudgetLines(entry: EventEntry): EventEntry {
         ? existingBudgetLines
         : migratedBudgetLines.length > 0
           ? migratedBudgetLines
-          : [{ id: "event-budget-line-default", amount: 0, description: "" }]
+          : ([
+              {
+                id: "event-budget-line-default",
+                amount: 0,
+                bucket: "events",
+                description: ""
+              }
+            ] satisfies ProductionBudgetLine[])
   };
 }
 
@@ -1981,6 +2054,7 @@ function normalizeLocationAddressBookEntries(entries: unknown[]) {
         typeof entry.id === "string" && entry.id
           ? entry.id
           : `location-${Date.now()}-${index}`,
+      dbId: typeof entry.dbId === "string" ? entry.dbId : undefined,
       locationName:
         typeof entry.locationName === "string" && entry.locationName
           ? entry.locationName
@@ -2035,7 +2109,7 @@ function consolidateLocationAddressBookEntries(
       key,
       mergeLocationAddressBookEntry(locationsByKey.get(key), {
         ...location,
-        id: `location-${key}`
+        id: location.id || `location-${key}`
       })
     );
   });
@@ -2343,15 +2417,43 @@ function getBudgetSummary(entries: BudgetEntry[]) {
     .filter((amount) => amount < 0)
     .reduce((sum, amount) => sum + Math.abs(amount), 0);
   const upcomingBalance = balance + potentialEarn - upcomingSpend;
+  const bucketSummaries = getBudgetBucketSummaries(historicalEntries, upcomingEntries);
 
   return {
     balance,
+    bucketSummaries,
     potentialEarn,
     upcomingSpend,
     totalEarned,
     totalSpent,
     upcomingBalance
   };
+}
+
+function getBudgetBucketSummaries(
+  historicalEntries: BudgetEntry[],
+  upcomingEntries: BudgetEntry[]
+) {
+  return budgetSummaryBucketOptions.reduce(
+    (summaries, bucket) => ({
+      ...summaries,
+      [bucket.value]: {
+        historical: sumBudgetEntriesByBucket(historicalEntries, bucket.value),
+        upcoming: sumBudgetEntriesByBucket(upcomingEntries, bucket.value)
+      }
+    }),
+    {} as Record<Exclude<BudgetSourceBucket, "other">, { historical: number; upcoming: number }>
+  );
+}
+
+function sumBudgetEntriesByBucket(
+  entries: BudgetEntry[],
+  bucket: BudgetSourceBucket
+) {
+  return entries
+    .filter((entry) => getBudgetSourceBucket(entry) === bucket)
+    .map(getBudgetSignedAmount)
+    .reduce((sum, amount) => sum + amount, 0);
 }
 
 function getBudgetEntriesWithForecast(
@@ -2382,7 +2484,6 @@ function getBudgetEntriesWithForecast(
     generateEventBudgetEntries(event).filter(
       (generatedEntry) =>
         !existingIds.has(generatedEntry.id) &&
-        !deletedIds.has(generatedEntry.id) &&
         !existingFingerprints.has(getBudgetEntryFingerprint(generatedEntry))
     )
   );
@@ -2390,7 +2491,6 @@ function getBudgetEntriesWithForecast(
     generateMarketingCampaignBudgetEntries(campaign).filter(
       (generatedEntry) =>
         !existingIds.has(generatedEntry.id) &&
-        !deletedIds.has(generatedEntry.id) &&
         !existingFingerprints.has(getBudgetEntryFingerprint(generatedEntry))
     )
   );
@@ -2399,11 +2499,7 @@ function getBudgetEntriesWithForecast(
       (generatedEntry) =>
         isBudgetEntryInVisibleBudgetWindow(generatedEntry) &&
         !existingIds.has(generatedEntry.id) &&
-        !deletedIds.has(generatedEntry.id) &&
-        !existingFingerprints.has(getBudgetEntryFingerprint(generatedEntry)) &&
-        !existingDateAmountFingerprints.has(
-          getBudgetEntryDateAmountFingerprint(generatedEntry)
-        )
+        !existingFingerprints.has(getBudgetEntryFingerprint(generatedEntry))
     )
   );
 
@@ -2451,6 +2547,7 @@ function generateBudgetRecurringEntries(entry: BudgetEntry) {
   ) {
     generatedEntries.push({
       ...entry,
+      bucket: getBudgetSourceBucket(entry),
       date: formatDateForInput(occurrenceDate),
       generated: true,
       id: getBudgetGeneratedEntryId(entry.id, occurrenceDate),
@@ -2471,6 +2568,7 @@ function generateEventBudgetEntries(event: EventEntry) {
     .filter((line) => line.amount !== 0)
     .map((line) => ({
       amount: line.amount,
+      bucket: getEventBudgetLineBucket(line),
       date: event.date,
       description: getEventBudgetDescription(event.name, line),
       generated: true,
@@ -2487,6 +2585,7 @@ function generateMarketingCampaignBudgetEntries(
     .filter((line) => line.amount !== 0)
     .map((line) => ({
       amount: line.amount,
+      bucket: "marketing" as const,
       date: campaign.releaseDate,
       description: getMarketingCampaignBudgetDescription(
         campaign.releaseTitle,
@@ -2571,6 +2670,7 @@ function generateProductionBudgetLineEntries({
     .filter((line) => line.amount !== 0)
     .map((line) => ({
       amount: line.amount,
+      bucket: getProductionBudgetLineBucket(line),
       date,
       description: getProductionBudgetDescription(songTitle, itemName, line),
       generated: true,
@@ -2655,6 +2755,135 @@ function getBudgetSignedAmount(entry: BudgetEntry) {
   return entry.amount;
 }
 
+const budgetSourceBucketOptions: Array<{
+  label: string;
+  value: BudgetSourceBucket;
+}> = [
+  { label: "Events", value: "events" },
+  { label: "Production", value: "production" },
+  { label: "Marketing", value: "marketing" },
+  { label: "Other", value: "other" }
+];
+
+const budgetSummaryBucketOptions: Array<{
+  label: string;
+  value: Exclude<BudgetSourceBucket, "other">;
+}> = [
+  { label: "Events", value: "events" },
+  { label: "Production", value: "production" },
+  { label: "Marketing", value: "marketing" }
+];
+
+const eventBudgetBucketOptions = budgetSourceBucketOptions.filter(
+  (bucket) => bucket.value !== "production"
+);
+
+function getBudgetSourceBucket(entry: BudgetEntry): BudgetSourceBucket {
+  if (
+    entry.bucket === "events" ||
+    entry.bucket === "production" ||
+    entry.bucket === "marketing" ||
+    entry.bucket === "other"
+  ) {
+    return entry.bucket;
+  }
+
+  if (entry.sourceEventEntryId) {
+    return "events";
+  }
+
+  if (entry.sourceProductionItemId || entry.sourceRecurringEntryId) {
+    return "production";
+  }
+
+  if (entry.sourceMarketingCampaignId) {
+    return "marketing";
+  }
+
+  return inferBudgetSourceBucket(entry.description);
+}
+
+function inferBudgetSourceBucket(description: string): BudgetSourceBucket {
+  const normalizedDescription = description.toLowerCase();
+
+  if (
+    normalizedDescription.includes("pickwick") ||
+    normalizedDescription.includes("gig") ||
+    normalizedDescription.includes("wedding") ||
+    normalizedDescription.includes("lebenszeit") ||
+    normalizedDescription.includes("event")
+  ) {
+    return "events";
+  }
+
+  if (
+    normalizedDescription.includes("canva") ||
+    normalizedDescription.includes("photo") ||
+    normalizedDescription.includes("ads") ||
+    normalizedDescription.includes("marketing") ||
+    normalizedDescription.includes("promo")
+  ) {
+    return "marketing";
+  }
+
+  return "production";
+}
+
+function normalizeBudgetSourceBucket(value?: string): BudgetSourceBucket {
+  if (
+    value === "events" ||
+    value === "production" ||
+    value === "marketing" ||
+    value === "other"
+  ) {
+    return value;
+  }
+
+  return "production";
+}
+
+function getProductionBudgetLineBucket(
+  line: ProductionBudgetLine
+): BudgetSourceBucket {
+  return "production";
+}
+
+function getEventBudgetLineBucket(line: ProductionBudgetLine): BudgetSourceBucket {
+  if (
+    line.bucket === "events" ||
+    line.bucket === "marketing" ||
+    line.bucket === "other"
+  ) {
+    return line.bucket;
+  }
+
+  return "events";
+}
+
+function getBudgetGeneratedSourceLabel(entry: BudgetEntry) {
+  if (entry.sourceEventEntryId) {
+    return "Events";
+  }
+
+  if (entry.sourceMarketingCampaignId) {
+    return "Marketing";
+  }
+
+  if (entry.sourceProductionItemId) {
+    return "Production";
+  }
+
+  if (entry.sourceRecurringEntryId) {
+    return "Recurring";
+  }
+
+  return null;
+}
+
+function canDeleteBudgetEntryFromLedger(entry: BudgetEntry) {
+  return !entry.generated || Boolean(entry.sourceRecurringEntryId);
+}
+
 function getBudgetPaymentType(entry: BudgetEntry) {
   return entry.type === "recurring" ? "recurring" : "one-off";
 }
@@ -2679,8 +2908,16 @@ function getTransactionAmountToneClass(value: number) {
   return undefined;
 }
 
+function getBudgetBucketToneClass(bucket: BudgetSourceBucket, value: number) {
+  if (bucket === "production" || bucket === "marketing") {
+    return "amount-expense";
+  }
+
+  return getAmountToneClass(value);
+}
+
 function parseEditableAmount(value: string) {
-  const normalizedValue = value.trim();
+  const normalizedValue = value.trim().replace(/,/g, "");
 
   if (normalizedValue === "") {
     return 0;
@@ -2701,12 +2938,22 @@ function parseEditableAmount(value: string) {
   return Number.isFinite(amount) ? amount : null;
 }
 
+function formatEditableAmount(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 2
+  }).format(value);
+}
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
     currency: "EUR",
     maximumFractionDigits: 0,
     style: "currency"
   }).format(value);
+}
+
+function formatSpentCurrency(value: number) {
+  return formatCurrency(-Math.abs(value));
 }
 
 function getCampaignSortTime(releaseDateInput: string) {
@@ -3048,6 +3295,7 @@ function mapProductionBudgetLineRows(rows: ProductionBudgetLineDbRow[]) {
     .sort((firstLine, secondLine) => firstLine.position - secondLine.position)
     .map((line) => ({
       amount: Number(line.amount),
+      bucket: normalizeBudgetSourceBucket(line.budget_bucket ?? "production"),
       description: line.description,
       id: line.id
     }));
@@ -3109,6 +3357,12 @@ function mapEventBudgetLineRows(rows: EventBudgetLineDbRow[]) {
     .sort((firstLine, secondLine) => firstLine.position - secondLine.position)
     .map((line) => ({
       amount: Number(line.amount),
+      bucket: getEventBudgetLineBucket({
+        amount: Number(line.amount),
+        bucket: line.budget_bucket ?? "events",
+        description: line.description,
+        id: line.id
+      }),
       description: line.description,
       id: line.id
     }));
@@ -3437,10 +3691,109 @@ async function saveEventsSnapshotToSupabase({
   }
 }
 
+type BudgetSnapshot = {
+  deletedForecastIds: string[];
+  entries: BudgetEntry[];
+};
+
+function normalizeBudgetEntries(entries: BudgetEntry[]) {
+  return sortBudgetEntriesByDate(
+    entries.map((entry) => ({
+      ...entry,
+      amount: Number(entry.amount) || 0,
+      bucket:
+        entry.bucket === "events" ||
+        entry.bucket === "production" ||
+        entry.bucket === "marketing"
+          ? entry.bucket
+          : inferBudgetSourceBucket(entry.description),
+      date: typeof entry.date === "string" ? entry.date : formatDateForInput(getTodayUtcDate()),
+      description: typeof entry.description === "string" ? entry.description : "",
+      id: typeof entry.id === "string" && entry.id ? entry.id : `budget-entry-${Date.now()}`,
+      type:
+        entry.type === "recurring" ||
+        entry.type === "one-off" ||
+        entry.type === "earned" ||
+        entry.type === "spent"
+          ? entry.type
+          : "one-off"
+    }))
+  );
+}
+
+async function loadBudgetSnapshotFromSupabase(): Promise<BudgetSnapshot | null> {
+  try {
+    const response = await fetch("/api/budget", {
+      credentials: "same-origin",
+      method: "GET"
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error ?? `Budget load failed with status ${response.status}.`);
+    }
+
+    const result = (await response.json()) as BudgetSnapshot;
+
+    return {
+      deletedForecastIds: Array.isArray(result.deletedForecastIds)
+        ? result.deletedForecastIds.filter(
+            (forecastId): forecastId is string => typeof forecastId === "string"
+          )
+        : [],
+      entries: normalizeBudgetEntries(result.entries ?? [])
+    };
+  } catch (error) {
+    console.warn("Unable to load budget from Supabase.", error);
+    return null;
+  }
+}
+
+async function saveBudgetSnapshotToSupabase({
+  deletedForecastIds,
+  entries
+}: BudgetSnapshot): Promise<BudgetSnapshot | null> {
+  try {
+    const response = await fetch("/api/budget", {
+      body: JSON.stringify({
+        deletedForecastIds,
+        entries: entries.filter((entry) => !entry.generated)
+      }),
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "x-love-strings-budget": "write"
+      },
+      method: "POST"
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error ?? `Budget save failed with status ${response.status}.`);
+    }
+
+    const result = (await response.json()) as BudgetSnapshot;
+
+    return {
+      deletedForecastIds: Array.isArray(result.deletedForecastIds)
+        ? result.deletedForecastIds.filter(
+            (forecastId): forecastId is string => typeof forecastId === "string"
+          )
+        : [],
+      entries: normalizeBudgetEntries(result.entries ?? [])
+    };
+  } catch (error) {
+    console.warn("Unable to save budget to Supabase.", error);
+    return null;
+  }
+}
+
 export default function Home() {
   const productionSaveTimers = useRef<Record<string, number>>({});
   const eventSaveTimer = useRef<number | null>(null);
+  const budgetSaveTimer = useRef<number | null>(null);
   const hasRequestedEventSupabaseLoad = useRef(false);
+  const hasRequestedBudgetSupabaseLoad = useRef(false);
   const [activeSection, setActiveSection] = useState<Section>("Dashboard");
   const [platformStatsData, setPlatformStatsData] = useState(platformStats);
   const [platformMetricRows, setPlatformMetricRows] = useState<MetricRow[]>([]);
@@ -3482,6 +3835,7 @@ export default function Home() {
   const [eventEntryDrafts, setEventEntryDrafts] = useState(() =>
     normalizeEventEntries(eventEntries)
   );
+  const fallbackEventEntriesForAddressBook = useRef(eventEntryDrafts);
   const [locationAddressBook, setLocationAddressBook] = useState(() =>
     buildLocationAddressBookEntries(eventEntries)
   );
@@ -3496,6 +3850,8 @@ export default function Home() {
   const [hasLoadedLocationAddressBook, setHasLoadedLocationAddressBook] =
     useState(false);
   const [hasLoadedEventSupabaseSnapshot, setHasLoadedEventSupabaseSnapshot] =
+    useState(false);
+  const [hasLoadedBudgetSupabaseSnapshot, setHasLoadedBudgetSupabaseSnapshot] =
     useState(false);
   const hasCheckedOpeningMetricRefresh = useRef(false);
   const dashboardPlatformStats = getDashboardPlatformStats(platformStatsData);
@@ -3545,6 +3901,17 @@ export default function Home() {
     eventSaveTimer.current = window.setTimeout(() => {
       eventSaveTimer.current = null;
       void saveEventsSnapshotToSupabase(snapshot);
+    }, 900);
+  }
+
+  function queueBudgetSnapshotSave(snapshot: BudgetSnapshot) {
+    if (budgetSaveTimer.current) {
+      window.clearTimeout(budgetSaveTimer.current);
+    }
+
+    budgetSaveTimer.current = window.setTimeout(() => {
+      budgetSaveTimer.current = null;
+      void saveBudgetSnapshotToSupabase(snapshot);
     }, 900);
   }
 
@@ -4010,6 +4377,7 @@ export default function Home() {
         {
           id: `budget-entry-${Date.now()}`,
           amount: 0,
+          bucket: "events",
           date: formatDateForInput(getTodayUtcDate()),
           description: "New budget line",
           type: "one-off"
@@ -4030,12 +4398,13 @@ export default function Home() {
   }
 
   function deleteBudgetEntry(entryId: string) {
-    if (
-      entryId.startsWith("budget-forecast-") ||
-      entryId.startsWith("budget-event-") ||
-      entryId.startsWith("budget-marketing-") ||
-      entryId.startsWith("budget-production-")
-    ) {
+    const entryToDelete = budgetEntries.find((entry) => entry.id === entryId);
+
+    if (!entryToDelete || !canDeleteBudgetEntryFromLedger(entryToDelete)) {
+      return;
+    }
+
+    if (entryToDelete.sourceRecurringEntryId) {
       setDeletedBudgetForecastIds((currentIds) =>
         currentIds.includes(entryId) ? currentIds : [...currentIds, entryId]
       );
@@ -4154,6 +4523,9 @@ export default function Home() {
       Object.values(saveTimers).forEach((timer) => window.clearTimeout(timer));
       if (eventSaveTimer.current) {
         window.clearTimeout(eventSaveTimer.current);
+      }
+      if (budgetSaveTimer.current) {
+        window.clearTimeout(budgetSaveTimer.current);
       }
     };
   }, []);
@@ -4403,6 +4775,60 @@ export default function Home() {
   }, [budgetEntryDrafts, deletedBudgetForecastIds, hasLoadedBudgetDrafts]);
 
   useEffect(() => {
+    if (!hasLoadedBudgetDrafts || hasRequestedBudgetSupabaseLoad.current) {
+      return;
+    }
+
+    hasRequestedBudgetSupabaseLoad.current = true;
+
+    async function loadBudgetSnapshot() {
+      const snapshot = await loadBudgetSnapshotFromSupabase();
+
+      if (!snapshot) {
+        setHasLoadedBudgetSupabaseSnapshot(true);
+        return;
+      }
+
+      if (snapshot.entries.length === 0 && snapshot.deletedForecastIds.length === 0) {
+        const seedSnapshot = await saveBudgetSnapshotToSupabase({
+          deletedForecastIds: deletedBudgetForecastIds,
+          entries: budgetEntryDrafts
+        });
+
+        if (seedSnapshot) {
+          setBudgetEntryDrafts(seedSnapshot.entries);
+          setDeletedBudgetForecastIds(seedSnapshot.deletedForecastIds);
+        }
+
+        setHasLoadedBudgetSupabaseSnapshot(true);
+        return;
+      }
+
+      setBudgetEntryDrafts(snapshot.entries);
+      setDeletedBudgetForecastIds(snapshot.deletedForecastIds);
+      setHasLoadedBudgetSupabaseSnapshot(true);
+    }
+
+    void loadBudgetSnapshot();
+  }, [budgetEntryDrafts, deletedBudgetForecastIds, hasLoadedBudgetDrafts]);
+
+  useEffect(() => {
+    if (!hasLoadedBudgetDrafts || !hasLoadedBudgetSupabaseSnapshot) {
+      return;
+    }
+
+    queueBudgetSnapshotSave({
+      deletedForecastIds: deletedBudgetForecastIds,
+      entries: budgetEntryDrafts
+    });
+  }, [
+    budgetEntryDrafts,
+    deletedBudgetForecastIds,
+    hasLoadedBudgetDrafts,
+    hasLoadedBudgetSupabaseSnapshot
+  ]);
+
+  useEffect(() => {
     let isCancelled = false;
 
     try {
@@ -4470,7 +4896,7 @@ export default function Home() {
               setLocationAddressBook(
                 mergeLocationAddressBookWithEvents(
                   normalizeLocationAddressBookEntries(parsedLocations),
-                  eventEntryDrafts
+                  fallbackEventEntriesForAddressBook.current
                 )
               );
               setHasLoadedLocationAddressBook(true);
@@ -4488,7 +4914,9 @@ export default function Home() {
 
     window.setTimeout(() => {
       if (!isCancelled) {
-        setLocationAddressBook(buildLocationAddressBookEntries(eventEntryDrafts));
+        setLocationAddressBook(
+          buildLocationAddressBookEntries(fallbackEventEntriesForAddressBook.current)
+        );
         setHasLoadedLocationAddressBook(true);
       }
     }, 0);
@@ -4496,7 +4924,7 @@ export default function Home() {
     return () => {
       isCancelled = true;
     };
-  }, [eventEntryDrafts]);
+  }, []);
 
   useEffect(() => {
     if (!hasLoadedLocationAddressBook) {
@@ -4688,7 +5116,7 @@ export default function Home() {
           supabase
             .from("production_budget_lines")
             .select(
-              "id, production_step_id, production_step_task_id, description, amount, position"
+              "id, production_step_id, production_step_task_id, description, amount, budget_bucket, position"
             )
             .order("position", { ascending: true })
         ]);
@@ -5084,6 +5512,11 @@ function LocationAddressBookCard({
 
   return (
     <article className="location-address-book-card">
+      <div className="location-address-book-card-header">
+        <strong>{location.locationName || "Location name"}</strong>
+        <span>{location.address || "Address"}</span>
+      </div>
+
       <div className="location-address-book-fields">
         <label>
           Location name
@@ -5212,7 +5645,14 @@ function EventCard({
   const eventBudgetLines =
     entry.budgetLines && entry.budgetLines.length > 0
       ? entry.budgetLines
-      : [{ id: "event-budget-line-default", amount: 0, description: "" }];
+      : ([
+          {
+            id: "event-budget-line-default",
+            amount: 0,
+            bucket: "events",
+            description: ""
+          }
+        ] satisfies ProductionBudgetLine[]);
 
   function selectLocation(locationId: string) {
     const location = locations.find((candidate) => candidate.id === locationId);
@@ -5247,6 +5687,7 @@ function EventCard({
         {
           id: `event-budget-line-${Date.now()}`,
           amount: 0,
+          bucket: "events",
           description: ""
         }
       ]
@@ -5260,7 +5701,14 @@ function EventCard({
       budgetLines:
         remainingLines.length > 0
           ? remainingLines
-          : [{ id: `event-budget-line-${Date.now()}`, amount: 0, description: "" }]
+          : ([
+              {
+                id: `event-budget-line-${Date.now()}`,
+                amount: 0,
+                bucket: "events",
+                description: ""
+              }
+            ] satisfies ProductionBudgetLine[])
     });
   }
 
@@ -5389,6 +5837,7 @@ function EventCard({
                 line={line}
                 onDelete={deleteEventBudgetLine}
                 onUpdate={updateEventBudgetLine}
+                showBucket
               />
             ))}
           </div>
@@ -5429,17 +5878,39 @@ function EventCard({
 function EventBudgetLineRow({
   line,
   onDelete,
-  onUpdate
+  onUpdate,
+  showBucket = false
 }: {
   line: ProductionBudgetLine;
   onDelete: (lineId: string) => void;
   onUpdate: (lineId: string, updates: Partial<ProductionBudgetLine>) => void;
+  showBucket?: boolean;
 }) {
   const [isActionsOpen, setIsActionsOpen] = useState(false);
   const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
 
   return (
-    <div className="event-budget-line">
+    <div className={showBucket ? "event-budget-line event-budget-line-with-bucket" : "event-budget-line"}>
+      {showBucket ? (
+        <label>
+          Bucket
+          <select
+            aria-label="Event budget bucket"
+            onChange={(event) =>
+              onUpdate(line.id, {
+                bucket: event.target.value as BudgetSourceBucket
+              })
+            }
+            value={getEventBudgetLineBucket(line)}
+          >
+            {eventBudgetBucketOptions.map((bucket) => (
+              <option key={bucket.value} value={bucket.value}>
+                {bucket.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <label>
         Budget reason
         <input
@@ -5477,7 +5948,7 @@ function EventBudgetLineRow({
                 onChange={(event) => setIsDeleteConfirmed(event.target.checked)}
                 type="checkbox"
               />
-              Confirm delete
+              Enable
             </label>
             <button
               aria-label="Delete event budget line"
@@ -5522,6 +5993,35 @@ function BudgetView({
   onEntryChange: (entryId: string, updates: Partial<BudgetEntry>) => void;
 }) {
   const summary = getBudgetSummary(entries);
+  const [isMoreAnalyticsOpen, setIsMoreAnalyticsOpen] = useState(false);
+  const [ledgerSort, setLedgerSort] = useState<{
+    direction: SortDirection;
+    key: BudgetLedgerSortKey;
+  }>({
+    direction: "descending",
+    key: "date"
+  });
+  const sortedEntries = useMemo(
+    () => sortBudgetEntriesForLedger(entries, ledgerSort.key, ledgerSort.direction),
+    [entries, ledgerSort]
+  );
+
+  function updateLedgerSort(nextKey: BudgetLedgerSortKey) {
+    setLedgerSort((currentSort) => {
+      if (currentSort.key !== nextKey) {
+        return {
+          direction: "ascending",
+          key: nextKey
+        };
+      }
+
+      return {
+        direction:
+          currentSort.direction === "ascending" ? "descending" : "ascending",
+        key: nextKey
+      };
+    });
+  }
 
   return (
     <>
@@ -5542,7 +6042,7 @@ function BudgetView({
         </article>
         <article className="metric-card budget-metric-card">
           <span>Total spent</span>
-          <strong className="amount-expense">{formatCurrency(summary.totalSpent)}</strong>
+          <strong className="amount-expense">{formatSpentCurrency(summary.totalSpent)}</strong>
         </article>
         <article className="metric-card budget-metric-card">
           <span>Current Balance</span>
@@ -5552,11 +6052,13 @@ function BudgetView({
         </article>
         <article className="metric-card budget-metric-card">
           <span>Projected earn month ahead</span>
-          <strong>{formatCurrency(summary.potentialEarn)}</strong>
+          <strong className="amount-positive">{formatCurrency(summary.potentialEarn)}</strong>
         </article>
         <article className="metric-card budget-metric-card">
           <span>Projected spend month ahead</span>
-          <strong>{formatCurrency(summary.upcomingSpend)}</strong>
+          <strong className="amount-expense">
+            {formatSpentCurrency(summary.upcomingSpend)}
+          </strong>
         </article>
         <article className="metric-card budget-metric-card">
           <span>Projected balance month ahead</span>
@@ -5564,6 +6066,74 @@ function BudgetView({
             {formatCurrency(summary.upcomingBalance)}
           </strong>
         </article>
+      </section>
+
+      <section className="budget-more-analytics" aria-label="More budget analytics">
+        <button
+          aria-expanded={isMoreAnalyticsOpen}
+          className="budget-more-analytics-button"
+          onClick={() => setIsMoreAnalyticsOpen((current) => !current)}
+          type="button"
+        >
+          <span>More analytics</span>
+          <ChevronDown size={20} aria-hidden />
+        </button>
+        <div className="budget-more-analytics-panel" hidden={!isMoreAnalyticsOpen}>
+          <section className="budget-bucket-grid" aria-label="Budget source buckets">
+            {budgetSummaryBucketOptions.map((bucket) => (
+              <article className="metric-card budget-metric-card" key={`${bucket.value}-history`}>
+                <span>{bucket.label} since start</span>
+                <strong
+                  className={getBudgetBucketToneClass(
+                    bucket.value,
+                    summary.bucketSummaries[bucket.value].historical
+                  )}
+                >
+                  {formatCurrency(summary.bucketSummaries[bucket.value].historical)}
+                </strong>
+              </article>
+            ))}
+            {budgetSummaryBucketOptions.map((bucket) => (
+              <article className="metric-card budget-metric-card" key={`${bucket.value}-upcoming`}>
+                <span>{bucket.label} month ahead</span>
+                <strong
+                  className={getBudgetBucketToneClass(
+                    bucket.value,
+                    summary.bucketSummaries[bucket.value].upcoming
+                  )}
+                >
+                  {formatCurrency(summary.bucketSummaries[bucket.value].upcoming)}
+                </strong>
+              </article>
+            ))}
+          </section>
+          <section className="budget-graph-placeholder-grid" aria-label="Future budget graphs">
+            <article className="budget-graph-placeholder">
+              <span>Cashflow evolution</span>
+              <div className="budget-line-chart" aria-hidden>
+                <i />
+                <i />
+                <i />
+                <i />
+                <i />
+                <svg viewBox="0 0 320 120" role="presentation">
+                  <polyline points="0,92 48,78 96,84 144,48 192,60 240,34 320,42" />
+                </svg>
+              </div>
+            </article>
+            <article className="budget-graph-placeholder">
+              <span>Bucket mix over time</span>
+              <div className="budget-bar-chart" aria-hidden>
+                {[42, 58, 36, 64, 50, 72].map((height, index) => (
+                  <div className="budget-bar" key={index}>
+                    <b style={{ height: `${height}%` }} />
+                    <b style={{ height: `${Math.max(18, 92 - height)}%` }} />
+                  </div>
+                ))}
+              </div>
+            </article>
+          </section>
+        </div>
       </section>
 
       <section className="budget-ledger panel" aria-label="Budget ledger">
@@ -5582,15 +6152,41 @@ function BudgetView({
           <table className="budget-table">
             <thead>
               <tr>
-                <th scope="col">Date</th>
-                <th scope="col">Description</th>
-                <th scope="col">Amount</th>
-                <th scope="col">Type</th>
+                <SortableBudgetHeader
+                  label="Date"
+                  sortKey="date"
+                  activeSort={ledgerSort}
+                  onSort={updateLedgerSort}
+                />
+                <SortableBudgetHeader
+                  label="Bucket"
+                  sortKey="bucket"
+                  activeSort={ledgerSort}
+                  onSort={updateLedgerSort}
+                />
+                <SortableBudgetHeader
+                  label="Description"
+                  sortKey="description"
+                  activeSort={ledgerSort}
+                  onSort={updateLedgerSort}
+                />
+                <SortableBudgetHeader
+                  label="Amount"
+                  sortKey="amount"
+                  activeSort={ledgerSort}
+                  onSort={updateLedgerSort}
+                />
+                <SortableBudgetHeader
+                  label="Type"
+                  sortKey="type"
+                  activeSort={ledgerSort}
+                  onSort={updateLedgerSort}
+                />
                 <th scope="col">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {entries.map((entry) => (
+              {sortedEntries.map((entry) => (
                 <BudgetEntryRow
                   entry={entry}
                   key={entry.id}
@@ -5603,6 +6199,53 @@ function BudgetView({
         </div>
       </section>
     </>
+  );
+}
+
+function SortableBudgetHeader({
+  activeSort,
+  label,
+  onSort,
+  sortKey
+}: {
+  activeSort: {
+    direction: SortDirection;
+    key: BudgetLedgerSortKey;
+  };
+  label: string;
+  onSort: (sortKey: BudgetLedgerSortKey) => void;
+  sortKey: BudgetLedgerSortKey;
+}) {
+  const isActive = activeSort.key === sortKey;
+
+  return (
+    <th
+      aria-sort={
+        isActive
+          ? activeSort.direction === "ascending"
+            ? "ascending"
+            : "descending"
+          : "none"
+      }
+      scope="col"
+    >
+      <button
+        className={isActive ? "budget-sort-button is-active" : "budget-sort-button"}
+        onClick={() => onSort(sortKey)}
+        type="button"
+      >
+        <span>{label}</span>
+        <ChevronDown
+          aria-hidden
+          className={
+            isActive && activeSort.direction === "ascending"
+              ? "budget-sort-icon is-ascending"
+              : "budget-sort-icon"
+          }
+          size={14}
+        />
+      </button>
+    </th>
   );
 }
 
@@ -5622,6 +6265,8 @@ function BudgetEntryRow({
   const signedAmount = getBudgetSignedAmount(entry);
   const paymentType = getBudgetPaymentType(entry);
   const isAutoRecurringEntry = Boolean(entry.generated && entry.sourceRecurringEntryId);
+  const generatedSourceLabel = getBudgetGeneratedSourceLabel(entry);
+  const canUseLedgerActions = canDeleteBudgetEntryFromLedger(entry);
 
   useEffect(() => {
     const input = descriptionInputRef.current;
@@ -5630,8 +6275,9 @@ function BudgetEntryRow({
       return;
     }
 
+    const minHeight = Number.parseFloat(window.getComputedStyle(input).minHeight);
     input.style.height = "auto";
-    input.style.height = `${input.scrollHeight}px`;
+    input.style.height = `${Math.max(input.scrollHeight, minHeight || 0)}px`;
   }, [entry.description]);
 
   return (
@@ -5647,18 +6293,43 @@ function BudgetEntryRow({
           value={entry.date}
         />
       </td>
+      <td className="budget-bucket-column" data-label="Bucket">
+        <select
+          aria-label={`${entry.description} source bucket`}
+          disabled={entry.generated}
+          onChange={(event) =>
+            onEntryChange(entry.id, {
+              bucket: event.target.value as BudgetSourceBucket
+            })
+          }
+          value={getBudgetSourceBucket(entry)}
+        >
+          {budgetSourceBucketOptions.map((bucket) => (
+            <option key={bucket.value} value={bucket.value}>
+              {bucket.label}
+            </option>
+          ))}
+        </select>
+      </td>
       <td className="budget-description-cell" data-label="Description">
         <textarea
           aria-label={`${entry.description} description`}
           disabled={entry.generated}
           onChange={(event) => {
+            const minHeight = Number.parseFloat(
+              window.getComputedStyle(event.target).minHeight
+            );
             event.target.style.height = "auto";
-            event.target.style.height = `${event.target.scrollHeight}px`;
+            event.target.style.height = `${Math.max(
+              event.target.scrollHeight,
+              minHeight || 0
+            )}px`;
             onEntryChange(entry.id, {
               description: event.target.value
             });
           }}
           ref={descriptionInputRef}
+          rows={1}
           value={entry.description}
         />
       </td>
@@ -5687,7 +6358,7 @@ function BudgetEntryRow({
               type: entry.type === "recurring" ? "recurring" : "one-off"
             });
           }}
-          value={amountInput}
+          value={entry.generated ? String(signedAmount) : amountInput}
         />
       </td>
       <td className="budget-type-column" data-label="Type">
@@ -5713,7 +6384,6 @@ function BudgetEntryRow({
             <option value="one-off">One off</option>
             <option value="recurring">Recurring</option>
           </select>
-          {entry.generated ? <span className="budget-generated-note">Auto-created</span> : null}
           {paymentType === "recurring" && !isAutoRecurringEntry ? (
             <div className="budget-recurring-options">
               <select
@@ -5746,45 +6416,51 @@ function BudgetEntryRow({
         </div>
       </td>
       <td className="budget-actions-column" data-label="Actions">
-        <div className="budget-actions-cell">
-          <button
-            aria-expanded={isActionsOpen}
-            aria-label={`${isActionsOpen ? "Hide" : "Show"} ${entry.description} actions`}
-            className="budget-row-action-button"
-            onClick={() => setIsActionsOpen((current) => !current)}
-            type="button"
-          >
-            <Pencil size={15} aria-hidden />
-          </button>
-          {isActionsOpen ? (
-            <div className="budget-action-panel">
-              {isAutoRecurringEntry ? (
-                <div className="budget-auto-details">
-                  <span>Auto-created</span>
+        {canUseLedgerActions ? (
+          <div className="budget-actions-cell">
+            <button
+              aria-expanded={isActionsOpen}
+              aria-label={`${isActionsOpen ? "Hide" : "Show"} ${entry.description} actions`}
+              className="budget-row-action-button"
+              onClick={() => setIsActionsOpen((current) => !current)}
+              type="button"
+            >
+              <Pencil size={15} aria-hidden />
+            </button>
+            {isActionsOpen ? (
+              <div className="budget-action-panel">
+                {isAutoRecurringEntry ? (
+                  <div className="budget-auto-details">
+                    <span>Auto-created</span>
+                  </div>
+                ) : null}
+                <div className="budget-delete-cell">
+                  <label>
+                    <input
+                      checked={isDeleteConfirmed}
+                      onChange={(event) => setIsDeleteConfirmed(event.target.checked)}
+                      type="checkbox"
+                    />
+                    Enable
+                  </label>
+                  <button
+                    aria-label={`Delete ${entry.description}`}
+                    className="delete-campaign-task-button"
+                    disabled={!isDeleteConfirmed}
+                    onClick={() => onDelete(entry.id)}
+                    type="button"
+                  >
+                    <Trash2 size={16} aria-hidden />
+                  </button>
                 </div>
-              ) : null}
-              <div className="budget-delete-cell">
-                <label>
-                  <input
-                    checked={isDeleteConfirmed}
-                    onChange={(event) => setIsDeleteConfirmed(event.target.checked)}
-                    type="checkbox"
-                  />
-                  Enable
-                </label>
-                <button
-                  aria-label={`Delete ${entry.description}`}
-                  className="delete-campaign-task-button"
-                  disabled={!isDeleteConfirmed}
-                  onClick={() => onDelete(entry.id)}
-                  type="button"
-                >
-                  <Trash2 size={16} aria-hidden />
-                </button>
               </div>
-            </div>
-          ) : null}
-        </div>
+            ) : null}
+          </div>
+        ) : (
+          <span className="budget-source-lock">
+            Edit in {generatedSourceLabel ?? "source"}
+          </span>
+        )}
       </td>
     </tr>
   );
@@ -6450,7 +7126,14 @@ function ProductionBudgetLineEditor({
   const visibleBudgetLines =
     budgetLines.length > 0
       ? budgetLines
-      : [{ amount: 0, description: "", id: `${idPrefix}-empty` }];
+      : ([
+          {
+            amount: 0,
+            bucket: "production",
+            description: "",
+            id: `${idPrefix}-empty`
+          }
+        ] satisfies ProductionBudgetLine[]);
 
   function updateBudgetLine(
     lineId: string,
@@ -6467,6 +7150,7 @@ function ProductionBudgetLineEditor({
       ...normalizeProductionBudgetLines(visibleBudgetLines),
       {
         amount: 0,
+        bucket: "production",
         description: "",
         id: `${idPrefix}-${Date.now()}`
       }
@@ -6480,35 +7164,13 @@ function ProductionBudgetLineEditor({
   return (
     <div className="production-budget-lines">
       {visibleBudgetLines.map((line) => (
-        <div className="production-budget-line" key={line.id}>
-          <label>
-            <span>Budget</span>
-            <input
-              aria-label="Production budget description"
-              onChange={(event) =>
-                updateBudgetLine(line.id, { description: event.target.value })
-              }
-              placeholder="Budget reason"
-              value={line.description}
-            />
-          </label>
-          <label>
-            <span>Amount</span>
-            <ProductionBudgetAmountInput
-              amount={line.amount}
-              onChange={(amount) => updateBudgetLine(line.id, { amount })}
-            />
-          </label>
-          <button
-            aria-label={`Delete ${line.description || "production budget line"}`}
-            className="delete-campaign-task-button production-budget-delete-button"
-            disabled={!budgetLines.some((budgetLine) => budgetLine.id === line.id)}
-            onClick={() => deleteBudgetLine(line.id)}
-            type="button"
-          >
-            <Trash2 size={16} aria-hidden />
-          </button>
-        </div>
+        <ProductionBudgetLineRow
+          canDelete={budgetLines.some((budgetLine) => budgetLine.id === line.id)}
+          key={line.id}
+          line={line}
+          onDelete={deleteBudgetLine}
+          onUpdate={updateBudgetLine}
+        />
       ))}
       <button
         className="add-campaign-task-button production-budget-add-button"
@@ -6530,8 +7192,9 @@ function ProductionBudgetAmountInput({
   onChange: (amount: number) => void;
 }) {
   const [amountInput, setAmountInput] = useState(
-    amount === 0 ? "" : String(amount)
+    amount === 0 ? "" : formatEditableAmount(amount)
   );
+  const [isFocused, setIsFocused] = useState(false);
 
   return (
     <input
@@ -6540,7 +7203,8 @@ function ProductionBudgetAmountInput({
       inputMode="decimal"
       onBlur={() => {
         const parsedAmount = parseEditableAmount(amountInput);
-        setAmountInput(parsedAmount ? String(parsedAmount) : "");
+        setIsFocused(false);
+        setAmountInput(parsedAmount ? formatEditableAmount(parsedAmount) : "");
       }}
       onChange={(event) => {
         const nextAmountInput = event.target.value;
@@ -6554,16 +7218,91 @@ function ProductionBudgetAmountInput({
 
         onChange(parsedAmount);
       }}
+      onFocus={() => setIsFocused(true)}
       placeholder="-20 or 100"
       value={amountInput}
     />
   );
 }
 
+function ProductionBudgetLineRow({
+  canDelete,
+  line,
+  onDelete,
+  onUpdate
+}: {
+  canDelete: boolean;
+  line: ProductionBudgetLine;
+  onDelete: (lineId: string) => void;
+  onUpdate: (lineId: string, updates: Partial<ProductionBudgetLine>) => void;
+}) {
+  const [isActionsOpen, setIsActionsOpen] = useState(false);
+  const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
+
+  return (
+    <div className="production-budget-line">
+      <label>
+        <span>Budget</span>
+        <input
+          aria-label="Production budget description"
+          onChange={(event) =>
+            onUpdate(line.id, { description: event.target.value })
+          }
+          placeholder="Budget reason"
+          value={line.description}
+        />
+      </label>
+      <label>
+        <span>Amount</span>
+        <ProductionBudgetAmountInput
+          amount={line.amount}
+          onChange={(amount) => onUpdate(line.id, { amount })}
+        />
+      </label>
+      <div className="production-budget-actions-cell">
+        <button
+          aria-expanded={isActionsOpen}
+          aria-label={`${isActionsOpen ? "Hide" : "Show"} production budget line actions`}
+          className="budget-row-action-button"
+          onClick={() => setIsActionsOpen((current) => !current)}
+          type="button"
+        >
+          <Pencil size={15} aria-hidden />
+        </button>
+        {isActionsOpen ? (
+          <div className="production-budget-action-panel">
+            <label>
+              <input
+                checked={isDeleteConfirmed}
+                disabled={!canDelete}
+                onChange={(event) => setIsDeleteConfirmed(event.target.checked)}
+                type="checkbox"
+              />
+              Enable
+            </label>
+            <button
+              aria-label={`Delete ${line.description || "production budget line"}`}
+              className="delete-campaign-task-button production-budget-delete-button"
+              disabled={!canDelete || !isDeleteConfirmed}
+              onClick={() => onDelete(line.id)}
+              type="button"
+            >
+              <Trash2 size={16} aria-hidden />
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function normalizeProductionBudgetLines(budgetLines: ProductionBudgetLine[]) {
   return budgetLines.filter(
     (line) => line.amount !== 0 || line.description.trim().length > 0
-  );
+  ).map((line) => ({
+    ...line,
+    bucket: normalizeBudgetSourceBucket(line.bucket ?? "production")
+  }));
 }
 
 function MarketingView({
@@ -8048,11 +8787,13 @@ function DashboardBudgetPreview({
         </article>
         <article className="metric-card budget-metric-card dashboard-budget-projected-earn">
           <span>Projected earn month ahead</span>
-          <strong>{formatCurrency(summary.potentialEarn)}</strong>
+          <strong className="amount-positive">{formatCurrency(summary.potentialEarn)}</strong>
         </article>
         <article className="metric-card budget-metric-card dashboard-budget-projected-spend">
           <span>Projected spend month ahead</span>
-          <strong>{formatCurrency(summary.upcomingSpend)}</strong>
+          <strong className="amount-expense">
+            {formatSpentCurrency(summary.upcomingSpend)}
+          </strong>
         </article>
         <article className="metric-card budget-metric-card dashboard-budget-projected-balance">
           <span>Projected balance month ahead</span>

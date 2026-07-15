@@ -1,9 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+type BudgetSourceBucket = "events" | "production" | "marketing" | "other";
 type ProductionBudgetLine = {
   id: string;
   amount: number;
+  bucket?: BudgetSourceBucket;
   description: string;
 };
 type EventEntry = {
@@ -61,6 +63,7 @@ type EventBudgetLineRow = {
   event_id: string;
   description: string;
   amount: number | string;
+  budget_bucket: BudgetSourceBucket | null;
   position: number;
 };
 
@@ -81,7 +84,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Events load failed." },
+      { error: getErrorMessage(error, "Events load failed.") },
       { status: 500 }
     );
   }
@@ -105,7 +108,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Events save failed." },
+      { error: getErrorMessage(error, "Events save failed.") },
       { status: 500 }
     );
   }
@@ -128,7 +131,7 @@ async function loadEventsSnapshot() {
       .order("event_date", { ascending: false }),
     supabase
       .from("event_budget_lines")
-      .select("id, event_id, description, amount, position")
+      .select("id, event_id, description, amount, budget_bucket, position")
       .order("position", { ascending: true })
   ]);
 
@@ -161,8 +164,7 @@ async function saveEventsSnapshot({
     contact_name: location.contactName,
     contact_phone: location.contactPhone,
     contact_notes: location.contactNotes,
-    source: "app",
-    ...(location.dbId ? { id: location.dbId } : {})
+    source: "app"
   }));
 
   if (locationRows.length > 0) {
@@ -208,8 +210,7 @@ async function saveEventsSnapshot({
       location_url: entry.locationUrl,
       address: entry.address,
       address_url: entry.addressUrl,
-      source: "app",
-      ...(entry.dbId ? { id: entry.dbId } : {})
+      source: "app"
     };
   });
 
@@ -247,6 +248,7 @@ async function saveEventsSnapshot({
       event_id: eventId,
       description: line.description,
       amount: line.amount,
+      budget_bucket: normalizeEventBudgetSourceBucket(line.bucket),
       position: index + 1
     }));
   });
@@ -271,8 +273,8 @@ async function saveEventsSnapshot({
 
 function normalizeLocationForSave(location: LocationAddressBookEntry) {
   const stableKey =
-    createStableId(location.id) ||
     createStableId(`${location.locationName}-${location.address}`) ||
+    createStableId(location.id) ||
     `location-${Date.now()}`;
 
   return {
@@ -405,6 +407,7 @@ function mapBudgetLines(rows: EventBudgetLineRow[]) {
     .sort((firstLine, secondLine) => firstLine.position - secondLine.position)
     .map((line) => ({
       amount: Number(line.amount),
+      bucket: normalizeEventBudgetSourceBucket(line.budget_bucket),
       description: line.description,
       id: line.id
     }));
@@ -415,9 +418,20 @@ function mapBudgetLines(rows: EventBudgetLineRow[]) {
 }
 
 function normalizeBudgetLines(budgetLines: ProductionBudgetLine[]) {
-  return budgetLines.filter(
-    (line) => line.description.trim().length > 0 || line.amount !== 0
-  );
+  return budgetLines
+    .filter((line) => line.description.trim().length > 0 || line.amount !== 0)
+    .map((line) => ({
+      ...line,
+      bucket: normalizeEventBudgetSourceBucket(line.bucket)
+    }));
+}
+
+function normalizeEventBudgetSourceBucket(value?: string | null): BudgetSourceBucket {
+  if (value === "marketing" || value === "other") {
+    return value;
+  }
+
+  return "events";
 }
 
 function isAuthorizedEventsRequest(request: NextRequest, requiresWrite: boolean) {
@@ -536,4 +550,21 @@ function parseDatabaseDateKey(value: string) {
 
   const [, year, month, day] = match;
   return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+
+  return fallback;
 }

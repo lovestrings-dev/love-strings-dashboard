@@ -14,12 +14,16 @@ Includes:
 - YouTube metric import script for channel, latest regular video, and latest Short stats.
 - Vercel deployment with Basic Auth protection.
 
+Story note:
+- Marketing was the first genuinely useful working module. While new modules were still being designed and wired, Yuliia could already use the deployed app in daily campaign work.
+
 ## Versioning Rules
 
 - Use `Beta 1.x` for deployed beta builds while the app is still evolving quickly.
 - Increase the minor beta number for meaningful UI, backend, API, or workflow updates, for example `Beta 1.1`.
 - Do not bump the version for normal app data changes such as editing campaign task names, changing statuses, or adding campaign days.
 - Record the version in this changelog, update the visible app label, then commit and deploy.
+- Each beta should have one main functional-module headline plus a practical bundle of backlog fixes, UI tweaks, and small cross-module improvements found during testing.
 
 ## Planned Next Versions
 
@@ -142,6 +146,7 @@ Post-release reliability update:
 - Added Vercel Cron configuration for daily platform metrics refresh at `05:00 UTC`.
 - Disabled the GitHub Actions scheduled triggers while keeping manual workflow dispatch as fallback.
 - Added an app-open refresh safety check that runs only when today's Europe/Vienna metric snapshot is missing.
+- Verified on 2026-07-15 that the Vercel scheduler created fresh Supabase platform metric snapshots automatically around 07:04 Vienna time.
 
 ## Beta 1.5
 
@@ -181,6 +186,35 @@ Beta 1.5 release checklist:
 - Smoke-test Events tab on local desktop and mobile widths.
 - Smoke-test deployed app with Basic Auth after Vercel release.
 - Commit/push and deploy through Vercel.
+
+## Beta 1.6
+
+Status: Release candidate prepared locally
+
+Release theme:
+
+Fully functional Budget module plus post-Beta 1.5 fixes and small cross-module refinements.
+
+Core scope:
+- Budget now has a server-side API route and Supabase-backed tables for editable manual ledger rows.
+- Manual Budget rows can sync across devices through Supabase instead of staying only in browser local storage.
+- Generated Budget rows from Events, Production, Marketing, and recurring plans remain derived/read-only where appropriate, avoiding duplicate stored financial records.
+- Hidden/deleted generated Budget rows are persisted as generated-row preferences so intentional cleanup survives refresh and cross-device use.
+- Budget summary cards keep the existing actual-versus-projected logic: historical income/spend/current balance through today, projected income/spend/balance one month ahead.
+- SUNO is preserved as a monthly recurring payment through 04/04/2027 in the shared Budget data.
+- Added the first Budget source-bucket analysis layer for Events, Production, and Marketing, with three since-start bucket cards and three one-month-forward bucket cards.
+- Added a bucket selector for manual Budget rows and automatic bucket assignment for generated Events, Production, Marketing, and recurring rows.
+- Tightened Budget ledger source-of-truth rules: Events/Marketing/Production generated rows are no longer editable or deletable from Budget, while recurring forecast rows and manual Budget rows keep Budget-side controls.
+- Added Budget ledger sorting by Date, Bucket, Description, Amount, and Type, with one active sort at a time.
+- Moved deeper Budget analytics behind a `More analytics` dropdown with first placeholder graph visuals for future cashflow and bucket-mix charts.
+- Polished Budget amount display and inputs: expense cards show minus signs, production/marketing/event amount fields support comma formatting, and ledger columns were tightened for better description space.
+
+Backlog already identified for Beta 1.6:
+- Address Book new-location persistence was fixed so newly created locations can survive refresh and appear in the new-event dropdown.
+- Marketing mobile UX follow-up from Yuliia: when adding a new task inside a campaign day and typing the task name, the screen can jump slightly up/down; revisit after the Budget module work is complete.
+
+Storytelling angle:
+- Beta 1.6 should be framed as the app learning money properly: not only tracking tasks and events, but turning income, expenses, recurring payments, and module-generated costs into a shared financial picture.
 
 ## Version 1.0
 

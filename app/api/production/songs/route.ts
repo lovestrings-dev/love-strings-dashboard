@@ -2,9 +2,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 type MarketingStatus = "not-started" | "in-progress" | "done";
+type BudgetSourceBucket = "events" | "production" | "marketing" | "other";
 type ProductionBudgetLine = {
   id: string;
   amount: number;
+  bucket?: BudgetSourceBucket;
   description: string;
 };
 type ExtraCampaignTask = {
@@ -173,6 +175,7 @@ async function saveProductionSong(song: ProductionSongConfig) {
       production_step_id: stepId,
       description: line.description,
       amount: line.amount,
+      budget_bucket: "production",
       position: index + 1
     }));
   });
@@ -236,6 +239,7 @@ async function saveProductionSong(song: ProductionSongConfig) {
           production_step_task_id: taskId,
           description: line.description,
           amount: line.amount,
+          budget_bucket: "production",
           position: index + 1
         }));
       });
@@ -259,9 +263,12 @@ async function saveProductionSong(song: ProductionSongConfig) {
 }
 
 function normalizeBudgetLines(budgetLines: ProductionBudgetLine[]) {
-  return budgetLines.filter(
-    (line) => line.description.trim().length > 0 || line.amount !== 0
-  );
+  return budgetLines
+    .filter((line) => line.description.trim().length > 0 || line.amount !== 0)
+    .map((line) => ({
+      ...line,
+      bucket: "production" as const
+    }));
 }
 
 function isAuthorizedProductionRequest(request: NextRequest) {
