@@ -18,6 +18,7 @@ type EventEntry = {
   locationUrl: string;
   address: string;
   addressUrl: string;
+  posterUrl?: string;
   budgetLines?: ProductionBudgetLine[];
 };
 type LocationAddressBookEntry = {
@@ -52,6 +53,7 @@ type EventRow = {
   event_date: string;
   event_name: string;
   event_url: string;
+  poster_url?: string | null;
   location_id: string | null;
   location_name: string;
   location_url: string;
@@ -126,7 +128,7 @@ async function loadEventsSnapshot() {
     supabase
       .from("events")
       .select(
-        "id, stable_key, event_date, event_name, event_url, location_id, location_name, location_url, address, address_url"
+        "id, stable_key, event_date, event_name, event_url, poster_url, location_id, location_name, location_url, address, address_url"
       )
       .order("event_date", { ascending: false }),
     supabase
@@ -205,6 +207,7 @@ async function saveEventsSnapshot({
       event_date: eventDate,
       event_name: entry.name,
       event_url: entry.nameUrl,
+      poster_url: entry.posterUrl ?? "",
       location_id: locationId,
       location_name: entry.locationName,
       location_url: entry.locationUrl,
@@ -316,7 +319,8 @@ function normalizeEventForSave(
       locationName: entry.locationName.trim() || "Location name",
       locationUrl: entry.locationUrl.trim(),
       name: entry.name.trim() || "Event",
-      nameUrl: entry.nameUrl.trim()
+      nameUrl: entry.nameUrl.trim(),
+      posterUrl: entry.posterUrl?.trim() ?? ""
     },
     locationId: matchingLocation
       ? locationIdByStableKey.get(matchingLocation.stableKey) ?? null
@@ -386,7 +390,8 @@ function mapEventsSnapshotRows({
       locationName: entry.location_name,
       locationUrl: entry.location_url,
       name: entry.event_name,
-      nameUrl: entry.event_url
+      nameUrl: entry.event_url,
+      posterUrl: entry.poster_url ?? ""
     })),
     locations: locations.map((location) => ({
       address: location.address,
@@ -418,12 +423,28 @@ function mapBudgetLines(rows: EventBudgetLineRow[]) {
 }
 
 function normalizeBudgetLines(budgetLines: ProductionBudgetLine[]) {
+  const seenLineFingerprints = new Set<string>();
+
   return budgetLines
     .filter((line) => line.description.trim().length > 0 || line.amount !== 0)
     .map((line) => ({
       ...line,
       bucket: normalizeEventBudgetSourceBucket(line.bucket)
-    }));
+    }))
+    .filter((line) => {
+      const fingerprint = [
+        line.description.trim().toLowerCase(),
+        Number(line.amount).toFixed(2),
+        line.bucket
+      ].join("::");
+
+      if (seenLineFingerprints.has(fingerprint)) {
+        return false;
+      }
+
+      seenLineFingerprints.add(fingerprint);
+      return true;
+    });
 }
 
 function normalizeEventBudgetSourceBucket(value?: string | null): BudgetSourceBucket {

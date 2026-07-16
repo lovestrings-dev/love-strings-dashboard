@@ -189,7 +189,7 @@ Beta 1.5 release checklist:
 
 ## Beta 1.6
 
-Status: Release candidate prepared locally
+Status: Released to production and verified; one post-release Budget follow-up identified for the next beta.
 
 Release theme:
 
@@ -209,12 +209,67 @@ Core scope:
 - Moved deeper Budget analytics behind a `More analytics` dropdown with first placeholder graph visuals for future cashflow and bucket-mix charts.
 - Polished Budget amount display and inputs: expense cards show minus signs, production/marketing/event amount fields support comma formatting, and ledger columns were tightened for better description space.
 
-Backlog already identified for Beta 1.6:
+Post-Beta 1.6 follow-ups:
 - Address Book new-location persistence was fixed so newly created locations can survive refresh and appear in the new-event dropdown.
+- Budget follow-up discovered after release: a newly added manual ledger row survived refresh, but its Budget-side delete action did not remove it afterward; leave the fix for the next beta rather than patching Beta 1.6.
 - Marketing mobile UX follow-up from Yuliia: when adding a new task inside a campaign day and typing the task name, the screen can jump slightly up/down; revisit after the Budget module work is complete.
 
 Storytelling angle:
 - Beta 1.6 should be framed as the app learning money properly: not only tracking tasks and events, but turning income, expenses, recurring payments, and module-generated costs into a shared financial picture.
+
+## Beta 1.7
+
+Status: Release candidate prepared locally
+
+Release theme:
+
+Platform analytics, Focus Queue improvements, and the practical follow-up fixes discovered after Beta 1.6.
+
+Already added locally since Beta 1.6:
+- Fixed the post-release manual Budget ledger delete bug.
+- Split the Budget ledger into visible upcoming rows and a hidden-by-default historical section behind `See more`.
+- Added first real Budget analytics graphs: Cashflow Evolution and Income vs Spend.
+- Started a shared visual language for line graphs: clean grid, thick line, compact points, small legend boxes, first/middle/latest labels, and bottom date labels.
+- Applied the improved graph language to Platforms graphs for YouTube, Instagram, YouTube Music, and Apple Music.
+- Added color-coded graph metrics:
+  - Instagram Followers: green.
+  - Instagram Accounts reached: amber.
+  - Instagram Views: blue.
+  - YouTube Subscribers: green.
+  - YouTube Lifetime Views: blue.
+  - YouTube Music Subscribers: green.
+  - YouTube Music Total Plays: blue.
+  - Apple Music Total Plays: blue.
+- Added YouTube `Lifetime Views` from the current YouTube Data API channel statistics and placed it as the second YouTube metric card after Subscribers.
+- Recalculated YouTube lifetime-view history in Supabase using the current API lifetime total plus real YouTube Studio daily view deltas, and removed earlier invented history rows.
+- Added small daily-change indicators to platform cards:
+  - Instagram Followers, Accounts reached, and Views.
+  - YouTube Subscribers and Lifetime Views.
+  - YouTube Music Subscribers and Total Plays.
+  - Apple Music Total Plays and Total Shazams, using latest CSV snapshot versus previous available snapshot.
+- Moved manual metric Refresh from Dashboard to Platforms because the Vercel scheduler is now the main path and manual refresh is mostly a platform-data action.
+- Added `Irrelevant` as a Marketing upload-task status for IG Upload and YT Upload, excluded from campaign completion and unfinished-task logic.
+- Refined Focus Queue mobile layout so category/status becomes a compact header and task text gets the full remaining width.
+- Focus Queue action now opens a compact status menu for source-linked Marketing and Production tasks.
+- Focus Queue now owns local `Other` tasks without creating a separate app tab.
+- Collapsed Focus Queue shows one Marketing reminder, one Production reminder, and up to three active Other tasks.
+- Expanded Focus Queue shows only active Other tasks that are not already visible in the header, plus a hidden history section for Done/Irrelevant tasks.
+- Other tasks can be added, edited, status-changed, archived via Done/Irrelevant, and temporarily deleted while the workflow is still being tested.
+- Other task rows match the compact Focus Queue row style; `Edit` opens one row into an editable form with title, due date, status, notes, protected spacing, and autoscroll.
+- Other tasks currently persist in local browser storage only; Supabase wiring is a future step before this becomes shared across Chrome, the internal browser, mobile, and Yuliia's device.
+- Added a compact Benchmark production card to Dashboard, matching the Benchmark campaign idea: a target to beat, not just a previous record.
+- Added today's Europe/Vienna date to the top header of every app module.
+- Added poster-style image URL support for Events, including a tall poster preview and a persisted Supabase `poster_url` field.
+- Refined Event poster UI so the poster thumbnail lives in the collapsed event header while the expanded details keep only the poster URL field.
+- Tightened the Dashboard Budget preview cards and fixed module header date placement across Dashboard, Marketing, Platforms, Events, Budget, and Roadmap.
+- Fixed Platforms header overflow on mobile after moving manual metric Refresh there.
+- Verified Benchmark campaign still chooses the highest completion percentage, and Benchmark production counts duration from the next step when an existing demo is already done, or from Demo for newer songs without a completed demo.
+- Confirmed all 27 current Production records have `Demo` as the earliest step by date.
+- Visible app label bumped to `Beta 1.7`.
+
+Deferred after Beta 1.7:
+- Wire `Other` tasks to Supabase once the local workflow is confirmed.
+- Roadmap work is likely the next larger module after this beta.
 
 ## Version 1.0
 

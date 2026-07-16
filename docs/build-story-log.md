@@ -468,9 +468,98 @@ Follow-up story angle:
 - Marketing includes campaign spends, ads, Canva, and promotion costs, including promotion linked to events.
 - This turns Budget from a ledger into a simple business mirror: are shows funding the project, are releases costing what we expected, and how much are we investing in attention?
 - First implementation step: Budget now has source buckets, six analytical cards, and a manual bucket selector.
+- Post-release reality beat: one manual Budget delete bug was found after Beta 1.6 was already live, so we decided not to hotfix the released version and instead carry the fix into the next beta. This is a useful story point: a beta is not a promise that nothing breaks; it is a controlled rhythm for learning from real use.
 
 Short script add-on:
 - "Once the money was finally stored properly, the next question became more interesting."
 - "Not just: are we positive or negative?"
 - "But: where does the money come from, and where does it go?"
 - "For musicians, that means three buckets: shows, production, and marketing."
+- "And then real use did what real use always does: it found the next small bug."
+- "We left the released beta stable and moved that fix into the next beta."
+
+### Reel: When One Number Taught Us To Name Data Properly
+
+Core story:
+- We added a new YouTube metric and at first it looked wrong: the app showed about 17.8K views while YouTube Studio showed about 1.4K.
+- The bug was not that the API was broken. The API was giving lifetime channel views, while the Studio table Dmitrii was looking at was a selected-period total.
+- The fix was partly technical and partly language: rename the metric to `Lifetime Views`, remove invented historical rows, and rebuild the history from the current API total plus real YouTube Studio daily deltas.
+- This is a useful creator-tech lesson: the dashboard is only as honest as the names of its metrics.
+
+Short script:
+- "Today the app gave me a number that looked completely wrong."
+- "YouTube Studio said 1.4K views. Our app said 17.8K."
+- "Turns out both were right. One was a period view, one was lifetime channel views."
+- "So we fixed the app, not by hiding the number, but by naming it correctly."
+
+Shot ideas:
+- Show the YouTube card with `Lifetime Views`.
+- Show the graph after cleanup.
+- Show the moment of confusion as a caption: "Wrong data? Or wrong label?"
+- End with: "Building your own tool means you also learn what your numbers really mean."
+
+### Reel: Tiny Daily Change Numbers
+
+Core story:
+- Platform cards started as static totals: followers, subscribers, plays, views.
+- The next improvement was small but meaningful: add daily change values like `(+3)` or `(-1)` beside the main number.
+- Green means growth, red means decline, muted means no change.
+- For Apple Music, because updates come from manual CSV uploads, the comparison is latest available snapshot versus previous available snapshot rather than yesterday.
+
+Short script:
+- "A total number tells you where you are."
+- "A tiny daily change tells you if you are moving."
+- "So we added the small numbers beside the big ones."
+- "It is not a huge feature, but it makes the dashboard feel alive."
+
+### Reel: The Focus Queue Becomes Actionable
+
+Core story:
+- Focus Queue started as a simple list of what matters next.
+- Then it became more practical: each task can now open its status choices directly from the Dashboard.
+- Marketing tasks can be Not started, In progress, Done, or Irrelevant.
+- Production tasks keep the production status model.
+- Other tasks became a small memory drawer inside Focus Queue rather than a full app tab.
+- The compact view shows one Marketing task, one Production task, and up to three active Other tasks.
+- The expanded view manages the remaining active Other tasks and keeps completed/irrelevant tasks in hidden history.
+- We intentionally leaned away from deletion: an idea that is irrelevant today may become useful later.
+
+Short script:
+- "The dashboard should not only tell me what to do."
+- "It should let me update the work without hunting through tabs."
+- "So Focus Queue started becoming a control surface."
+- "Small buttons, source-linked statuses, and fewer taps on mobile."
+
+Storytelling add-on:
+- "Not every task deserves a whole project board."
+- "Sometimes it is just: book a photoshoot, remember an idea, update one small thing."
+- "So instead of building another tab, we made Focus Queue remember those small things."
+- "Done tasks disappear from the daily view, but the app still remembers them."
+- "That matters because creative work is full of ideas that look irrelevant today and useful tomorrow."
+
+Beta-release beat:
+- We intentionally stopped before wiring Other Tasks to Supabase.
+- The local workflow now feels right: quick add, compact active list, history instead of deletion, and editing without losing mobile focus.
+- Tomorrow's job is to make this shared across devices and users.
+- This is a useful product-build story: first make the habit feel natural, then make it permanent and shared.
+- Beta 1.7 also became a "small wins add up" release: platform graphs got a shared visual language, the dashboard got benchmark targets, Events got poster thumbnails, and the app header started showing today's date like a daily command screen.
+- Before release prep, we checked that the production benchmark logic fits the real records: every current song still starts with Demo as the earliest step, so existing-demo songs can fairly count from the next production step.
+
+Short script add-on:
+- "Today we solved one of the least glamorous parts of music life: all the small things that do not fit anywhere."
+- "Book the photoshoot, remember a post idea, check one admin task."
+- "We tested it locally inside the Focus Queue first."
+- "Tomorrow we make it shared, so it becomes real app memory."
+- "We also added a musician-style benchmark: not just what is next, but what record am I trying to beat?"
+
+### Reel: Irrelevant Is A Real Status
+
+Core story:
+- In a real release campaign, not every piece of content belongs on every platform.
+- A video may be useful for Instagram but not for YouTube, or the other way around.
+- Before this, those tasks looked unfinished forever.
+- Adding `Irrelevant` made the campaign progress more honest: if a platform upload does not apply, it should not punish the completion percentage.
+
+Caption angle:
+
+Sometimes better software is not about adding more automation. Sometimes it is about adding one word that describes real life.

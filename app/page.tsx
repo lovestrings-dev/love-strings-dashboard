@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import type { ReactNode } from "react";
+import { forwardRef } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUpRight,
@@ -26,7 +27,7 @@ import {
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 type Section = (typeof sections)[number];
-type MarketingStatus = "not-started" | "in-progress" | "done";
+type MarketingStatus = "not-started" | "in-progress" | "done" | "irrelevant";
 type CampaignDayProgressStatus = "empty" | "partial" | "complete";
 type ProductionBudgetLine = {
   id: string;
@@ -45,8 +46,33 @@ type CampaignTaskItem = {
   label: string;
   status: MarketingStatus;
 };
+type FocusQueueActionTarget =
+  | {
+      campaignId: string;
+      dayNumber: number;
+      kind: "marketing";
+      taskKey?: keyof CampaignDay["statuses"];
+      extraTaskId?: string;
+    }
+  | {
+      extraTaskId?: string;
+      kind: "production";
+      songId: string;
+      stepId: string;
+      taskKey: "main" | "extra";
+    };
 type FocusQueueItem = CampaignTaskItem & {
+  actionTarget?: FocusQueueActionTarget;
+  dueDate?: string;
+  notes?: string;
   source: "Marketing" | "Production" | "Other";
+};
+type OtherTask = {
+  id: string;
+  dueDate: string;
+  notes: string;
+  status: MarketingStatus;
+  title: string;
 };
 type CampaignDay = {
   dayNumber: number;
@@ -128,6 +154,7 @@ type EventEntry = {
   locationUrl: string;
   address: string;
   addressUrl: string;
+  posterUrl?: string;
   budgetLines?: ProductionBudgetLine[];
   earnedAmount?: number;
   earnedDescription?: string;
@@ -195,6 +222,10 @@ type MetricRow = {
 type MetricTrendPoint = {
   date: string;
   source: "manual" | "supabase";
+  value: number;
+};
+type PlatformMetricDelta = {
+  direction: "down" | "flat" | "up";
   value: number;
 };
 type RefreshStatus = {
@@ -292,6 +323,7 @@ type EventDbRow = {
   event_date: string;
   event_name: string;
   event_url: string;
+  poster_url?: string | null;
   location_id: string | null;
   location_name: string;
   location_url: string;
@@ -346,6 +378,7 @@ const platformStats = [
     dashboard: true,
     metrics: [
       { label: "Subscribers", metricName: "subscribers", value: "39" },
+      { label: "Lifetime Views", metricName: "total_channel_views", value: "17.8K" },
       {
         label: "Latest Video Views",
         metricName: "latest_video_views",
@@ -495,7 +528,7 @@ const defaultQrCodeLinks: QrCodeLink[] = [
   }))
 ];
 
-const appVersionLabel = "Beta 1.6";
+const appVersionLabel = "Beta 1.7";
 
 const sections = [
   "Dashboard",
@@ -513,10 +546,16 @@ const marketingStatusOptions: MarketingStatus[] = [
   "done"
 ];
 
+const marketingUploadStatusOptions: MarketingStatus[] = [
+  ...marketingStatusOptions,
+  "irrelevant"
+];
+
 const statusLabels: Record<MarketingStatus, string> = {
   "not-started": "Not started",
   "in-progress": "In progress",
-  done: "Done"
+  done: "Done",
+  irrelevant: "Irrelevant"
 };
 
 const campaignDayStatusLabels: Record<CampaignDayProgressStatus, string> = {
@@ -739,6 +778,7 @@ const deletedBudgetForecastStorageKey = "love-strings-budget-deleted-forecast-v1
 const eventDraftStorageKey = "love-strings-event-entry-drafts-v1";
 const locationAddressBookStorageKey = "love-strings-location-address-book-v1";
 const qrCodeLinksStorageKey = "love-strings-qr-code-links-v1";
+const otherTaskStorageKey = "love-strings-focus-other-tasks-v1";
 
 const newMarketingCampaign: Omit<MarketingCampaignConfig, "id"> = {
   releaseTitle: "New Campaign",
@@ -1896,6 +1936,22 @@ function formatDateForInput(date: Date) {
   ].join("/");
 }
 
+function formatModuleHeaderDate() {
+  const date = new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    timeZone: "Europe/Vienna",
+    weekday: "short",
+    year: "numeric"
+  }).format(new Date());
+
+  return `Today is - ${date}`.toUpperCase();
+}
+
+function ModuleHeaderDate() {
+  return <span className="topbar-date">{formatModuleHeaderDate()}</span>;
+}
+
 function sortBudgetEntriesByDate(entries: BudgetEntry[]) {
   return [...entries].sort(
     (firstEntry, secondEntry) =>
@@ -1969,8 +2025,8 @@ function normalizeEventEntries(entries: EventEntry[]) {
 }
 
 function normalizeEventBudgetLines(entry: EventEntry): EventEntry {
-  const existingBudgetLines = normalizeProductionBudgetLines(
-    entry.budgetLines ?? []
+  const existingBudgetLines = dedupeProductionBudgetLines(
+    normalizeProductionBudgetLines(entry.budgetLines ?? [])
   );
   const migratedBudgetLines: ProductionBudgetLine[] = [];
 
@@ -1998,7 +2054,7 @@ function normalizeEventBudgetLines(entry: EventEntry): EventEntry {
       existingBudgetLines.length > 0
         ? existingBudgetLines
         : migratedBudgetLines.length > 0
-          ? migratedBudgetLines
+          ? dedupeProductionBudgetLines(migratedBudgetLines)
           : ([
               {
                 id: "event-budget-line-default",
@@ -2008,6 +2064,25 @@ function normalizeEventBudgetLines(entry: EventEntry): EventEntry {
               }
             ] satisfies ProductionBudgetLine[])
   };
+}
+
+function dedupeProductionBudgetLines(lines: ProductionBudgetLine[]) {
+  const seenLineFingerprints = new Set<string>();
+
+  return lines.filter((line) => {
+    const fingerprint = [
+      line.description.trim().toLowerCase(),
+      Number(line.amount).toFixed(2),
+      getEventBudgetLineBucket(line)
+    ].join("::");
+
+    if (seenLineFingerprints.has(fingerprint)) {
+      return false;
+    }
+
+    seenLineFingerprints.add(fingerprint);
+    return true;
+  });
 }
 
 function buildLocationAddressBookEntries(events: EventEntry[]) {
@@ -2430,6 +2505,93 @@ function getBudgetSummary(entries: BudgetEntry[]) {
   };
 }
 
+function getBudgetCashflowPoints(entries: BudgetEntry[]) {
+  const monthlyEntries = new Map<string, { amount: number; date: Date }>();
+
+  entries
+    .map((entry) => ({
+      amount: getBudgetSignedAmount(entry),
+      date: parseFlexibleBudgetDate(entry.date)
+    }))
+    .filter(
+      (entry): entry is { amount: number; date: Date } => entry.date !== null
+    )
+    .forEach((entry) => {
+      const monthDate = new Date(
+        Date.UTC(entry.date.getUTCFullYear(), entry.date.getUTCMonth(), 1)
+      );
+      const monthKey = monthDate.toISOString().slice(0, 7);
+      const currentMonth = monthlyEntries.get(monthKey) ?? {
+        amount: 0,
+        date: monthDate
+      };
+
+      currentMonth.amount += entry.amount;
+      monthlyEntries.set(monthKey, currentMonth);
+    });
+
+  let runningBalance = 0;
+
+  return Array.from(monthlyEntries.values())
+    .sort((firstEntry, secondEntry) => firstEntry.date.getTime() - secondEntry.date.getTime())
+    .map((entry) => {
+      runningBalance += entry.amount;
+
+      return {
+        balance: runningBalance,
+        key: entry.date.toISOString().slice(0, 7),
+        label: formatBudgetMonthLabel(entry.date)
+      };
+    });
+}
+
+function getBudgetMonthlyIncomeSpend(entries: BudgetEntry[]) {
+  const months = new Map<string, { date: Date; income: number; spend: number }>();
+
+  entries.forEach((entry) => {
+    const entryDate = parseFlexibleBudgetDate(entry.date);
+
+    if (!entryDate) {
+      return;
+    }
+
+    const monthDate = new Date(
+      Date.UTC(entryDate.getUTCFullYear(), entryDate.getUTCMonth(), 1)
+    );
+    const monthKey = monthDate.toISOString().slice(0, 7);
+    const currentMonth = months.get(monthKey) ?? {
+      date: monthDate,
+      income: 0,
+      spend: 0
+    };
+    const signedAmount = getBudgetSignedAmount(entry);
+
+    if (signedAmount >= 0) {
+      currentMonth.income += signedAmount;
+    } else {
+      currentMonth.spend += Math.abs(signedAmount);
+    }
+
+    months.set(monthKey, currentMonth);
+  });
+
+  return Array.from(months.values())
+    .sort((firstMonth, secondMonth) => firstMonth.date.getTime() - secondMonth.date.getTime())
+    .map((month) => ({
+      income: month.income,
+      key: month.date.toISOString().slice(0, 7),
+      label: formatBudgetMonthLabel(month.date),
+      spend: month.spend
+    }));
+}
+
+function formatBudgetMonthLabel(date: Date) {
+  return date.toLocaleString("en-US", {
+    month: "short",
+    timeZone: "UTC"
+  });
+}
+
 function getBudgetBucketSummaries(
   historicalEntries: BudgetEntry[],
   upcomingEntries: BudgetEntry[]
@@ -2621,7 +2783,7 @@ function getMarketingCampaignBudgetDescription(
 function generateProductionBudgetEntries(song: ProductionSongConfig) {
   return song.steps.flatMap((step) => {
     const stepBudgetLines =
-      step.budgetLines && step.budgetLines.length > 0
+      step.budgetLines !== undefined
         ? step.budgetLines
         : getFallbackProductionStepBudgetLines(step);
     const stepEntries = generateProductionBudgetLineEntries({
@@ -2952,6 +3114,15 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
+function formatCompactCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    currency: "EUR",
+    maximumFractionDigits: 1,
+    notation: "compact",
+    style: "currency"
+  }).format(value);
+}
+
 function formatSpentCurrency(value: number) {
   return formatCurrency(-Math.abs(value));
 }
@@ -2974,7 +3145,7 @@ function getDashboardCampaignPreview(campaigns: MarketingCampaignConfig[]) {
     sortedCampaigns.find((campaign) => isCampaignActive(campaign, today)) ??
     null;
   const benchmark =
-    sortedCampaigns
+    [...sortedCampaigns]
       .sort(
         (firstCampaign, secondCampaign) =>
           getCampaignCompletionScore(secondCampaign) -
@@ -2998,10 +3169,61 @@ function getDashboardCampaignPreview(campaigns: MarketingCampaignConfig[]) {
   return { benchmark, current, next };
 }
 
+function getProductionCompletionScore(song: ProductionSongConfig) {
+  return calculateProductionCompletion(song.steps);
+}
+
+function getProductionBenchmarkDays(song: ProductionSongConfig) {
+  const sortedSteps = sortProductionStepsByDeadline(song.steps);
+  const firstStep = sortedSteps[0];
+  const firstWorkStep =
+    firstStep?.label === "Demo" && firstStep.status === "done"
+      ? sortedSteps[1] ?? firstStep
+      : firstStep;
+  const lastStep = sortedSteps.at(-1);
+  const startDate = firstWorkStep ? parseCampaignDate(firstWorkStep.deadline) : null;
+  const endDate = lastStep ? parseCampaignDate(lastStep.deadline) : null;
+
+  if (!startDate || !endDate) {
+    return null;
+  }
+
+  return Math.max(
+    0,
+    Math.round((endDate.getTime() - startDate.getTime()) / 86400000)
+  );
+}
+
+function getDashboardProductionPreview(songs: ProductionSongConfig[]) {
+  const sortedSongs = sortProductionSongsByDeadline(songs);
+  const [current, next] = sortedSongs;
+  const completedSongs = sortedSongs.filter(
+    (song) => getProductionCompletionScore(song) === 100
+  );
+  const benchmarkCandidates = completedSongs.length > 0 ? completedSongs : sortedSongs;
+  const benchmark =
+    benchmarkCandidates
+      .sort((firstSong, secondSong) => {
+        const firstDays = getProductionBenchmarkDays(firstSong) ?? Number.MAX_SAFE_INTEGER;
+        const secondDays = getProductionBenchmarkDays(secondSong) ?? Number.MAX_SAFE_INTEGER;
+
+        return (
+          firstDays - secondDays ||
+          getProductionCompletionScore(secondSong) -
+            getProductionCompletionScore(firstSong) ||
+          getCampaignSortTime(secondSong.deadline) -
+            getCampaignSortTime(firstSong.deadline)
+        );
+      })[0] ?? null;
+
+  return { benchmark, current: current ?? null, next: next ?? null };
+}
+
 function getDashboardFocusQueue(
   campaignPreview: ReturnType<typeof getDashboardCampaignPreview>,
   productionPreviewSongs: ProductionSongConfig[],
-  otherTasks: FocusQueueItem[] = []
+  otherTasks: OtherTask[] = [],
+  utilityTasks: FocusQueueItem[] = []
 ) {
   const selectedCampaign = campaignPreview.current ?? campaignPreview.next;
   const selectedSong = productionPreviewSongs[0] ?? productionPreviewSongs[1] ?? null;
@@ -3012,42 +3234,179 @@ function getDashboardFocusQueue(
       )
     : [];
   const productionTasks = selectedSong ? getNextProductionTasks(selectedSong.steps) : [];
+  const marketingFocusItems = selectedCampaign
+    ? marketingTasks.map((task) =>
+        toFocusQueueItem(
+          task,
+          "Marketing",
+          getMarketingFocusActionTarget(selectedCampaign.id, task.id)
+        )
+      )
+    : [];
+  const productionFocusItems = selectedSong
+    ? productionTasks.map((task) =>
+        toFocusQueueItem(
+          task,
+          "Production",
+          getProductionFocusActionTarget(selectedSong, task.id)
+        )
+      )
+    : [];
   const primaryMarketingTask = marketingTasks[0]
-    ? toFocusQueueItem(marketingTasks[0], "Marketing")
+    ? marketingFocusItems[0]
     : null;
   const primaryProductionTask = productionTasks[0]
-    ? toFocusQueueItem(productionTasks[0], "Production")
+    ? productionFocusItems[0]
     : null;
-  const fallbackOtherTask =
-    [...marketingTasks.slice(1), ...productionTasks.slice(1)]
-      .sort((firstTask, secondTask) =>
-        getTaskDateSortTime(firstTask.label) - getTaskDateSortTime(secondTask.label)
-      )
-      .map((task) => toFocusQueueItem(task, "Other"))[0] ?? null;
-  const otherTask = otherTasks[0] ?? fallbackOtherTask;
+  const activeOtherTasks = otherTasks
+    .filter((task) => task.status !== "done" && task.status !== "irrelevant")
+    .sort(
+      (firstTask, secondTask) =>
+        getBudgetDateSortTime(firstTask.dueDate) -
+          getBudgetDateSortTime(secondTask.dueDate) ||
+        firstTask.title.localeCompare(secondTask.title)
+    )
+    .map(toOtherFocusQueueItem);
+  const otherHistoryTasks = otherTasks
+    .filter((task) => task.status === "done" || task.status === "irrelevant")
+    .sort(
+      (firstTask, secondTask) =>
+        getBudgetDateSortTime(secondTask.dueDate) -
+          getBudgetDateSortTime(firstTask.dueDate) ||
+        firstTask.title.localeCompare(secondTask.title)
+    )
+    .map(toOtherFocusQueueItem);
 
   return {
     allTasks: [
-      ...marketingTasks.map((task) => toFocusQueueItem(task, "Marketing")),
-      ...productionTasks.map((task) => toFocusQueueItem(task, "Production")),
-      ...otherTasks,
-      ...(otherTasks.length === 0 && fallbackOtherTask ? [fallbackOtherTask] : [])
+      ...(primaryMarketingTask ? [primaryMarketingTask] : []),
+      ...(primaryProductionTask ? [primaryProductionTask] : []),
+      ...utilityTasks,
+      ...activeOtherTasks
     ],
-    visibleTasks: [primaryMarketingTask, primaryProductionTask, otherTask].filter(
-      (task): task is FocusQueueItem => Boolean(task)
-    )
+    visibleTasks: [
+      primaryMarketingTask,
+      primaryProductionTask,
+      ...utilityTasks,
+      ...activeOtherTasks.slice(0, 3)
+    ].filter((task): task is FocusQueueItem => Boolean(task))
   };
 }
 
 function toFocusQueueItem(
   task: CampaignTaskItem,
-  source: FocusQueueItem["source"]
+  source: FocusQueueItem["source"],
+  actionTarget?: FocusQueueActionTarget
 ): FocusQueueItem {
   return {
     ...task,
+    actionTarget,
     id: `${source.toLowerCase()}-${task.id}`,
     source
   };
+}
+
+function toOtherFocusQueueItem(task: OtherTask): FocusQueueItem {
+  const dueDate = parseFlexibleBudgetDate(task.dueDate);
+  const title = task.title.trim() || "Untitled task";
+  const notes = task.notes.trim();
+
+  return {
+    dueDate: task.dueDate,
+    id: `other-${task.id}`,
+    label: `${dueDate ? formatCampaignDate(dueDate) : task.dueDate} - ${title}${
+      notes ? ` - ${notes}` : ""
+    }`,
+    notes: task.notes,
+    source: "Other",
+    status: task.status
+  };
+}
+
+function normalizeOtherTasks(tasks: unknown[]): OtherTask[] {
+  return tasks
+    .filter((task): task is Partial<OtherTask> => Boolean(task && typeof task === "object"))
+    .map((task, index) => ({
+      dueDate:
+        typeof task.dueDate === "string" && task.dueDate
+          ? task.dueDate
+          : formatDateForInput(getTodayUtcDate()),
+      id:
+        typeof task.id === "string" && task.id
+          ? task.id
+          : `other-task-${Date.now()}-${index}`,
+      notes: typeof task.notes === "string" ? task.notes : "",
+      status: marketingUploadStatusOptions.includes(task.status as MarketingStatus)
+        ? (task.status as MarketingStatus)
+        : "not-started",
+      title:
+        typeof task.title === "string" && task.title
+          ? task.title
+          : "Other task"
+    }));
+}
+
+function getMarketingFocusActionTarget(
+  campaignId: string,
+  taskId: string
+): FocusQueueActionTarget | undefined {
+  const [dayNumberValue, taskKeyValue] = taskId.split("-");
+  const dayNumber = Number(dayNumberValue);
+
+  if (!Number.isFinite(dayNumber)) {
+    return undefined;
+  }
+
+  if (taskKeyValue === "production") {
+    return { campaignId, dayNumber, kind: "marketing", taskKey: "production" };
+  }
+
+  if (taskKeyValue === "instagram") {
+    return { campaignId, dayNumber, kind: "marketing", taskKey: "instagramUpload" };
+  }
+
+  if (taskKeyValue === "youtube") {
+    return { campaignId, dayNumber, kind: "marketing", taskKey: "youtubeUpload" };
+  }
+
+  return {
+    campaignId,
+    dayNumber,
+    extraTaskId: taskId.slice(`${dayNumberValue}-`.length),
+    kind: "marketing"
+  };
+}
+
+function getProductionFocusActionTarget(
+  song: ProductionSongConfig,
+  taskId: string
+): FocusQueueActionTarget | undefined {
+  const mainStep = song.steps.find((step) => taskId === `${step.id}-main`);
+
+  if (mainStep) {
+    return {
+      kind: "production",
+      songId: song.id,
+      stepId: mainStep.id,
+      taskKey: "main"
+    };
+  }
+
+  for (const step of song.steps) {
+    const extraTask = step.extraTasks.find((task) => taskId === `${step.id}-${task.id}`);
+
+    if (extraTask) {
+      return {
+        extraTaskId: extraTask.id,
+        kind: "production",
+        songId: song.id,
+        stepId: step.id,
+        taskKey: "extra"
+      };
+    }
+  }
+
+  return undefined;
 }
 
 function getTaskDateSortTime(label: string) {
@@ -3333,7 +3692,8 @@ function mapEventsSnapshotRows({
         locationName: entry.location_name,
         locationUrl: entry.location_url,
         name: entry.event_name,
-        nameUrl: entry.event_url
+        nameUrl: entry.event_url,
+        posterUrl: entry.poster_url ?? ""
       }))
     ),
     locations: normalizeLocationAddressBookEntries(
@@ -3839,6 +4199,7 @@ export default function Home() {
   const [locationAddressBook, setLocationAddressBook] = useState(() =>
     buildLocationAddressBookEntries(eventEntries)
   );
+  const [otherTasks, setOtherTasks] = useState<OtherTask[]>([]);
   const [qrCodeLinks, setQrCodeLinks] =
     useState<QrCodeLink[]>(defaultQrCodeLinks);
   const [hasLoadedCampaignDrafts, setHasLoadedCampaignDrafts] = useState(false);
@@ -3849,6 +4210,7 @@ export default function Home() {
   const [hasLoadedEventDrafts, setHasLoadedEventDrafts] = useState(false);
   const [hasLoadedLocationAddressBook, setHasLoadedLocationAddressBook] =
     useState(false);
+  const [hasLoadedOtherTasks, setHasLoadedOtherTasks] = useState(false);
   const [hasLoadedEventSupabaseSnapshot, setHasLoadedEventSupabaseSnapshot] =
     useState(false);
   const [hasLoadedBudgetSupabaseSnapshot, setHasLoadedBudgetSupabaseSnapshot] =
@@ -4398,7 +4760,7 @@ export default function Home() {
   }
 
   function deleteBudgetEntry(entryId: string) {
-    const entryToDelete = budgetEntries.find((entry) => entry.id === entryId);
+    const entryToDelete = budgetEntriesWithForecast.find((entry) => entry.id === entryId);
 
     if (!entryToDelete || !canDeleteBudgetEntryFromLedger(entryToDelete)) {
       return;
@@ -4428,6 +4790,7 @@ export default function Home() {
           locationUrl: "",
           address: "Address",
           addressUrl: "",
+          posterUrl: "",
           budgetLines: [
             {
               id: `event-budget-line-${Date.now()}`,
@@ -4487,6 +4850,47 @@ export default function Home() {
   function deleteLocationAddressBookEntry(locationId: string) {
     setLocationAddressBook((currentLocations) =>
       currentLocations.filter((location) => location.id !== locationId)
+    );
+  }
+
+  function addOtherTask() {
+    const existingEmptyTask = otherTasks.find(
+      (task) => task.title.trim() === "" && task.notes.trim() === ""
+    );
+
+    if (existingEmptyTask) {
+      return existingEmptyTask.id;
+    }
+
+    const newTaskId = `other-task-${Date.now()}`;
+
+    setOtherTasks((currentTasks) => {
+      return [
+        {
+          dueDate: formatDateForInput(getTodayUtcDate()),
+          id: newTaskId,
+          notes: "",
+          status: "not-started",
+          title: ""
+        },
+        ...currentTasks
+      ];
+    });
+
+    return newTaskId;
+  }
+
+  function updateOtherTask(taskId: string, updates: Partial<OtherTask>) {
+    setOtherTasks((currentTasks) =>
+      currentTasks.map((task) =>
+        task.id === taskId ? { ...task, ...updates } : task
+      )
+    );
+  }
+
+  function deleteOtherTask(taskId: string) {
+    setOtherTasks((currentTasks) =>
+      currentTasks.filter((task) => task.id !== taskId)
     );
   }
 
@@ -4942,6 +5346,55 @@ export default function Home() {
   }, [hasLoadedLocationAddressBook, locationAddressBook]);
 
   useEffect(() => {
+    let isCancelled = false;
+
+    try {
+      const storedOtherTasks = window.localStorage.getItem(otherTaskStorageKey);
+
+      if (storedOtherTasks) {
+        const parsedOtherTasks = JSON.parse(storedOtherTasks);
+
+        if (Array.isArray(parsedOtherTasks)) {
+          window.setTimeout(() => {
+            if (!isCancelled) {
+              setOtherTasks(normalizeOtherTasks(parsedOtherTasks));
+              setHasLoadedOtherTasks(true);
+            }
+          }, 0);
+
+          return () => {
+            isCancelled = true;
+          };
+        }
+      }
+    } catch (error) {
+      console.warn("Unable to load local focus other tasks.", error);
+    }
+
+    window.setTimeout(() => {
+      if (!isCancelled) {
+        setHasLoadedOtherTasks(true);
+      }
+    }, 0);
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedOtherTasks) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(otherTaskStorageKey, JSON.stringify(otherTasks));
+    } catch (error) {
+      console.warn("Unable to save local focus other tasks.", error);
+    }
+  }, [hasLoadedOtherTasks, otherTasks]);
+
+  useEffect(() => {
     if (
       !hasLoadedEventDrafts ||
       !hasLoadedLocationAddressBook ||
@@ -5234,9 +5687,11 @@ export default function Home() {
             onAppleMusicCsvImport={importAppleMusicCsv}
             onDeleteQrCode={deleteQrCodeLink}
             onQrCodeChange={updateQrCodeLink}
+            onRefreshPlatformStats={refreshPlatformStats}
             platformMetricRows={platformMetricRows}
             platformStatsData={platformStatsData}
             qrCodeLinks={qrCodeLinks}
+            refreshStatus={refreshStatus}
           />
         ) : null}
         {activeSection === "Production" ? (
@@ -5284,13 +5739,17 @@ export default function Home() {
             dashboardPlatformStats={dashboardPlatformStats}
             eventEntries={eventEntryDrafts}
             onAddQrCode={addQrCodeLink}
+            onAddOtherTask={addOtherTask}
+            onCampaignDaysChange={updateCampaignDays}
             onDeleteQrCode={deleteQrCodeLink}
+            onDeleteOtherTask={deleteOtherTask}
+            onOtherTaskChange={updateOtherTask}
+            onProductionSongChange={updateProductionSong}
             onQrCodeChange={updateQrCodeLink}
-            onRefreshPlatformStats={refreshPlatformStats}
+            otherTasks={otherTasks}
             platformMetricRows={platformMetricRows}
             productionSongs={productionSongDrafts}
             qrCodeLinks={qrCodeLinks}
-            refreshStatus={refreshStatus}
           />
         ) : null}
       </section>
@@ -5363,13 +5822,13 @@ function EventsView({
   return (
     <>
       <header className="topbar">
-        <div>
-          <p className="eyebrow">Shows and appearances</p>
+        <div className="topbar-title-block">
+          <div className="topbar-eyebrow-row">
+            <p className="eyebrow">Shows and appearances</p>
+            <ModuleHeaderDate />
+          </div>
           <h1>Events</h1>
         </div>
-        <button className="icon-button" type="button" aria-label="Open project setup">
-          <ArrowUpRight size={18} aria-hidden />
-        </button>
       </header>
 
       <section className="events-summary-grid" aria-label="Events summary">
@@ -5716,6 +6175,18 @@ function EventCard({
     <article className="event-card">
       <div className="event-card-header">
         <div className="event-card-main">
+          {entry.posterUrl ? (
+            <span
+              aria-label={`${entry.name} poster preview`}
+              className="event-header-poster-thumb"
+              role="img"
+              style={{ backgroundImage: `url("${entry.posterUrl}")` }}
+            />
+          ) : (
+            <span className="event-header-poster-thumb event-header-poster-thumb-empty">
+              <CalendarDays size={18} aria-hidden />
+            </span>
+          )}
           <strong className="event-date-display">{entry.date}</strong>
           <div className="event-title-block">
             <EventMaybeLink label={entry.name} url={entry.nameUrl} />
@@ -5752,6 +6223,19 @@ function EventCard({
         hidden={!isEventOpen}
         id={`${entry.id}-event-details`}
       >
+        <div className="event-poster-section">
+          <label>
+            Poster image URL
+            <input
+              onChange={(event) =>
+                onEntryChange(entry.id, { posterUrl: event.target.value })
+              }
+              placeholder="https://..."
+              value={entry.posterUrl ?? ""}
+            />
+          </label>
+        </div>
+
         <div className="event-edit-grid">
           <label>
             Date
@@ -5993,6 +6477,12 @@ function BudgetView({
   onEntryChange: (entryId: string, updates: Partial<BudgetEntry>) => void;
 }) {
   const summary = getBudgetSummary(entries);
+  const cashflowPoints = useMemo(() => getBudgetCashflowPoints(entries), [entries]);
+  const monthlyIncomeSpend = useMemo(
+    () => getBudgetMonthlyIncomeSpend(entries),
+    [entries]
+  );
+  const [isHistoricalLedgerOpen, setIsHistoricalLedgerOpen] = useState(false);
   const [isMoreAnalyticsOpen, setIsMoreAnalyticsOpen] = useState(false);
   const [ledgerSort, setLedgerSort] = useState<{
     direction: SortDirection;
@@ -6005,6 +6495,27 @@ function BudgetView({
     () => sortBudgetEntriesForLedger(entries, ledgerSort.key, ledgerSort.direction),
     [entries, ledgerSort]
   );
+  const { historicalEntries, upcomingEntries } = useMemo(() => {
+    const todayTime = getTodayUtcDate().getTime();
+
+    return sortedEntries.reduce(
+      (groups, entry) => {
+        const entryDate = parseFlexibleBudgetDate(entry.date);
+
+        if (entryDate !== null && entryDate.getTime() > todayTime) {
+          groups.upcomingEntries.push(entry);
+        } else {
+          groups.historicalEntries.push(entry);
+        }
+
+        return groups;
+      },
+      {
+        historicalEntries: [] as BudgetEntry[],
+        upcomingEntries: [] as BudgetEntry[]
+      }
+    );
+  }, [sortedEntries]);
 
   function updateLedgerSort(nextKey: BudgetLedgerSortKey) {
     setLedgerSort((currentSort) => {
@@ -6026,13 +6537,13 @@ function BudgetView({
   return (
     <>
       <header className="topbar">
-        <div>
-          <p className="eyebrow">Money tracker</p>
+        <div className="topbar-title-block">
+          <div className="topbar-eyebrow-row">
+            <p className="eyebrow">Money tracker</p>
+            <ModuleHeaderDate />
+          </div>
           <h1>Budget</h1>
         </div>
-        <button className="icon-button" type="button" aria-label="Open project setup">
-          <ArrowUpRight size={18} aria-hidden />
-        </button>
       </header>
 
       <section className="budget-summary-grid" aria-label="Budget summary">
@@ -6109,28 +6620,20 @@ function BudgetView({
           </section>
           <section className="budget-graph-placeholder-grid" aria-label="Future budget graphs">
             <article className="budget-graph-placeholder">
-              <span>Cashflow evolution</span>
-              <div className="budget-line-chart" aria-hidden>
-                <i />
-                <i />
-                <i />
-                <i />
-                <i />
-                <svg viewBox="0 0 320 120" role="presentation">
-                  <polyline points="0,92 48,78 96,84 144,48 192,60 240,34 320,42" />
-                </svg>
-              </div>
+              <span className="budget-graph-title-with-legend">
+                <i className="budget-legend-square budget-legend-square-income" aria-hidden />
+                Cashflow evolution
+              </span>
+              <BudgetCashflowChart points={cashflowPoints} />
             </article>
             <article className="budget-graph-placeholder">
-              <span>Bucket mix over time</span>
-              <div className="budget-bar-chart" aria-hidden>
-                {[42, 58, 36, 64, 50, 72].map((height, index) => (
-                  <div className="budget-bar" key={index}>
-                    <b style={{ height: `${height}%` }} />
-                    <b style={{ height: `${Math.max(18, 92 - height)}%` }} />
-                  </div>
-                ))}
-              </div>
+              <span className="budget-graph-title-with-legend">
+                <i className="budget-legend-square budget-legend-square-income" aria-hidden />
+                Income vs
+                <i className="budget-legend-square budget-legend-square-spend" aria-hidden />
+                Spend
+              </span>
+              <BudgetIncomeSpendChart months={monthlyIncomeSpend} />
             </article>
           </section>
         </div>
@@ -6148,57 +6651,282 @@ function BudgetView({
           </button>
         </div>
 
-        <div className="budget-table-wrap">
-          <table className="budget-table">
-            <thead>
-              <tr>
-                <SortableBudgetHeader
-                  label="Date"
-                  sortKey="date"
-                  activeSort={ledgerSort}
-                  onSort={updateLedgerSort}
-                />
-                <SortableBudgetHeader
-                  label="Bucket"
-                  sortKey="bucket"
-                  activeSort={ledgerSort}
-                  onSort={updateLedgerSort}
-                />
-                <SortableBudgetHeader
-                  label="Description"
-                  sortKey="description"
-                  activeSort={ledgerSort}
-                  onSort={updateLedgerSort}
-                />
-                <SortableBudgetHeader
-                  label="Amount"
-                  sortKey="amount"
-                  activeSort={ledgerSort}
-                  onSort={updateLedgerSort}
-                />
-                <SortableBudgetHeader
-                  label="Type"
-                  sortKey="type"
-                  activeSort={ledgerSort}
-                  onSort={updateLedgerSort}
-                />
-                <th scope="col">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedEntries.map((entry) => (
-                <BudgetEntryRow
-                  entry={entry}
-                  key={entry.id}
-                  onDelete={onDeleteEntry}
-                  onEntryChange={onEntryChange}
-                />
-              ))}
-            </tbody>
-          </table>
+        <div className="budget-ledger-section">
+          <div className="budget-ledger-subheader">
+            <span>Upcoming amounts</span>
+            <small>{upcomingEntries.length} lines</small>
+          </div>
+          <BudgetLedgerTable
+            activeSort={ledgerSort}
+            entries={upcomingEntries}
+            emptyMessage="No upcoming budget lines."
+            onDeleteEntry={onDeleteEntry}
+            onEntryChange={onEntryChange}
+            onSort={updateLedgerSort}
+          />
+        </div>
+
+        <div className="budget-historical-ledger">
+          <button
+            aria-expanded={isHistoricalLedgerOpen}
+            className="budget-more-analytics-button budget-see-more-button"
+            onClick={() => setIsHistoricalLedgerOpen((current) => !current)}
+            type="button"
+          >
+            <span>See more</span>
+            <small>{historicalEntries.length} historical lines</small>
+            <ChevronDown size={20} aria-hidden />
+          </button>
+          <div
+            className="budget-historical-ledger-panel"
+            hidden={!isHistoricalLedgerOpen}
+          >
+            <div className="budget-ledger-subheader">
+              <span>Historical amounts</span>
+              <small>{historicalEntries.length} lines</small>
+            </div>
+            <BudgetLedgerTable
+              activeSort={ledgerSort}
+              entries={historicalEntries}
+              emptyMessage="No historical budget lines."
+              onDeleteEntry={onDeleteEntry}
+              onEntryChange={onEntryChange}
+              onSort={updateLedgerSort}
+            />
+          </div>
         </div>
       </section>
     </>
+  );
+}
+
+function BudgetCashflowChart({
+  points
+}: {
+  points: Array<{ balance: number; key: string; label: string }>;
+}) {
+  if (points.length === 0) {
+    return <div className="budget-chart-empty">No cashflow data yet.</div>;
+  }
+
+  const width = 320;
+  const height = 132;
+  const padding = 14;
+  const labelBandHeight = 20;
+  const gridBottom = height - padding - labelBandHeight;
+  const balances = points.map((point) => point.balance);
+  const minBalance = Math.min(...balances, 0);
+  const maxBalance = Math.max(...balances, 0);
+  const balanceRange = Math.max(maxBalance - minBalance, 1);
+  const chartWidth = width - padding * 2;
+  const chartHeight = gridBottom - padding;
+  const chartPoints = points.map((point, index) => {
+    const x =
+      points.length === 1
+        ? width / 2
+        : padding + (index / (points.length - 1)) * chartWidth;
+    const labelY =
+      padding + ((maxBalance - point.balance) / balanceRange) * chartHeight;
+
+    return {
+      ...point,
+      x,
+      labelY,
+      y: labelY + 8
+    };
+  });
+  const linePoints = chartPoints
+    .map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`)
+    .join(" ");
+  const middleIndex = Math.floor((chartPoints.length - 1) / 2);
+  const labeledPointIndexes = new Set([0, middleIndex, chartPoints.length - 1]);
+  const verticalGridLines = Array.from({ length: 6 }, (_, index) => {
+    return padding + (index / 5) * chartWidth;
+  });
+  const horizontalGridLines = Array.from({ length: 4 }, (_, index) => {
+    return padding + (index / 3) * chartHeight;
+  });
+
+  return (
+    <div className="budget-line-chart">
+      <svg aria-hidden role="presentation" viewBox={`0 0 ${width} ${height}`}>
+        <rect
+          className="budget-line-chart-grid-frame"
+          height={chartHeight}
+          width={chartWidth}
+          x={padding}
+          y={padding}
+        />
+        {verticalGridLines.map((x) => (
+          <line
+            className="budget-line-chart-grid-line"
+            key={`vertical-${x.toFixed(1)}`}
+            x1={x}
+            x2={x}
+            y1={padding}
+            y2={gridBottom}
+          />
+        ))}
+        {horizontalGridLines.map((y) => (
+          <line
+            className="budget-line-chart-grid-line"
+            key={`horizontal-${y.toFixed(1)}`}
+            x1={padding}
+            x2={width - padding}
+            y1={y}
+            y2={y}
+          />
+        ))}
+        <polyline points={linePoints} />
+        {chartPoints.map((point, index) => (
+          <g key={point.key}>
+            <circle cx={point.x} cy={point.y} r="4" />
+            {labeledPointIndexes.has(index) ? (
+              <text
+                className="budget-line-chart-value"
+                textAnchor={
+                  index === 0 ? "start" : index === chartPoints.length - 1 ? "end" : "middle"
+                }
+                x={point.x}
+                y={Math.max(12, point.labelY - 8)}
+              >
+                {formatCompactCurrency(point.balance)}
+              </text>
+            ) : null}
+            {labeledPointIndexes.has(index) ? (
+              <text
+                className="budget-line-chart-month"
+                textAnchor={
+                  index === 0 ? "start" : index === chartPoints.length - 1 ? "end" : "middle"
+                }
+                x={point.x}
+                y={height - 2}
+              >
+                {point.label}
+              </text>
+            ) : null}
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+function BudgetIncomeSpendChart({
+  months
+}: {
+  months: Array<{ income: number; key: string; label: string; spend: number }>;
+}) {
+  if (months.length === 0) {
+    return <div className="budget-chart-empty">No monthly data yet.</div>;
+  }
+
+  const maxMonthlyValue = Math.max(
+    ...months.flatMap((month) => [month.income, month.spend]),
+    1
+  );
+
+  return (
+    <div className="budget-income-spend-chart">
+      <div className="budget-bar-chart" aria-hidden>
+        {months.map((month) => (
+          <div className="budget-bar-group" key={month.key}>
+            <div className="budget-bar">
+              <b
+                className="budget-income-bar"
+                title={`Income ${formatCurrency(month.income)}`}
+                style={{ height: `${Math.max(8, (month.income / maxMonthlyValue) * 100)}%` }}
+              />
+              <b
+                className="budget-spend-bar"
+                title={`Spend ${formatCurrency(month.spend)}`}
+                style={{ height: `${Math.max(8, (month.spend / maxMonthlyValue) * 100)}%` }}
+              />
+            </div>
+            <small>{month.label}</small>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BudgetLedgerTable({
+  activeSort,
+  emptyMessage,
+  entries,
+  onDeleteEntry,
+  onEntryChange,
+  onSort
+}: {
+  activeSort: {
+    direction: SortDirection;
+    key: BudgetLedgerSortKey;
+  };
+  emptyMessage: string;
+  entries: BudgetEntry[];
+  onDeleteEntry: (entryId: string) => void;
+  onEntryChange: (entryId: string, updates: Partial<BudgetEntry>) => void;
+  onSort: (sortKey: BudgetLedgerSortKey) => void;
+}) {
+  return (
+    <div className="budget-table-wrap">
+      <table className="budget-table">
+        <thead>
+          <tr>
+            <SortableBudgetHeader
+              label="Date"
+              sortKey="date"
+              activeSort={activeSort}
+              onSort={onSort}
+            />
+            <SortableBudgetHeader
+              label="Bucket"
+              sortKey="bucket"
+              activeSort={activeSort}
+              onSort={onSort}
+            />
+            <SortableBudgetHeader
+              label="Description"
+              sortKey="description"
+              activeSort={activeSort}
+              onSort={onSort}
+            />
+            <SortableBudgetHeader
+              label="Amount"
+              sortKey="amount"
+              activeSort={activeSort}
+              onSort={onSort}
+            />
+            <SortableBudgetHeader
+              label="Type"
+              sortKey="type"
+              activeSort={activeSort}
+              onSort={onSort}
+            />
+            <th scope="col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.length > 0 ? (
+            entries.map((entry) => (
+              <BudgetEntryRow
+                entry={entry}
+                key={entry.id}
+                onDelete={onDeleteEntry}
+                onEntryChange={onEntryChange}
+              />
+            ))
+          ) : (
+            <tr>
+              <td className="budget-empty-row" colSpan={6}>
+                {emptyMessage}
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -6515,9 +7243,7 @@ function ProductionView({
               {saveStatus.message}
             </span>
           ) : null}
-          <button className="icon-button" type="button" aria-label="Open project setup">
-            <ArrowUpRight size={18} aria-hidden />
-          </button>
+          <ModuleHeaderDate />
         </div>
       </header>
 
@@ -7410,13 +8136,13 @@ function MarketingView({
   return (
     <>
       <header className="topbar">
-        <div>
-          <p className="eyebrow">Campaign execution</p>
+        <div className="topbar-title-block">
+          <div className="topbar-eyebrow-row">
+            <p className="eyebrow">Campaign execution</p>
+            <ModuleHeaderDate />
+          </div>
           <h1>Marketing</h1>
         </div>
-        <button className="icon-button" type="button" aria-label="Open project setup">
-          <ArrowUpRight size={18} aria-hidden />
-        </button>
       </header>
 
       <div className="campaign-list">
@@ -8150,6 +8876,7 @@ function MarketingCampaignTaskCell({
         />
         <CampaignTaskStatus
           label="IG Upload"
+          options={marketingUploadStatusOptions}
           status={day.statuses.instagramUpload}
           onChange={(status) =>
             onStatusChange(day.dayNumber, "instagramUpload", status)
@@ -8157,6 +8884,7 @@ function MarketingCampaignTaskCell({
         />
         <CampaignTaskStatus
           label="YT upload"
+          options={marketingUploadStatusOptions}
           status={day.statuses.youtubeUpload}
           onChange={(status) =>
             onStatusChange(day.dayNumber, "youtubeUpload", status)
@@ -8258,10 +8986,12 @@ function ExtraCampaignTaskRow({
 function CampaignTaskStatus({
   label,
   onChange,
+  options = marketingStatusOptions,
   status
 }: {
   label: string;
   onChange: (status: MarketingStatus) => void;
+  options?: MarketingStatus[];
   status: MarketingStatus;
 }) {
   return (
@@ -8275,7 +9005,7 @@ function CampaignTaskStatus({
         onChange={(event) => onChange(event.target.value as MarketingStatus)}
         value={status}
       >
-        {marketingStatusOptions.map((option) => (
+        {options.map((option) => (
           <option key={option} value={option}>
             {statusLabels[option]}
           </option>
@@ -8360,31 +9090,43 @@ function DashboardView({
   dashboardPlatformStats,
   eventEntries,
   onAddQrCode,
+  onAddOtherTask,
+  onCampaignDaysChange,
   onDeleteQrCode,
+  onDeleteOtherTask,
+  onOtherTaskChange,
+  onProductionSongChange,
   onQrCodeChange,
-  onRefreshPlatformStats,
+  otherTasks,
   platformMetricRows,
   productionSongs,
-  qrCodeLinks,
-  refreshStatus
+  qrCodeLinks
 }: {
   budgetEntries: BudgetEntry[];
   campaigns: MarketingCampaignConfig[];
   dashboardPlatformStats: typeof platformStats;
   eventEntries: EventEntry[];
   onAddQrCode: () => void;
+  onAddOtherTask: () => string;
+  onCampaignDaysChange: (campaignId: string, campaignDays: CampaignDay[]) => void;
   onDeleteQrCode: (linkId: string) => void;
+  onDeleteOtherTask: (taskId: string) => void;
+  onOtherTaskChange: (taskId: string, updates: Partial<OtherTask>) => void;
+  onProductionSongChange: (songId: string, updates: Partial<ProductionSongConfig>) => void;
   onQrCodeChange: (linkId: string, updates: Partial<QrCodeLink>) => void;
-  onRefreshPlatformStats: () => void;
+  otherTasks: OtherTask[];
   platformMetricRows: MetricRow[];
   productionSongs: ProductionSongConfig[];
   qrCodeLinks: QrCodeLink[];
-  refreshStatus: RefreshStatus;
 }) {
   const campaignPreview = getDashboardCampaignPreview(campaigns);
   const budgetSummary = getBudgetSummary(budgetEntries);
   const nextEvent = getNextUpcomingEvent(eventEntries);
-  const productionPreviewSongs = productionSongs.slice(0, 2);
+  const productionPreview = getDashboardProductionPreview(productionSongs);
+  const productionPreviewSongs = [
+    productionPreview.current,
+    productionPreview.next
+  ].filter((song): song is ProductionSongConfig => Boolean(song));
   const appleMusicLastUpdate = getAppleMusicLastUpdateDate(
     dashboardPlatformStats,
     platformMetricRows
@@ -8393,38 +9135,110 @@ function DashboardView({
   const focusQueue = getDashboardFocusQueue(
     campaignPreview,
     productionPreviewSongs,
+    otherTasks,
     appleMusicUpdateTask ? [appleMusicUpdateTask] : []
   );
   const phaseOne = roadmapPhases[0];
 
+  function updateFocusTaskStatus(task: FocusQueueItem, nextStatus: MarketingStatus) {
+    const target = task.actionTarget;
+
+    if (!target) {
+      return;
+    }
+
+    if (target.kind === "production" && nextStatus === "irrelevant") {
+      return;
+    }
+
+    if (target.kind === "marketing") {
+      const campaign = campaigns.find((candidate) => candidate.id === target.campaignId);
+
+      if (!campaign) {
+        return;
+      }
+
+      const currentDays =
+        campaign.campaignDays ?? buildCampaignDays(campaign.releaseDate, campaign.daySeeds);
+      const nextDays = currentDays.map((day) => {
+        if (day.dayNumber !== target.dayNumber) {
+          return day;
+        }
+
+        if (target.taskKey) {
+          return {
+            ...day,
+            statuses: {
+              ...day.statuses,
+              [target.taskKey]: nextStatus
+            }
+          };
+        }
+
+        return {
+          ...day,
+          extraTasks: day.extraTasks.map((extraTask) =>
+            extraTask.id === target.extraTaskId
+              ? { ...extraTask, status: nextStatus }
+              : extraTask
+          )
+        };
+      });
+
+      onCampaignDaysChange(campaign.id, nextDays);
+      return;
+    }
+
+    const song = productionSongs.find((candidate) => candidate.id === target.songId);
+
+    if (!song) {
+      return;
+    }
+
+    const nextSteps = song.steps.map((step) => {
+      if (step.id !== target.stepId) {
+        return step;
+      }
+
+      if (target.taskKey === "main") {
+        return { ...step, status: nextStatus };
+      }
+
+      return {
+        ...step,
+        extraTasks: step.extraTasks.map((extraTask) =>
+          extraTask.id === target.extraTaskId
+            ? { ...extraTask, status: nextStatus }
+            : extraTask
+        )
+      };
+    });
+
+    onProductionSongChange(song.id, { steps: nextSteps });
+  }
+
   return (
     <>
       <header className="topbar">
-        <div>
-          <p className="eyebrow">Daily command screen</p>
+        <div className="topbar-title-block">
+          <div className="topbar-eyebrow-row">
+            <p className="eyebrow">Daily command screen</p>
+            <ModuleHeaderDate />
+          </div>
           <h1>Love Strings Dashboard</h1>
-        </div>
-        <div className="dashboard-refresh-control">
-          <button
-            className="refresh-button"
-            disabled={refreshStatus.state === "loading"}
-            onClick={onRefreshPlatformStats}
-            type="button"
-          >
-            <RefreshCw size={16} aria-hidden />
-            Refresh
-          </button>
-          {refreshStatus.message ? (
-            <span className={`refresh-status refresh-status-${refreshStatus.state}`}>
-              {refreshStatus.message}
-            </span>
-          ) : null}
         </div>
       </header>
 
       <DashboardNextEventCard event={nextEvent} />
 
-      <DashboardFocusQueueCard focusQueue={focusQueue} />
+      <DashboardFocusQueueCard
+        focusQueue={focusQueue}
+        onAddOtherTask={onAddOtherTask}
+        onDeleteOtherTask={onDeleteOtherTask}
+        onOtherTaskChange={onOtherTaskChange}
+        onTaskStatusChange={updateFocusTaskStatus}
+        otherTasks={otherTasks}
+      />
 
       <PlatformStatsSection
         hideHeading
@@ -8451,7 +9265,7 @@ function DashboardView({
         productionSongs={productionSongs}
       />
 
-      <DashboardProductionPreview songs={productionPreviewSongs} />
+      <DashboardProductionPreview preview={productionPreview} />
 
       <DashboardBudgetPreview summary={budgetSummary} />
 
@@ -8541,6 +9355,11 @@ function DashboardCampaignCard({
   const displayedCampaignTitle =
     getProductionSongForRelease(campaign.releaseTitle, productionSongs)?.title ??
     campaign.releaseTitle;
+  const campaignAlbumArtUrl = getProductionAlbumArtForRelease(
+    campaign.releaseTitle,
+    productionSongs
+  );
+  const campaignCompletion = calculateCampaignCompletion(days);
 
   return (
     <article
@@ -8551,9 +9370,28 @@ function DashboardCampaignCard({
       }
     >
       <div className="dashboard-campaign-card-header">
-        <div>
-          <p className="eyebrow">{label}</p>
-          <h3>{displayedCampaignTitle}</h3>
+        <div className={showTasks ? undefined : "dashboard-benchmark-title-row"}>
+          {!showTasks ? (
+            campaignAlbumArtUrl ? (
+              <span
+                aria-label={`${displayedCampaignTitle} album art preview`}
+                className="dashboard-production-art"
+                role="img"
+                style={{ backgroundImage: `url("${campaignAlbumArtUrl}")` }}
+              />
+            ) : (
+              <span className="dashboard-production-art dashboard-production-art-empty">
+                <Music2 size={18} aria-hidden />
+              </span>
+            )
+          ) : null}
+          <div>
+            <p className="eyebrow">{label}</p>
+            <h3>
+              {displayedCampaignTitle}
+              {!showTasks ? ` - ${campaignCompletion}%` : ""}
+            </h3>
+          </div>
         </div>
         {showDate ? (
           <div className="dashboard-campaign-date">
@@ -8563,10 +9401,9 @@ function DashboardCampaignCard({
         ) : null}
       </div>
 
-      <CampaignProgressStrip
-        completion={calculateCampaignCompletion(days)}
-        days={days}
-      />
+      {showTasks ? (
+        <CampaignProgressStrip completion={campaignCompletion} days={days} />
+      ) : null}
       {showTasks ? <HeaderTaskList tasks={visibleTasks} /> : null}
       {showTasks && unfinishedTasks.length > 3 ? (
         <button
@@ -8619,16 +9456,56 @@ function DashboardNextEventCard({ event }: { event: EventEntry | null }) {
 }
 
 function DashboardFocusQueueCard({
-  focusQueue
+  focusQueue,
+  onAddOtherTask,
+  onDeleteOtherTask,
+  onOtherTaskChange,
+  onTaskStatusChange,
+  otherTasks
 }: {
   focusQueue: {
     allTasks: FocusQueueItem[];
     visibleTasks: FocusQueueItem[];
   };
+  onAddOtherTask: () => string;
+  onDeleteOtherTask: (taskId: string) => void;
+  onOtherTaskChange: (taskId: string, updates: Partial<OtherTask>) => void;
+  onTaskStatusChange: (task: FocusQueueItem, status: MarketingStatus) => void;
+  otherTasks: OtherTask[];
 }) {
   const [isTaskListOpen, setIsTaskListOpen] = useState(false);
-  const tasks = isTaskListOpen ? focusQueue.allTasks : focusQueue.visibleTasks;
-  const hiddenTaskCount = focusQueue.allTasks.length - focusQueue.visibleTasks.length;
+  const [editingOtherTaskId, setEditingOtherTaskId] = useState<string | null>(null);
+  const [openStatusTaskId, setOpenStatusTaskId] = useState<string | null>(null);
+  const [showCompletedOtherTasks, setShowCompletedOtherTasks] = useState(false);
+  const tasks = focusQueue.visibleTasks;
+  const activeOtherTasks = otherTasks
+    .filter((task) => task.status !== "done" && task.status !== "irrelevant")
+    .sort(
+      (firstTask, secondTask) =>
+        getBudgetDateSortTime(firstTask.dueDate) -
+          getBudgetDateSortTime(secondTask.dueDate) ||
+        firstTask.title.localeCompare(secondTask.title)
+    );
+  const expandedOtherTasks = activeOtherTasks.slice(3);
+  const editingActiveHeaderTask =
+    editingOtherTaskId && !expandedOtherTasks.some((task) => task.id === editingOtherTaskId)
+      ? activeOtherTasks.find((task) => task.id === editingOtherTaskId) ?? null
+      : null;
+  const displayedExpandedOtherTasks = editingActiveHeaderTask
+    ? [editingActiveHeaderTask, ...expandedOtherTasks]
+    : expandedOtherTasks;
+  const completedOtherTasks = otherTasks
+    .filter((task) => task.status === "done" || task.status === "irrelevant")
+    .sort(
+      (firstTask, secondTask) =>
+        getBudgetDateSortTime(secondTask.dueDate) -
+          getBudgetDateSortTime(firstTask.dueDate) ||
+        firstTask.title.localeCompare(secondTask.title)
+    );
+  const getEditableOtherTaskId = (task: FocusQueueItem) =>
+    task.source === "Other" && task.id.startsWith("other-other-task-")
+      ? task.id.replace(/^other-/, "")
+      : null;
 
   return (
     <section className="dashboard-focus" aria-label="Focus queue">
@@ -8641,9 +9518,77 @@ function DashboardFocusQueueCard({
           <ul className="dashboard-focus-list">
             {tasks.map((task) => (
               <li key={task.id}>
-                <span className="dashboard-focus-source">{task.source}</span>
-                <StatusDot status={task.status} label={statusLabels[task.status]} />
-                <span>{task.label}</span>
+                <div className="dashboard-focus-task-topline">
+                  <span className="dashboard-focus-task-header">
+                    <span className="dashboard-focus-source">{task.source}</span>
+                    <StatusDot status={task.status} label={statusLabels[task.status]} />
+                  </span>
+                  <span className="dashboard-focus-task-label">{task.label}</span>
+                  <div className="dashboard-focus-status-menu-wrap">
+                    <button
+                      aria-expanded={openStatusTaskId === task.id}
+                      aria-label={`Change status for ${task.label}`}
+                      className="dashboard-focus-status-button"
+                      onClick={() =>
+                        setOpenStatusTaskId((currentId) =>
+                          currentId === task.id ? null : task.id
+                        )
+                      }
+                      title="Change status"
+                      type="button"
+                    >
+                      <ChevronDown size={14} aria-hidden />
+                    </button>
+                    {openStatusTaskId === task.id ? (
+                      <div className="dashboard-focus-status-menu">
+                        {getEditableOtherTaskId(task) ? (
+                          <button
+                            className="dashboard-focus-status-option"
+                            onClick={() => {
+                              setEditingOtherTaskId(getEditableOtherTaskId(task));
+                              setIsTaskListOpen(true);
+                              setOpenStatusTaskId(null);
+                            }}
+                            type="button"
+                          >
+                            <Pencil size={14} aria-hidden />
+                            Edit
+                          </button>
+                        ) : null}
+                        {getFocusQueueStatusOptions(task).map((status) => (
+                          <button
+                            className="dashboard-focus-status-option"
+                            disabled={
+                              !task.actionTarget && getEditableOtherTaskId(task) === null
+                            }
+                            key={status}
+                            onClick={() => {
+                              const editableOtherTaskId = getEditableOtherTaskId(task);
+
+                              if (editableOtherTaskId) {
+                                onOtherTaskChange(editableOtherTaskId, {
+                                  status
+                                });
+                              } else {
+                                onTaskStatusChange(task, status);
+                              }
+                              setOpenStatusTaskId(null);
+                            }}
+                            title={
+                              task.actionTarget || getEditableOtherTaskId(task)
+                                ? statusLabels[status]
+                                : "This automatic reminder is updated from its source"
+                            }
+                            type="button"
+                          >
+                            <StatusDot status={status} label={statusLabels[status]} />
+                            {statusLabels[status]}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
               </li>
             ))}
           </ul>
@@ -8652,41 +9597,299 @@ function DashboardFocusQueueCard({
             No focus tasks are scheduled yet.
           </p>
         )}
-        {focusQueue.allTasks.length > focusQueue.visibleTasks.length ? (
+        <div className="dashboard-focus-actions">
           <button
             className="dashboard-task-toggle"
             onClick={() => setIsTaskListOpen((current) => !current)}
             type="button"
           >
-            {isTaskListOpen
-              ? "Show 3 focus tasks"
-              : `Show all focus tasks (${hiddenTaskCount} more)`}
+            {isTaskListOpen ? "Hide focus details" : "Show focus details"}
           </button>
+          <button
+            className="dashboard-other-add dashboard-other-add-compact"
+            onClick={() => {
+              const newTaskId = onAddOtherTask();
+              setEditingOtherTaskId(newTaskId);
+              setIsTaskListOpen(true);
+            }}
+            type="button"
+          >
+            <Plus size={14} aria-hidden />
+            Other task
+          </button>
+        </div>
+        {isTaskListOpen ? (
+          <div className="dashboard-other-tasks">
+            <OtherTaskList
+              editingTaskId={editingOtherTaskId}
+              emptyText={
+                activeOtherTasks.length > 0
+                  ? "No extra active other tasks beyond the header."
+                  : "No active other tasks yet."
+              }
+              onDeleteTask={onDeleteOtherTask}
+              onEditTask={setEditingOtherTaskId}
+              onTaskChange={onOtherTaskChange}
+              tasks={displayedExpandedOtherTasks}
+            />
+            {completedOtherTasks.length > 0 ? (
+              <>
+                <button
+                  className="dashboard-task-toggle"
+                  onClick={() => setShowCompletedOtherTasks((current) => !current)}
+                  type="button"
+                >
+                  {showCompletedOtherTasks
+                    ? "Hide completed other tasks"
+                    : `Show completed other tasks (${completedOtherTasks.length})`}
+                </button>
+                {showCompletedOtherTasks ? (
+                  <OtherTaskList
+                    editingTaskId={editingOtherTaskId}
+                    emptyText=""
+                    onDeleteTask={onDeleteOtherTask}
+                    onEditTask={setEditingOtherTaskId}
+                    onTaskChange={onOtherTaskChange}
+                    tasks={completedOtherTasks}
+                  />
+                ) : null}
+              </>
+            ) : null}
+          </div>
         ) : null}
       </article>
     </section>
   );
 }
 
-function DashboardProductionPreview({
-  songs
+function OtherTaskList({
+  editingTaskId,
+  emptyText,
+  onDeleteTask,
+  onEditTask,
+  onTaskChange,
+  tasks
 }: {
-  songs: ProductionSongConfig[];
+  editingTaskId: string | null;
+  emptyText: string;
+  onDeleteTask: (taskId: string) => void;
+  onEditTask: (taskId: string | null) => void;
+  onTaskChange: (taskId: string, updates: Partial<OtherTask>) => void;
+  tasks: OtherTask[];
 }) {
-  const [currentSong, nextSong] = songs;
+  const [openOtherMenuTaskId, setOpenOtherMenuTaskId] = useState<string | null>(null);
+  const editingTaskRef = useRef<HTMLDivElement | null>(null);
 
+  useEffect(() => {
+    if (!editingTaskId) {
+      return;
+    }
+
+    const scrollTimer = window.setTimeout(() => {
+      editingTaskRef.current?.scrollIntoView({
+        block: "start",
+        behavior: "smooth"
+      });
+    }, 60);
+
+    return () => {
+      window.clearTimeout(scrollTimer);
+    };
+  }, [editingTaskId]);
+
+  if (tasks.length === 0) {
+    return emptyText ? <p className="dashboard-focus-empty">{emptyText}</p> : null;
+  }
+
+  return (
+    <div className="dashboard-other-task-list">
+      {tasks.map((task) =>
+        editingTaskId === task.id ? (
+          <OtherTaskEditor
+            key={task.id}
+            onClose={() => onEditTask(null)}
+            onDeleteTask={onDeleteTask}
+            onTaskChange={onTaskChange}
+            ref={editingTaskRef}
+            task={task}
+          />
+        ) : (
+          <div className="dashboard-other-task-row" key={task.id}>
+            <div className="dashboard-focus-task-topline">
+              <span className="dashboard-focus-task-header">
+                <span className="dashboard-focus-source">Other</span>
+                <StatusDot status={task.status} label={statusLabels[task.status]} />
+              </span>
+              <span className="dashboard-focus-task-label">
+                {toOtherFocusQueueItem(task).label}
+              </span>
+              <div className="dashboard-focus-status-menu-wrap">
+                <button
+                  aria-expanded={openOtherMenuTaskId === task.id}
+                  aria-label={`Change status for ${task.title || "other task"}`}
+                  className="dashboard-focus-status-button"
+                  onClick={() =>
+                    setOpenOtherMenuTaskId((currentId) =>
+                      currentId === task.id ? null : task.id
+                    )
+                  }
+                  title="Task actions"
+                  type="button"
+                >
+                  <ChevronDown size={14} aria-hidden />
+                </button>
+                {openOtherMenuTaskId === task.id ? (
+                  <div className="dashboard-focus-status-menu">
+                    <button
+                      className="dashboard-focus-status-option"
+                      onClick={() => {
+                        onEditTask(task.id);
+                        setOpenOtherMenuTaskId(null);
+                      }}
+                      type="button"
+                    >
+                      <Pencil size={14} aria-hidden />
+                      Edit
+                    </button>
+                    {marketingUploadStatusOptions.map((status) => (
+                      <button
+                        className="dashboard-focus-status-option"
+                        key={status}
+                        onClick={() => {
+                          onTaskChange(task.id, { status });
+                          setOpenOtherMenuTaskId(null);
+                        }}
+                        type="button"
+                      >
+                        <StatusDot status={status} label={statusLabels[status]} />
+                        {statusLabels[status]}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+const OtherTaskEditor = forwardRef<HTMLDivElement, {
+  onClose: () => void;
+  onDeleteTask: (taskId: string) => void;
+  onTaskChange: (taskId: string, updates: Partial<OtherTask>) => void;
+  task: OtherTask;
+}>(function OtherTaskEditor({
+  onClose,
+  onDeleteTask,
+  onTaskChange,
+  task
+}, ref) {
+  return (
+    <div className="dashboard-other-task-editor" ref={ref}>
+      <label>
+        <span>Task</span>
+        <input
+          onChange={(event) =>
+            onTaskChange(task.id, { title: event.target.value })
+          }
+          placeholder="Short description"
+          value={task.title}
+        />
+      </label>
+      <label>
+        <span>Due date</span>
+        <input
+          onChange={(event) =>
+            onTaskChange(task.id, { dueDate: event.target.value })
+          }
+          placeholder="24/07/2026"
+          value={task.dueDate}
+        />
+      </label>
+      <label>
+        <span>Status</span>
+        <select
+          onChange={(event) =>
+            onTaskChange(task.id, {
+              status: event.target.value as MarketingStatus
+            })
+          }
+          value={task.status}
+        >
+          {marketingUploadStatusOptions.map((status) => (
+            <option key={status} value={status}>
+              {statusLabels[status]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="dashboard-other-task-notes">
+        <span>Notes</span>
+        <textarea
+          onChange={(event) =>
+            onTaskChange(task.id, { notes: event.target.value })
+          }
+          placeholder="Optional context"
+          rows={1}
+          value={task.notes}
+        />
+      </label>
+      <div className="dashboard-other-task-editor-actions">
+        <button
+          aria-label={`Delete ${task.title || "other task"}`}
+          className="icon-button danger ghost dashboard-other-task-delete"
+          onClick={() => onDeleteTask(task.id)}
+          title="Delete task"
+          type="button"
+        >
+          <Trash2 size={16} aria-hidden />
+        </button>
+        <button
+          aria-label="Close edit mode"
+          className="icon-button ghost dashboard-other-task-collapse"
+          onClick={onClose}
+          title="Close edit"
+          type="button"
+        >
+          <ChevronDown className="dashboard-other-task-collapse-icon" size={16} aria-hidden />
+        </button>
+      </div>
+    </div>
+  );
+});
+
+function getFocusQueueStatusOptions(task: FocusQueueItem) {
+  return task.source === "Production"
+    ? marketingStatusOptions
+    : marketingUploadStatusOptions;
+}
+
+function DashboardProductionPreview({
+  preview
+}: {
+  preview: ReturnType<typeof getDashboardProductionPreview>;
+}) {
   return (
     <section className="dashboard-production" aria-label="Production preview">
       <div className="dashboard-production-grid">
         <DashboardProductionCard
+          compact
+          emptyText="No benchmark production song yet."
+          label="Benchmark production"
+          song={preview.benchmark}
+        />
+        <DashboardProductionCard
           emptyText="No current production song yet."
           label="Current song"
-          song={currentSong ?? null}
+          song={preview.current}
         />
         <DashboardProductionCard
           emptyText="No next production song yet."
           label="Next song"
-          song={nextSong ?? null}
+          song={preview.next}
         />
       </div>
     </section>
@@ -8694,10 +9897,12 @@ function DashboardProductionPreview({
 }
 
 function DashboardProductionCard({
+  compact = false,
   emptyText,
   label,
   song
 }: {
+  compact?: boolean;
   emptyText: string;
   label: string;
   song: ProductionSongConfig | null;
@@ -8716,6 +9921,7 @@ function DashboardProductionCard({
   const deadlineDate = parseCampaignDate(song.deadline);
   const allTasks = getProductionTaskList(song.steps);
   const nextTasks = getNextProductionTasks(song.steps);
+  const benchmarkDays = getProductionBenchmarkDays(song);
   const visibleTasks = isTaskListOpen
     ? allTasks
     : nextTasks.length > 0
@@ -8724,7 +9930,9 @@ function DashboardProductionCard({
   const hiddenTaskCount = allTasks.length - visibleTasks.length;
 
   return (
-    <article className="dashboard-production-card">
+    <article
+      className={`dashboard-production-card${compact ? " dashboard-production-card-compact" : ""}`}
+    >
       <div className="dashboard-production-card-header">
         <div className="dashboard-production-title-row">
           {song.albumArtUrl ? (
@@ -8741,22 +9949,31 @@ function DashboardProductionCard({
           )}
           <div>
             <p className="eyebrow">{label}</p>
-            <h3>{song.title}</h3>
+            <h3>
+              {song.title}
+              {compact && benchmarkDays !== null ? ` - ${benchmarkDays} days` : ""}
+            </h3>
           </div>
         </div>
-        <div className="dashboard-campaign-date">
-          <strong>
-            {formatDaysToProductionDeadline(
-              deadlineDate ? getDaysToRelease(deadlineDate) : null
-            )}
-          </strong>
-          {deadlineDate ? <span>{formatCampaignDate(deadlineDate)}</span> : null}
-        </div>
+        {compact ? null : (
+          <div className="dashboard-campaign-date">
+            <strong>
+              {formatDaysToProductionDeadline(
+                deadlineDate ? getDaysToRelease(deadlineDate) : null
+              )}
+            </strong>
+            {deadlineDate ? <span>{formatCampaignDate(deadlineDate)}</span> : null}
+          </div>
+        )}
       </div>
 
-      <ProductionProgressStrip steps={song.steps} />
-      <HeaderTaskList tasks={visibleTasks} />
-      {allTasks.length > 3 ? (
+      {compact ? null : (
+        <div className="dashboard-production-progress-row">
+          <ProductionProgressStrip steps={song.steps} />
+        </div>
+      )}
+      {compact ? null : <HeaderTaskList tasks={visibleTasks} />}
+      {!compact && allTasks.length > 3 ? (
         <button
           className="dashboard-task-toggle"
           onClick={() => setIsTaskListOpen((current) => !current)}
@@ -8842,18 +10059,22 @@ function PlatformsView({
   onAppleMusicCsvImport,
   onDeleteQrCode,
   onQrCodeChange,
+  onRefreshPlatformStats,
   platformMetricRows,
   platformStatsData,
-  qrCodeLinks
+  qrCodeLinks,
+  refreshStatus
 }: {
   appleMusicImportStatus: AppleMusicImportStatus;
   onAddQrCode: () => void;
   onAppleMusicCsvImport: (file: File) => void;
   onDeleteQrCode: (linkId: string) => void;
   onQrCodeChange: (linkId: string, updates: Partial<QrCodeLink>) => void;
+  onRefreshPlatformStats: () => void;
   platformMetricRows: MetricRow[];
   platformStatsData: typeof platformStats;
   qrCodeLinks: QrCodeLink[];
+  refreshStatus: RefreshStatus;
 }) {
   const instagramFollowerTrend = getPlatformMetricTrend(
     platformMetricRows,
@@ -8878,10 +10099,34 @@ function PlatformsView({
     "instagram"
   );
   const youtubeSubscriberTrend = getYouTubeSubscriberTrend(platformMetricRows);
+  const youtubeTotalViewsTrend = getPlatformMetricTrend(
+    platformMetricRows,
+    "youtube",
+    "total_channel_views",
+    []
+  );
   const youtubeLastUpdate = getPlatformLastSnapshotDate(platformMetricRows, "youtube");
+  const youtubeMusicSubscriberTrend = getPlatformMetricTrend(
+    platformMetricRows,
+    "youtube-music",
+    "subscribers",
+    []
+  );
+  const youtubeMusicTotalPlaysTrend = getPlatformMetricTrend(
+    platformMetricRows,
+    "youtube-music",
+    "total_plays",
+    []
+  );
   const youtubeMusicLastUpdate = getPlatformLastSnapshotDate(
     platformMetricRows,
     "youtube-music"
+  );
+  const appleMusicTotalPlaysTrend = getPlatformMetricTrend(
+    platformMetricRows,
+    "apple-music",
+    "total_plays",
+    []
   );
   const appleMusicLastUpdate = getAppleMusicLastUpdateDate(
     platformStatsData,
@@ -8891,13 +10136,29 @@ function PlatformsView({
   return (
     <>
       <header className="topbar">
-        <div>
-          <p className="eyebrow">Detailed platform statistics</p>
+        <div className="topbar-title-block">
+          <div className="topbar-eyebrow-row">
+            <p className="eyebrow">Detailed platform statistics</p>
+            <ModuleHeaderDate />
+          </div>
           <h1>Platforms</h1>
         </div>
-        <button className="icon-button" type="button" aria-label="Open project setup">
-          <ArrowUpRight size={18} aria-hidden />
-        </button>
+        <div className="dashboard-refresh-control platform-refresh-control">
+          <button
+            className="refresh-button"
+            disabled={refreshStatus.state === "loading"}
+            onClick={onRefreshPlatformStats}
+            type="button"
+          >
+            <RefreshCw size={16} aria-hidden />
+            Refresh
+          </button>
+          {refreshStatus.message ? (
+            <span className={`refresh-status refresh-status-${refreshStatus.state}`}>
+              {refreshStatus.message}
+            </span>
+          ) : null}
+        </div>
       </header>
 
       <PlatformStatsSection
@@ -8912,14 +10173,17 @@ function PlatformsView({
               <PlatformTrendPanelGroup
                 charts={[
                   {
+                    color: "#1f7a58",
                     label: "Followers",
                     points: instagramFollowerTrend
                   },
                   {
+                    color: "#c79522",
                     label: "Accounts reached, last 30 days",
                     points: instagramReachTrend
                   },
                   {
+                    color: "#2f75a8",
                     label: "Views, last 30 days",
                     points: instagramViewsTrend
                   }
@@ -8928,10 +10192,45 @@ function PlatformsView({
               />
             ) : null}
             {platform.slug === "youtube" ? (
+              <PlatformTrendPanelGroup
+                charts={[
+                  {
+                    color: "#1f7a58",
+                    label: "Subscribers",
+                    points: youtubeSubscriberTrend
+                  },
+                  {
+                    color: "#2f75a8",
+                    label: "Lifetime views",
+                    points: youtubeTotalViewsTrend
+                  }
+                ]}
+                title="Evolution graphs"
+              />
+            ) : null}
+            {platform.slug === "youtube-music" ? (
+              <PlatformTrendPanelGroup
+                charts={[
+                  {
+                    color: "#1f7a58",
+                    label: "Subscribers",
+                    points: youtubeMusicSubscriberTrend
+                  },
+                  {
+                    color: "#2f75a8",
+                    label: "Total plays",
+                    points: youtubeMusicTotalPlaysTrend
+                  }
+                ]}
+                title="Evolution graphs"
+              />
+            ) : null}
+            {platform.slug === "apple-music" ? (
               <PlatformTrendPanel
-                label="Subscribers"
-                points={youtubeSubscriberTrend}
-                title="Subscriber evolution"
+                color="#2f75a8"
+                label="Total plays"
+                points={appleMusicTotalPlaysTrend}
+                title="Evolution graphs"
               />
             ) : null}
           </>
@@ -9247,10 +10546,12 @@ function parsePlatformUpdateDate(value: string) {
 }
 
 function PlatformTrendPanel({
+  color = "#1f7a58",
   label,
   points,
   title
 }: {
+  color?: string;
   label: string;
   points: MetricTrendPoint[];
   title: string;
@@ -9259,6 +10560,7 @@ function PlatformTrendPanel({
     <PlatformTrendPanelGroup
       charts={[
         {
+          color,
           label,
           points
         }
@@ -9273,6 +10575,7 @@ function PlatformTrendPanelGroup({
   title
 }: {
   charts: Array<{
+    color?: string;
     label: string;
     points: MetricTrendPoint[];
   }>;
@@ -9303,6 +10606,7 @@ function PlatformTrendPanelGroup({
         <div className="platform-trend-body">
           {charts.map((chart) => (
             <PlatformTrendChartBlock
+              color={chart.color}
               key={chart.label}
               label={chart.label}
               points={chart.points}
@@ -9315,9 +10619,11 @@ function PlatformTrendPanelGroup({
 }
 
 function PlatformTrendChartBlock({
+  color = "#1f7a58",
   label,
   points
 }: {
+  color?: string;
   label: string;
   points: MetricTrendPoint[];
 }) {
@@ -9329,7 +10635,14 @@ function PlatformTrendChartBlock({
   return (
     <div className="platform-trend-chart-block">
       <div className="platform-trend-summary">
-        <span>{label}</span>
+        <span className="platform-trend-title-with-legend">
+          <i
+            aria-hidden
+            className="platform-trend-legend-square"
+            style={{ backgroundColor: color }}
+          />
+          {label}
+        </span>
         <strong>
           {firstPoint && lastPoint
             ? `${formatMetricValue(firstPoint.value)} -> ${formatMetricValue(lastPoint.value)}`
@@ -9337,15 +10650,17 @@ function PlatformTrendChartBlock({
         </strong>
         <em>{change >= 0 ? `+${formatMetricValue(change)}` : formatMetricValue(change)}</em>
       </div>
-      <PlatformLineChart label={label} points={points} />
+      <PlatformLineChart color={color} label={label} points={points} />
     </div>
   );
 }
 
 function PlatformLineChart({
+  color = "#1f7a58",
   label,
   points
 }: {
+  color?: string;
   label: string;
   points: MetricTrendPoint[];
 }) {
@@ -9353,9 +10668,11 @@ function PlatformLineChart({
     return <p className="platform-trend-empty">Not enough history yet.</p>;
   }
 
-  const width = 360;
-  const height = 160;
-  const padding = 24;
+  const width = 320;
+  const height = 132;
+  const padding = 14;
+  const labelBandHeight = 20;
+  const gridBottom = height - padding - labelBandHeight;
   const minValue = Math.min(...points.map((point) => point.value));
   const maxValue = Math.max(...points.map((point) => point.value));
   const firstTime = Date.parse(points[0].date);
@@ -9363,12 +10680,12 @@ function PlatformLineChart({
   const valueRange = Math.max(maxValue - minValue, 1);
   const timeRange = Math.max(lastTime - firstTime, 1);
   const chartWidth = width - padding * 2;
-  const chartHeight = height - padding * 2;
+  const chartHeight = gridBottom - padding;
 
   const coordinates = points.map((point) => {
     const time = Date.parse(point.date);
     const x = padding + ((time - firstTime) / timeRange) * chartWidth;
-    const y =
+    const labelY =
       padding +
       chartHeight -
       ((point.value - minValue) / valueRange) * chartHeight;
@@ -9376,55 +10693,90 @@ function PlatformLineChart({
     return {
       ...point,
       x,
-      y
+      labelY,
+      y: labelY + 8
     };
   });
-  const pathData = coordinates
-    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
+  const linePoints = coordinates
+    .map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`)
     .join(" ");
-  const areaData = `${pathData} L ${
-    coordinates.at(-1)?.x ?? padding
-  } ${height - padding} L ${padding} ${height - padding} Z`;
+  const middleIndex = Math.floor((coordinates.length - 1) / 2);
+  const labeledPointIndexes = new Set([0, middleIndex, coordinates.length - 1]);
+  const verticalGridLines = Array.from({ length: 6 }, (_, index) => {
+    return padding + (index / 5) * chartWidth;
+  });
+  const horizontalGridLines = Array.from({ length: 4 }, (_, index) => {
+    return padding + (index / 3) * chartHeight;
+  });
 
   return (
-    <div className="platform-line-chart">
+    <div
+      className="platform-line-chart"
+      style={{ "--platform-chart-color": color } as React.CSSProperties}
+    >
       <svg
         aria-label={`${label} over time`}
-        preserveAspectRatio="none"
         role="img"
         viewBox={`0 0 ${width} ${height}`}
       >
-        <line
-          className="platform-line-chart-grid"
-          x1={padding}
-          x2={width - padding}
-          y1={height - padding}
-          y2={height - padding}
+        <rect
+          className="platform-line-chart-grid-frame"
+          height={chartHeight}
+          width={chartWidth}
+          x={padding}
+          y={padding}
         />
-        <line
-          className="platform-line-chart-grid"
-          x1={padding}
-          x2={width - padding}
-          y1={padding}
-          y2={padding}
-        />
-        <path className="platform-line-chart-area" d={areaData} />
-        <path className="platform-line-chart-line" d={pathData} />
-        {coordinates.map((point) => (
-          <circle
-            className={`platform-line-chart-dot platform-line-chart-dot-${point.source}`}
-            cx={point.x}
-            cy={point.y}
-            key={`${point.date}-${point.value}`}
-            r={point.source === "manual" ? 3.5 : 4}
+        {verticalGridLines.map((x) => (
+          <line
+            className="platform-line-chart-grid-line"
+            key={`vertical-${x.toFixed(1)}`}
+            x1={x}
+            x2={x}
+            y1={padding}
+            y2={gridBottom}
           />
         ))}
+        {horizontalGridLines.map((y) => (
+          <line
+            className="platform-line-chart-grid-line"
+            key={`horizontal-${y.toFixed(1)}`}
+            x1={padding}
+            x2={width - padding}
+            y1={y}
+            y2={y}
+          />
+        ))}
+        <polyline className="platform-line-chart-line" points={linePoints} />
+        {coordinates.map((point, index) => (
+          <g key={`${point.date}-${point.value}`}>
+            <circle className="platform-line-chart-dot" cx={point.x} cy={point.y} r="4" />
+            {labeledPointIndexes.has(index) ? (
+              <text
+                className="platform-line-chart-value"
+                textAnchor={
+                  index === 0 ? "start" : index === coordinates.length - 1 ? "end" : "middle"
+                }
+                x={point.x}
+                y={Math.max(12, point.labelY - 8)}
+              >
+                {formatMetricValue(point.value)}
+              </text>
+            ) : null}
+            {labeledPointIndexes.has(index) ? (
+              <text
+                className="platform-line-chart-month"
+                textAnchor={
+                  index === 0 ? "start" : index === coordinates.length - 1 ? "end" : "middle"
+                }
+                x={point.x}
+                y={height - 2}
+              >
+                {formatTrendDate(points[index].date)}
+              </text>
+            ) : null}
+          </g>
+        ))}
       </svg>
-      <div className="platform-line-chart-axis">
-        <span>{formatTrendDate(points[0].date)}</span>
-        <span>{maxValue}</span>
-        <span>{formatTrendDate(points.at(-1)?.date ?? points[0].date)}</span>
-      </div>
     </div>
   );
 }
@@ -9458,14 +10810,66 @@ function mergePlatformMetricRows(
       }
 
       const context = getMetricDisplayContext(platform.slug, metric.metricName, row, metric.context);
+      const dailyDelta = getPlatformMetricDelta(platform.slug, metric.metricName, row, rows);
 
       return {
         ...metric,
         value: getMetricDisplayValue(metric.metricName, row),
-        context
+        context,
+        ...(dailyDelta ? { dailyDelta } : {})
       };
     })
   }));
+}
+
+const platformMetricDeltaKeys = new Set([
+  "instagram:followers",
+  "instagram:accounts_reached_30d",
+  "instagram:views_30d",
+  "youtube:subscribers",
+  "youtube:total_channel_views",
+  "youtube-music:subscribers",
+  "youtube-music:total_plays",
+  "apple-music:total_plays",
+  "apple-music:total_shazams"
+]);
+
+function getPlatformMetricDelta(
+  platformSlug: string,
+  metricName: string,
+  currentRow: MetricRow,
+  rows: MetricRow[]
+): PlatformMetricDelta | null {
+  if (!platformMetricDeltaKeys.has(`${platformSlug}:${metricName}`)) {
+    return null;
+  }
+
+  const currentValue = Number(currentRow.metric_value);
+
+  if (!Number.isFinite(currentValue)) {
+    return null;
+  }
+
+  const previousRow = rows
+    .filter(
+      (candidate) =>
+        getSingle(candidate.platforms)?.slug === platformSlug &&
+        candidate.metric_name === metricName &&
+        candidate.snapshot_date < currentRow.snapshot_date &&
+        Number.isFinite(Number(candidate.metric_value))
+    )
+    .sort(compareMetricRows)[0];
+
+  if (!previousRow) {
+    return null;
+  }
+
+  const delta = currentValue - Number(previousRow.metric_value);
+
+  return {
+    direction: delta > 0 ? "up" : delta < 0 ? "down" : "flat",
+    value: delta
+  };
 }
 
 function getMetricDisplayContext(
@@ -9997,12 +11401,26 @@ function formatProductionStepDate(value: string) {
   return formatCampaignDate(date);
 }
 
+function isRelevantMarketingStatus(status: MarketingStatus) {
+  return status !== "irrelevant";
+}
+
+function isUnfinishedRelevantStatus(status: MarketingStatus) {
+  return status !== "done" && isRelevantMarketingStatus(status);
+}
+
 function calculateCampaignCompletion(days: CampaignDay[]) {
-  const statuses = days.flatMap((day) => [
-    ...Object.values(day.statuses),
-    ...day.extraTasks.map((task) => task.status)
-  ]);
+  const statuses = days
+    .flatMap((day) => [
+      ...Object.values(day.statuses),
+      ...day.extraTasks.map((task) => task.status)
+    ])
+    .filter(isRelevantMarketingStatus);
   const doneCount = statuses.filter((status) => status === "done").length;
+
+  if (statuses.length === 0) {
+    return 100;
+  }
 
   return Math.round((doneCount / statuses.length) * 100);
 }
@@ -10012,14 +11430,14 @@ function getNextCampaignTasks(days: CampaignDay[]): CampaignTaskItem[] {
     .flatMap((day) => {
       const tasks: CampaignTaskItem[] = [];
 
-      if (day.statuses.production !== "done") {
+      if (isUnfinishedRelevantStatus(day.statuses.production)) {
         tasks.push({
           id: `${day.dayNumber}-production`,
           label: `${day.date} - ${day.clipName} - Make video / post`,
           status: day.statuses.production
         });
       } else {
-        if (day.statuses.instagramUpload !== "done") {
+        if (isUnfinishedRelevantStatus(day.statuses.instagramUpload)) {
           tasks.push({
             id: `${day.dayNumber}-instagram`,
             label: `${day.date} - ${day.clipName} - IG Upload`,
@@ -10027,7 +11445,7 @@ function getNextCampaignTasks(days: CampaignDay[]): CampaignTaskItem[] {
           });
         }
 
-        if (day.statuses.youtubeUpload !== "done") {
+        if (isUnfinishedRelevantStatus(day.statuses.youtubeUpload)) {
           tasks.push({
             id: `${day.dayNumber}-youtube`,
             label: `${day.date} - ${day.clipName} - YT upload`,
@@ -10039,7 +11457,7 @@ function getNextCampaignTasks(days: CampaignDay[]): CampaignTaskItem[] {
       return [
         ...tasks,
         ...day.extraTasks
-          .filter((task) => task.status !== "done")
+          .filter((task) => isUnfinishedRelevantStatus(task.status))
           .map((task) => ({
             id: `${day.dayNumber}-${task.id}`,
             label: `${day.date}: ${task.title}`,
@@ -10053,8 +11471,12 @@ function getCampaignDayStatus(day: CampaignDay): CampaignDayProgressStatus {
   const statuses = [
     ...Object.values(day.statuses),
     ...day.extraTasks.map((task) => task.status)
-  ];
+  ].filter(isRelevantMarketingStatus);
   const doneCount = statuses.filter((status) => status === "done").length;
+
+  if (statuses.length === 0) {
+    return "complete";
+  }
 
   if (doneCount === statuses.length) {
     return "complete";
@@ -10167,22 +11589,37 @@ function PlatformStatsSection({
                         metric.metricName === "last_update_date"
                       )
                   )
-                  .map((metric) => (
-                  <div
-                    className={
-                      metric.metricName === "last_update_date"
-                        ? "platform-metric-row platform-metric-row-inline"
-                        : "platform-metric-row"
-                    }
-                    key={`${platform.platform}-${metric.label}`}
-                  >
-                    <dt>
-                      {metric.label}
-                      {metric.context ? <span>{metric.context}</span> : null}
-                    </dt>
-                    <dd>{metric.value}</dd>
-                  </div>
-                ))}
+                  .map((metric) => {
+                    const dailyDelta = (metric as { dailyDelta?: PlatformMetricDelta })
+                      .dailyDelta;
+
+                    return (
+                      <div
+                        className={
+                          metric.metricName === "last_update_date"
+                            ? "platform-metric-row platform-metric-row-inline"
+                            : "platform-metric-row"
+                        }
+                        key={`${platform.platform}-${metric.label}`}
+                      >
+                        <dt>
+                          {metric.label}
+                          {metric.context ? <span>{metric.context}</span> : null}
+                        </dt>
+                        <dd>
+                          {metric.value}
+                          {dailyDelta ? (
+                            <span
+                              className={`platform-metric-delta platform-metric-delta-${dailyDelta.direction}`}
+                            >
+                              ({dailyDelta.value > 0 ? "+" : ""}
+                              {formatMetricValue(dailyDelta.value)})
+                            </span>
+                          ) : null}
+                        </dd>
+                      </div>
+                    );
+                  })}
               </dl>
               {cardAddon}
             </article>
@@ -10206,13 +11643,13 @@ function RoadmapView() {
   return (
     <>
       <header className="topbar">
-        <div>
-          <p className="eyebrow">Strategic overview</p>
+        <div className="topbar-title-block">
+          <div className="topbar-eyebrow-row">
+            <p className="eyebrow">Strategic overview</p>
+            <ModuleHeaderDate />
+          </div>
           <h1>Roadmap</h1>
         </div>
-        <button className="icon-button" type="button" aria-label="Open project setup">
-          <ArrowUpRight size={18} aria-hidden />
-        </button>
       </header>
 
       <section className="roadmap-overview panel" aria-label="General roadmap progress">

@@ -267,6 +267,11 @@ async function refreshYouTubeMetrics(): Promise<MetricCollectorResult> {
         metricValue: Number(channelItem.statistics?.subscriberCount ?? 0)
       },
       {
+        metricName: "total_channel_views",
+        metricUnit: "views",
+        metricValue: Number(channelItem.statistics?.viewCount ?? 0)
+      },
+      {
         contentExternalId: latestVideo.id,
         contentTitle: cleanAsciiTitle(latestVideo.snippet?.title ?? "Latest video"),
         contentType: "video",
@@ -294,7 +299,8 @@ async function refreshYouTubeMetrics(): Promise<MetricCollectorResult> {
     metrics: {
       latestShortViews: Number(latestShort.statistics?.viewCount ?? 0),
       latestVideoViews: Number(latestVideo.statistics?.viewCount ?? 0),
-      subscribers: Number(channelItem.statistics?.subscriberCount ?? 0)
+      subscribers: Number(channelItem.statistics?.subscriberCount ?? 0),
+      totalChannelViews: Number(channelItem.statistics?.viewCount ?? 0)
     },
     name: "youtube",
     status: "fulfilled"

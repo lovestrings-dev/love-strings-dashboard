@@ -443,3 +443,108 @@ Verification:
 - On 2026-07-15, Supabase contained fresh platform metric snapshots for the Europe/Vienna date `2026-07-15`.
 - Rows were imported around `2026-07-15T05:04:06-08Z`, which is about 07:04 in Vienna during daylight saving time.
 - The successful automated snapshot included Instagram, YouTube Channel, and YouTube Music metrics, confirming that the Vercel-based autopilot path worked.
+
+## 2026-07-16 - Platform Graphs And Metric Naming
+
+Decision:
+
+- Use one shared visual language for compact line graphs across Budget and Platforms.
+- Graphs should use a clean grid, thick colored line, compact points, small legend boxes in the graph title, and limited labels rather than labeling every data point.
+- Platform graph colors should communicate the nature of the metric:
+  - green for audience/followers/subscribers,
+  - blue for consumption/views/plays,
+  - amber for reach.
+- Treat the YouTube Data API channel `viewCount` as `Lifetime Views`, not as current 28-day views.
+- Keep YouTube Studio period views separate conceptually from YouTube API lifetime views.
+- Historical YouTube Lifetime Views should use real daily deltas when available and be clearly backed by current API totals, not invented seed numbers.
+
+Reason:
+
+- The Platforms tab is becoming an analytics surface, so inconsistent graph styles quickly make it look like separate prototypes stitched together.
+- The YouTube `viewCount` confusion showed that correct metric names are part of the data model, not just UI wording.
+- Labeling `viewCount` as `Lifetime Views` prevents a false comparison with YouTube Studio's selected-period views.
+
+## 2026-07-16 - Manual Refresh Belongs In Platforms
+
+Decision:
+
+- Move the manual metrics Refresh action from Dashboard to the Platforms tab.
+- Dashboard should mostly show the current state, while Platforms owns data-refresh and deeper analytics behavior.
+- Keep the scheduled Vercel Cron job as the normal daily update path.
+
+Reason:
+
+- The scheduler is now working, so manual refresh is less of a daily Dashboard action and more of an intentional platform-data maintenance action.
+- This keeps the Dashboard calmer and reduces visual clutter in the command-center view.
+
+## 2026-07-16 - Marketing Irrelevant Status
+
+Decision:
+
+- Add `Irrelevant` as a valid status for Marketing IG Upload and YT Upload tasks.
+- Exclude `Irrelevant` tasks from campaign completion percentage calculations.
+- Exclude `Irrelevant` tasks from unfinished-task lists and Focus Queue.
+- Do not add `Irrelevant` to the production status model.
+
+Reason:
+
+- Some campaign videos/posts are intentionally not suitable for both platforms.
+- Marking those tasks as Not started or In progress would make the campaign look less complete even when the plan is correct.
+- This status lets the campaign calendar describe reality without punishing the progress score.
+
+## 2026-07-16 - Focus Queue Status Control
+
+Decision:
+
+- Focus Queue can update source-linked Marketing and Production task statuses directly.
+- Marketing Focus Queue tasks expose the Marketing status set, including `Irrelevant` where allowed.
+- Production Focus Queue tasks expose Production statuses only.
+- Other tasks show status UI for design continuity, but do not save yet because the Other-task storage model is not decided.
+
+Reason:
+
+- Focus Queue should become the quick action surface for today's work, not only a read-only list.
+- Status changes must still respect the source module's rules so the Dashboard does not become a hidden second source of truth.
+- Other tasks need a deliberate storage design before they become active records.
+
+## 2026-07-16 - Focus Queue Owns Other Tasks
+
+Decision:
+
+- Do not create a separate app tab for miscellaneous `Other` tasks.
+- Make Focus Queue the home for Other tasks because they are usually small, fast, near-term reminders or ideas.
+- Collapsed Focus Queue should show:
+  - one Marketing reminder,
+  - one Production reminder,
+  - up to three active Other tasks.
+- Expanded Focus Queue should not repeat the full Marketing or Production task lists; those live in their own modules.
+- Expanded Focus Queue should show only Other tasks that are not already visible in the header, plus a hidden completed/irrelevant history section.
+- Other tasks can be `Not started`, `In progress`, `Done`, or `Irrelevant`.
+- `Done` and `Irrelevant` are treated as history/archive states, not deletion.
+- Keep delete available temporarily while testing, but the intended product direction is to preserve task history and avoid easy deletion.
+- Persist Other tasks locally first while the UX is being tested; wire them to Supabase after the workflow stabilizes.
+
+Reason:
+
+- Other tasks are important enough to remember, but not structured enough to deserve a full module.
+- Keeping them in Focus Queue turns the Dashboard into a practical daily action surface without adding navigation weight.
+- Preserving completed/irrelevant tasks supports later storytelling and personal memory: ideas that seem irrelevant today may become useful later.
+- Local-first implementation let us test interaction details quickly; shared Supabase persistence should come once the behavior is settled.
+
+## 2026-07-16 - Beta 1.7 Release Boundary
+
+Decision:
+
+- Treat the current Beta 1.7 candidate as a day of practical polish: platform analytics, Budget graphs, Focus Queue usability, dashboard refinements, and small cross-module additions.
+- Keep the new Other Tasks workflow local-only for this beta and wire it to Supabase in the next development session.
+- Let Event poster URLs persist now, because Events already has a Supabase-backed module and a poster that disappears after refresh would be confusing.
+- Add Benchmark production to Dashboard as a gamified target, matching the Benchmark campaign idea.
+- Keep Benchmark campaign as the best-completion campaign target, not a simple previous-campaign card.
+- Keep Benchmark production as a speed-to-produce target: count from the next production step when `Demo` is already done, otherwise count from `Demo`.
+
+Reason:
+
+- The Other Tasks interaction needed real UX testing before it became shared data for Dmitrii and Yuliia.
+- Event poster support is a small database-safe extension to an already wired module, so it fits the beta polish scope.
+- A beta release can carry many small quality-of-life wins as long as the one intentionally unfinished boundary is clearly named.
+- The current production database was checked before release prep: all 27 current songs still have `Demo` as the earliest step by date, so the Benchmark production duration rule matches the real records.
