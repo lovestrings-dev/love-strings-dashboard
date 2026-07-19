@@ -548,3 +548,76 @@ Reason:
 - Event poster support is a small database-safe extension to an already wired module, so it fits the beta polish scope.
 - A beta release can carry many small quality-of-life wins as long as the one intentionally unfinished boundary is clearly named.
 - The current production database was checked before release prep: all 27 current songs still have `Demo` as the earliest step by date, so the Benchmark production duration rule matches the real records.
+
+Post-release validation:
+
+- GitHub push and Vercel deploy completed successfully.
+- Focus Queue persisted through browser refresh and is considered ready for Supabase wiring in the next session.
+- Event poster URLs persisted through refresh, including newly added poster links.
+- Budget ledger looked clean after generated-line cleanup and is close to the intended autopilot tracker behavior.
+- Keep one rare Focus Queue add/edit oddity as a watch item, but do not block the release on it unless it becomes reproducible.
+
+Next direction:
+
+- Treat the next beta as `Other Tasks` persistence plus the Beta 1.7 polish backlog.
+- Roadmap logic is the next larger module after that.
+- UI graphics/skin work should be discussed before implementation; an old-school Winamp-inspired skin is a possible study case, not an immediate code task.
+
+## 2026-07-19 - Daily Focus Score
+
+Decision:
+
+- Set a daily Focus Queue target of 6 points: three completed tasks.
+- Score `Done` as 2 points, `In progress` as 1 point, `Not started` as 0, and exclude `Irrelevant`.
+- Show at least three compact status boxes in the Focus Queue header; add boxes when more than three tasks are touched so the score can exceed 100%.
+- Record one current status per stable task key and Vienna calendar day in Supabase. Repeated status changes update the same daily record instead of generating duplicate points.
+- Count status changes made directly in Marketing, Production, and Other-task editors as well as changes made from Focus Queue.
+- Count a successful Apple Music CSV import as one completed Other task for that day; opening or dismissing the reminder earns no points, and repeat imports update the same daily record.
+
+Reason:
+
+- The score rewards actual daily work rather than clicks inside one particular screen.
+- Fixed daily records create a future source for consistency/evolution graphs without inflating history through repeated status toggles.
+- This extends the app's `beat yourself` idea from campaign completion and production speed into everyday creative/admin momentum.
+
+## 2026-07-19 - Release-Day Marketing Defaults
+
+Decision:
+
+- Add three non-deletable standard tasks to the release day: `Update website`, `Facebook post`, and `YouTube post`.
+- Include them in campaign completion, unfinished-task lists, Focus Queue actions, daily Focus scoring, and Supabase campaign persistence.
+- Apply the defaults to active and future campaigns, but do not retrofit completed historical campaigns and distort benchmark percentages.
+
+Reason:
+
+- Release day includes important announcement work beyond the recurring video/IG/YT upload routine.
+- These actions are predictable enough to be standard tasks rather than manually recreated extras.
+
+## 2026-07-19 - Atomic And Protected Marketing Writes
+
+Decision:
+
+- Remove temporary anonymous write policies from all Marketing campaign tables.
+- Route campaign creation, header updates, and deletion through `/api/marketing/campaigns` using the server-held Supabase service role.
+- Replace campaign days and tasks through one database transaction exposed by `/api/marketing/campaign-days`.
+- Keep anonymous reads for the current dashboard experience, but do not expose direct browser writes.
+
+Reason:
+
+- A failed task insert previously had enough room to leave a campaign partially reset after its old days were deleted.
+- Atomic replacement guarantees all-or-nothing behavior and makes validation failures recoverable without data loss.
+- Server-side writes reduce the public mutation surface before the app grows beyond its current private beta audience.
+
+## 2026-07-19 - Shared QR Records
+
+Decision:
+
+- Store editable QR records in the private `qr_links` Supabase table and mutate them only through `/api/qr-links`.
+- Preserve local browser storage as an offline fallback and as the one-time source for seeding an empty shared QR list.
+- Replace the whole ordered QR list atomically because it is a small configuration collection, not a high-volume ledger.
+
+Reason:
+
+- QR links are useful specifically when the app is opened on different phones and by both Dmitrii and Yuliia.
+- Local-only QR configuration made each browser a separate source of truth.
+- The collection is small enough that one protected snapshot is simpler and safer than many independent reorder/update calls.

@@ -74,6 +74,13 @@ type OtherTask = {
   status: MarketingStatus;
   title: string;
 };
+type DailyFocusProgressItem = {
+  date: string;
+  label: string;
+  source: FocusQueueItem["source"];
+  status: MarketingStatus;
+  taskKey: string;
+};
 type CampaignDay = {
   dayNumber: number;
   date: string;
@@ -83,6 +90,9 @@ type CampaignDay = {
   clipName: string;
   extraTasks: ExtraCampaignTask[];
   statuses: {
+    facebookPost: MarketingStatus;
+    websiteUpdate: MarketingStatus;
+    youtubePost: MarketingStatus;
     production: MarketingStatus;
     instagramUpload: MarketingStatus;
     youtubeUpload: MarketingStatus;
@@ -249,7 +259,14 @@ type AppleMusicCsvRow = {
 };
 type MarketingCampaignTaskDbRow = {
   id: string;
-  task_kind: "production" | "instagram_upload" | "youtube_upload" | "extra";
+  task_kind:
+    | "production"
+    | "instagram_upload"
+    | "youtube_upload"
+    | "website_update"
+    | "facebook_post"
+    | "youtube_post"
+    | "extra";
   title: string;
   status: MarketingStatus;
   position: number;
@@ -528,7 +545,7 @@ const defaultQrCodeLinks: QrCodeLink[] = [
   }))
 ];
 
-const appVersionLabel = "Beta 1.7";
+const appVersionLabel = "Beta 1.8";
 
 const sections = [
   "Dashboard",
@@ -779,6 +796,9 @@ const eventDraftStorageKey = "love-strings-event-entry-drafts-v1";
 const locationAddressBookStorageKey = "love-strings-location-address-book-v1";
 const qrCodeLinksStorageKey = "love-strings-qr-code-links-v1";
 const otherTaskStorageKey = "love-strings-focus-other-tasks-v1";
+const otherTaskSupabaseMigrationKey = "love-strings-focus-other-tasks-supabase-v1";
+const appleMusicReminderDismissedDateKey =
+  "love-strings-apple-music-reminder-dismissed-date-v1";
 
 const newMarketingCampaign: Omit<MarketingCampaignConfig, "id"> = {
   releaseTitle: "New Campaign",
@@ -1945,7 +1965,7 @@ function formatModuleHeaderDate() {
     year: "numeric"
   }).format(new Date());
 
-  return `Today is - ${date}`.toUpperCase();
+  return date.toUpperCase();
 }
 
 function ModuleHeaderDate() {
@@ -3293,6 +3313,92 @@ function getDashboardFocusQueue(
   };
 }
 
+function getCampaignDailyProgressItems(
+  campaign: MarketingCampaignConfig,
+  days: CampaignDay[]
+) {
+  return days.flatMap((day): Array<Omit<DailyFocusProgressItem, "date">> => [
+    {
+      label: `${campaign.releaseTitle} - ${day.date} - Make video / post`,
+      source: "Marketing",
+      status: day.statuses.production,
+      taskKey: `marketing:${campaign.id}:day:${day.dayNumber}:production`
+    },
+    {
+      label: `${campaign.releaseTitle} - ${day.date} - IG Upload`,
+      source: "Marketing",
+      status: day.statuses.instagramUpload,
+      taskKey: `marketing:${campaign.id}:day:${day.dayNumber}:instagram`
+    },
+    {
+      label: `${campaign.releaseTitle} - ${day.date} - YT upload`,
+      source: "Marketing",
+      status: day.statuses.youtubeUpload,
+      taskKey: `marketing:${campaign.id}:day:${day.dayNumber}:youtube`
+    },
+    ...(hasReleaseDayDefaultTasks(day)
+      ? [
+          {
+            label: `${campaign.releaseTitle} - ${day.date} - Update website`,
+            source: "Marketing" as const,
+            status: day.statuses.websiteUpdate,
+            taskKey: `marketing:${campaign.id}:day:${day.dayNumber}:website-update`
+          },
+          {
+            label: `${campaign.releaseTitle} - ${day.date} - Facebook post`,
+            source: "Marketing" as const,
+            status: day.statuses.facebookPost,
+            taskKey: `marketing:${campaign.id}:day:${day.dayNumber}:facebook-post`
+          },
+          {
+            label: `${campaign.releaseTitle} - ${day.date} - YouTube post`,
+            source: "Marketing" as const,
+            status: day.statuses.youtubePost,
+            taskKey: `marketing:${campaign.id}:day:${day.dayNumber}:youtube-post`
+          }
+        ]
+      : []),
+    ...day.extraTasks.map((task) => ({
+      label: `${campaign.releaseTitle} - ${day.date} - ${task.title}`,
+      source: "Marketing" as const,
+      status: task.status,
+      taskKey: `marketing:${campaign.id}:day:${day.dayNumber}:extra:${task.id}`
+    }))
+  ]);
+}
+
+function getProductionDailyProgressItems(song: ProductionSongConfig) {
+  return song.steps.flatMap(
+    (step): Array<Omit<DailyFocusProgressItem, "date">> => [
+      {
+        label: `${song.title} - ${step.label}`,
+        source: "Production",
+        status: step.status,
+        taskKey: `production:${song.id}:step:${step.id}:main`
+      },
+      ...step.extraTasks.map((task) => ({
+        label: `${song.title} - ${step.label} - ${task.title}`,
+        source: "Production" as const,
+        status: task.status,
+        taskKey: `production:${song.id}:step:${step.id}:extra:${task.id}`
+      }))
+    ]
+  );
+}
+
+function getChangedDailyProgressItems(
+  previousItems: Array<Omit<DailyFocusProgressItem, "date">>,
+  nextItems: Array<Omit<DailyFocusProgressItem, "date">>
+) {
+  const previousStatusByKey = new Map(
+    previousItems.map((item) => [item.taskKey, item.status])
+  );
+
+  return nextItems.filter(
+    (item) => previousStatusByKey.get(item.taskKey) !== item.status
+  );
+}
+
 function toFocusQueueItem(
   task: CampaignTaskItem,
   source: FocusQueueItem["source"],
@@ -3340,7 +3446,7 @@ function normalizeOtherTasks(tasks: unknown[]): OtherTask[] {
         ? (task.status as MarketingStatus)
         : "not-started",
       title:
-        typeof task.title === "string" && task.title
+        typeof task.title === "string"
           ? task.title
           : "Other task"
     }));
@@ -3350,8 +3456,9 @@ function getMarketingFocusActionTarget(
   campaignId: string,
   taskId: string
 ): FocusQueueActionTarget | undefined {
-  const [dayNumberValue, taskKeyValue] = taskId.split("-");
+  const [dayNumberValue] = taskId.split("-");
   const dayNumber = Number(dayNumberValue);
+  const taskKeyValue = taskId.slice(`${dayNumberValue}-`.length);
 
   if (!Number.isFinite(dayNumber)) {
     return undefined;
@@ -3369,10 +3476,22 @@ function getMarketingFocusActionTarget(
     return { campaignId, dayNumber, kind: "marketing", taskKey: "youtubeUpload" };
   }
 
+  if (taskKeyValue === "website-update") {
+    return { campaignId, dayNumber, kind: "marketing", taskKey: "websiteUpdate" };
+  }
+
+  if (taskKeyValue === "facebook-post") {
+    return { campaignId, dayNumber, kind: "marketing", taskKey: "facebookPost" };
+  }
+
+  if (taskKeyValue === "youtube-post") {
+    return { campaignId, dayNumber, kind: "marketing", taskKey: "youtubePost" };
+  }
+
   return {
     campaignId,
     dayNumber,
-    extraTaskId: taskId.slice(`${dayNumberValue}-`.length),
+    extraTaskId: taskKeyValue,
     kind: "marketing"
   };
 }
@@ -3504,9 +3623,21 @@ function mapMarketingCampaignRows(rows: MarketingCampaignDbRow[]) {
       releaseTitle: campaign.title,
       releaseDate: formatDateKeyForInput(campaign.release_date),
       albumArtUrl: campaign.album_art_url,
-      campaignDays: mapMarketingCampaignDayRows(campaign.marketing_campaign_days ?? [])
+      campaignDays: mapMarketingCampaignDayRows(
+        campaign.marketing_campaign_days ?? [],
+        shouldIncludeReleaseDayDefaults(campaign.release_date)
+      )
     }))
   );
+}
+
+function shouldIncludeReleaseDayDefaults(releaseDateKey: string) {
+  const releaseDate = parseCampaignDateKey(releaseDateKey);
+  const today = parseCampaignDateKey(getViennaDateKey());
+
+  if (!releaseDate || !today) return false;
+
+  return addUtcDays(releaseDate, defaultCampaignDayCount - 5) >= today;
 }
 
 function mergeMarketingCampaignLocalBudgetLines(
@@ -3538,7 +3669,10 @@ function mergeMarketingCampaignLocalBudgetLines(
   );
 }
 
-function mapMarketingCampaignDayRows(rows: MarketingCampaignDayDbRow[]) {
+function mapMarketingCampaignDayRows(
+  rows: MarketingCampaignDayDbRow[],
+  includeReleaseTasks: boolean
+) {
   return [...rows]
     .sort((firstDay, secondDay) => firstDay.day_number - secondDay.day_number)
     .map((day) => {
@@ -3565,6 +3699,18 @@ function mapMarketingCampaignDayRows(rows: MarketingCampaignDayDbRow[]) {
             status: task.status
           })),
         statuses: {
+          facebookPost:
+            includeReleaseTasks && day.release_offset === 0
+              ? standardTaskByKind.get("facebook_post")?.status ?? "not-started"
+              : "irrelevant",
+          websiteUpdate:
+            includeReleaseTasks && day.release_offset === 0
+              ? standardTaskByKind.get("website_update")?.status ?? "not-started"
+              : "irrelevant",
+          youtubePost:
+            includeReleaseTasks && day.release_offset === 0
+              ? standardTaskByKind.get("youtube_post")?.status ?? "not-started"
+              : "irrelevant",
           production:
             standardTaskByKind.get("production")?.status ?? "not-started",
           instagramUpload:
@@ -3742,6 +3888,7 @@ function applyCampaignDaySeed(
     ...day,
     clipName: seed.clipName,
     statuses: {
+      ...day.statuses,
       production:
         seed.instagramDone || seed.youtubeDone ? "done" : day.statuses.production,
       instagramUpload: seed.instagramDone ? "done" : "not-started",
@@ -3775,6 +3922,9 @@ function buildCampaignDay(releaseDate: Date, index: number): CampaignDay {
     clipName: `${theme}: vertical performance clip`,
     extraTasks: getPlaceholderExtraTasks(dayNumber),
     statuses: {
+      facebookPost: releaseOffset === 0 ? "not-started" : "irrelevant",
+      websiteUpdate: releaseOffset === 0 ? "not-started" : "irrelevant",
+      youtubePost: releaseOffset === 0 ? "not-started" : "irrelevant",
       production: getPlaceholderStatus(index, 0),
       instagramUpload: getPlaceholderStatus(index, 1),
       youtubeUpload: getPlaceholderStatus(index, 2)
@@ -3800,51 +3950,14 @@ async function saveMarketingCampaignDays(
   }
 
   try {
-    const supabase = createBrowserSupabaseClient();
-    const { error: deleteError } = await supabase
-      .from("marketing_campaign_days")
-      .delete()
-      .eq("campaign_id", campaign.dbId);
-
-    if (deleteError) {
-      throw deleteError;
-    }
-
-    if (campaignDays.length === 0) {
-      return;
-    }
-
-    const { data: savedDays, error: dayInsertError } = await supabase
-      .from("marketing_campaign_days")
-      .insert(
-        campaignDays.map((day) => ({
-          campaign_id: campaign.dbId,
-          day_number: day.dayNumber,
-          campaign_date: day.dateKey,
-          release_offset: day.releaseOffset,
-          clip_name: day.clipName,
-          is_default_day: day.isDefaultDay
-        }))
-      )
-      .select("id, day_number");
-
-    if (dayInsertError) {
-      throw dayInsertError;
-    }
-
-    const dayIdByNumber = new Map(
-      (savedDays ?? []).map((day) => [day.day_number, day.id])
-    );
-    const taskRows = campaignDays.flatMap((day) => {
-      const campaignDayId = dayIdByNumber.get(day.dayNumber);
-
-      if (!campaignDayId) {
-        return [];
-      }
-
-      return [
+    const days = campaignDays.map((day) => ({
+      campaign_date: day.dateKey,
+      clip_name: day.clipName,
+      day_number: day.dayNumber,
+      is_default_day: day.isDefaultDay,
+      release_offset: day.releaseOffset,
+      tasks: [
         {
-          campaign_day_id: campaignDayId,
           task_kind: "production",
           title: "Make video / post",
           status: day.statuses.production,
@@ -3852,7 +3965,6 @@ async function saveMarketingCampaignDays(
           is_standard_task: true
         },
         {
-          campaign_day_id: campaignDayId,
           task_kind: "instagram_upload",
           title: "IG Upload",
           status: day.statuses.instagramUpload,
@@ -3860,34 +3972,61 @@ async function saveMarketingCampaignDays(
           is_standard_task: true
         },
         {
-          campaign_day_id: campaignDayId,
           task_kind: "youtube_upload",
           title: "YT upload",
           status: day.statuses.youtubeUpload,
           position: 3,
           is_standard_task: true
         },
+        ...(hasReleaseDayDefaultTasks(day)
+          ? [
+              {
+                task_kind: "website_update",
+                title: "Update website",
+                status: day.statuses.websiteUpdate,
+                position: 4,
+                is_standard_task: true
+              },
+              {
+                task_kind: "facebook_post",
+                title: "Facebook post",
+                status: day.statuses.facebookPost,
+                position: 5,
+                is_standard_task: true
+              },
+              {
+                task_kind: "youtube_post",
+                title: "YouTube post",
+                status: day.statuses.youtubePost,
+                position: 6,
+                is_standard_task: true
+              }
+            ]
+          : []),
         ...day.extraTasks.map((task, index) => ({
-          campaign_day_id: campaignDayId,
           task_kind: "extra",
           title: task.title,
           status: task.status,
-          position: index + 4,
+          position: index + 7,
           is_standard_task: false
         }))
-      ];
+      ]
+    }));
+    const response = await fetch("/api/marketing/campaign-days", {
+      body: JSON.stringify({ campaignId: campaign.dbId, days }),
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "x-love-strings-marketing": "write"
+      },
+      method: "POST"
     });
 
-    if (taskRows.length === 0) {
-      return;
-    }
-
-    const { error: taskInsertError } = await supabase
-      .from("marketing_campaign_tasks")
-      .insert(taskRows);
-
-    if (taskInsertError) {
-      throw taskInsertError;
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(
+        body.error ?? `Marketing campaign save failed with status ${response.status}.`
+      );
     }
   } catch (error) {
     console.warn("Unable to save marketing campaign days.", error);
@@ -4051,6 +4190,192 @@ async function saveEventsSnapshotToSupabase({
   }
 }
 
+async function loadOtherTasksFromSupabase(): Promise<OtherTask[] | null> {
+  try {
+    const response = await fetch("/api/focus/other-tasks", {
+      credentials: "same-origin",
+      method: "GET"
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(
+        body.error ?? `Other tasks load failed with status ${response.status}.`
+      );
+    }
+
+    const result = (await response.json()) as { tasks?: OtherTask[] };
+    return normalizeOtherTasks(result.tasks ?? []);
+  } catch (error) {
+    console.warn("Unable to load focus other tasks from Supabase.", error);
+    return null;
+  }
+}
+
+async function saveOtherTasksToSupabase(
+  tasks: OtherTask[]
+): Promise<OtherTask[] | null> {
+  try {
+    const response = await fetch("/api/focus/other-tasks", {
+      body: JSON.stringify({ tasks }),
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "x-love-strings-focus": "write"
+      },
+      method: "POST"
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(
+        body.error ?? `Other tasks save failed with status ${response.status}.`
+      );
+    }
+
+    const result = (await response.json()) as { tasks?: OtherTask[] };
+    return normalizeOtherTasks(result.tasks ?? []);
+  } catch (error) {
+    console.warn("Unable to save focus other tasks to Supabase.", error);
+    return null;
+  }
+}
+
+async function deleteOtherTaskFromSupabase(taskId: string) {
+  try {
+    const response = await fetch("/api/focus/other-tasks", {
+      body: JSON.stringify({ id: taskId }),
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "x-love-strings-focus": "write"
+      },
+      method: "DELETE"
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(
+        body.error ?? `Other task delete failed with status ${response.status}.`
+      );
+    }
+
+    return true;
+  } catch (error) {
+    console.warn("Unable to delete focus other task from Supabase.", error);
+    return false;
+  }
+}
+
+async function loadDailyFocusProgress(date: string) {
+  try {
+    const response = await fetch(`/api/focus/daily-progress?date=${date}`, {
+      credentials: "same-origin",
+      method: "GET"
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(
+        body.error ?? `Daily focus progress load failed with status ${response.status}.`
+      );
+    }
+
+    const result = (await response.json()) as { items?: DailyFocusProgressItem[] };
+    return result.items ?? [];
+  } catch (error) {
+    console.warn("Unable to load daily focus progress from Supabase.", error);
+    return null;
+  }
+}
+
+async function saveDailyFocusProgress(item: DailyFocusProgressItem) {
+  try {
+    const response = await fetch("/api/focus/daily-progress", {
+      body: JSON.stringify({ item }),
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "x-love-strings-focus": "write"
+      },
+      method: "POST"
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(
+        body.error ?? `Daily focus progress save failed with status ${response.status}.`
+      );
+    }
+
+    const result = (await response.json()) as { items?: DailyFocusProgressItem[] };
+    return result.items ?? [];
+  } catch (error) {
+    console.warn("Unable to save daily focus progress to Supabase.", error);
+    return null;
+  }
+}
+
+function normalizeQrCodeLinks(links: QrCodeLink[]) {
+  return links.map((link, index) => ({
+    id:
+      typeof link.id === "string" && link.id
+        ? link.id
+        : `qr-${Date.now()}-${index}`,
+    name:
+      typeof link.name === "string" && link.name ? link.name : "QR Code",
+    qrImageUrl: typeof link.qrImageUrl === "string" ? link.qrImageUrl : "",
+    targetUrl: typeof link.targetUrl === "string" ? link.targetUrl : ""
+  }));
+}
+
+async function loadQrCodeLinksFromSupabase(): Promise<QrCodeLink[] | null> {
+  try {
+    const response = await fetch("/api/qr-links", {
+      credentials: "same-origin",
+      method: "GET"
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error ?? `QR links load failed with status ${response.status}.`);
+    }
+
+    const result = (await response.json()) as { links?: QrCodeLink[] };
+    return normalizeQrCodeLinks(result.links ?? []);
+  } catch (error) {
+    console.warn("Unable to load QR links from Supabase.", error);
+    return null;
+  }
+}
+
+async function saveQrCodeLinksToSupabase(
+  links: QrCodeLink[]
+): Promise<QrCodeLink[] | null> {
+  try {
+    const response = await fetch("/api/qr-links", {
+      body: JSON.stringify({ links }),
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "x-love-strings-qr": "write"
+      },
+      method: "POST"
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error ?? `QR links save failed with status ${response.status}.`);
+    }
+
+    const result = (await response.json()) as { links?: QrCodeLink[] };
+    return normalizeQrCodeLinks(result.links ?? []);
+  } catch (error) {
+    console.warn("Unable to save QR links to Supabase.", error);
+    return null;
+  }
+}
+
 type BudgetSnapshot = {
   deletedForecastIds: string[];
   entries: BudgetEntry[];
@@ -4150,11 +4475,20 @@ async function saveBudgetSnapshotToSupabase({
 
 export default function Home() {
   const productionSaveTimers = useRef<Record<string, number>>({});
+  const otherTaskSaveTimers = useRef<Record<string, number>>({});
   const eventSaveTimer = useRef<number | null>(null);
   const budgetSaveTimer = useRef<number | null>(null);
+  const qrCodeSaveTimer = useRef<number | null>(null);
   const hasRequestedEventSupabaseLoad = useRef(false);
   const hasRequestedBudgetSupabaseLoad = useRef(false);
+  const hasRequestedOtherTaskSupabaseLoad = useRef(false);
+  const hasRequestedQrCodeSupabaseLoad = useRef(false);
   const [activeSection, setActiveSection] = useState<Section>("Dashboard");
+  const [dailyFocusProgress, setDailyFocusProgress] = useState<
+    DailyFocusProgressItem[]
+  >([]);
+  const [appleMusicReminderDismissedDate, setAppleMusicReminderDismissedDate] =
+    useState("");
   const [platformStatsData, setPlatformStatsData] = useState(platformStats);
   const [platformMetricRows, setPlatformMetricRows] = useState<MetricRow[]>([]);
   const [refreshStatus, setRefreshStatus] = useState<RefreshStatus>({
@@ -4207,6 +4541,8 @@ export default function Home() {
     useState(false);
   const [hasLoadedBudgetDrafts, setHasLoadedBudgetDrafts] = useState(false);
   const [hasLoadedQrCodeLinks, setHasLoadedQrCodeLinks] = useState(false);
+  const [hasLoadedQrCodeSupabaseSnapshot, setHasLoadedQrCodeSupabaseSnapshot] =
+    useState(false);
   const [hasLoadedEventDrafts, setHasLoadedEventDrafts] = useState(false);
   const [hasLoadedLocationAddressBook, setHasLoadedLocationAddressBook] =
     useState(false);
@@ -4277,6 +4613,44 @@ export default function Home() {
     }, 900);
   }
 
+  function queueOtherTaskSave(task: OtherTask) {
+    const existingTimer = otherTaskSaveTimers.current[task.id];
+
+    if (existingTimer) {
+      window.clearTimeout(existingTimer);
+    }
+
+    otherTaskSaveTimers.current[task.id] = window.setTimeout(() => {
+      delete otherTaskSaveTimers.current[task.id];
+      void saveOtherTasksToSupabase([task]);
+    }, 650);
+  }
+
+  function queueQrCodeLinksSave(links: QrCodeLink[]) {
+    if (qrCodeSaveTimer.current) {
+      window.clearTimeout(qrCodeSaveTimer.current);
+    }
+
+    qrCodeSaveTimer.current = window.setTimeout(() => {
+      qrCodeSaveTimer.current = null;
+      void saveQrCodeLinksToSupabase(links);
+    }, 650);
+  }
+
+  function recordDailyFocusStatus(
+    item: Omit<DailyFocusProgressItem, "date">
+  ) {
+    const progressItem = { ...item, date: getViennaDateKey() };
+
+    setDailyFocusProgress((currentItems) => [
+      ...currentItems.filter(
+        (currentItem) => currentItem.taskKey !== progressItem.taskKey
+      ),
+      progressItem
+    ]);
+    void saveDailyFocusProgress(progressItem);
+  }
+
   const loadPlatformStats = useCallback(async () => {
     try {
       const supabase = createBrowserSupabaseClient();
@@ -4324,13 +4698,13 @@ export default function Home() {
       return;
     }
 
-    const payload: { album_art_url?: string; release_date?: string; title?: string } = {};
+    const payload: { albumArtUrl?: string; releaseDate?: string; title?: string } = {};
 
     if (updates.releaseDate) {
       const releaseDate = formatInputDateForDatabase(updates.releaseDate);
 
       if (releaseDate) {
-        payload.release_date = releaseDate;
+        payload.releaseDate = releaseDate;
       }
     }
 
@@ -4339,7 +4713,7 @@ export default function Home() {
     }
 
     if (updates.albumArtUrl !== undefined) {
-      payload.album_art_url = updates.albumArtUrl;
+      payload.albumArtUrl = updates.albumArtUrl;
     }
 
     if (Object.keys(payload).length === 0) {
@@ -4347,14 +4721,19 @@ export default function Home() {
     }
 
     try {
-      const supabase = createBrowserSupabaseClient();
-      const { error } = await supabase
-        .from("marketing_campaigns")
-        .update(payload)
-        .eq("id", campaign.dbId);
+      const response = await fetch("/api/marketing/campaigns", {
+        body: JSON.stringify({ campaignId: campaign.dbId, updates: payload }),
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "x-love-strings-marketing": "write"
+        },
+        method: "PATCH"
+      });
 
-      if (error) {
-        throw error;
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error ?? `Campaign update failed with status ${response.status}.`);
       }
     } catch (error) {
       console.warn("Unable to save marketing campaign header.", error);
@@ -4363,14 +4742,19 @@ export default function Home() {
 
   async function deleteMarketingCampaign(campaignDbId: string) {
     try {
-      const supabase = createBrowserSupabaseClient();
-      const { error } = await supabase
-        .from("marketing_campaigns")
-        .delete()
-        .eq("id", campaignDbId);
+      const response = await fetch("/api/marketing/campaigns", {
+        body: JSON.stringify({ campaignId: campaignDbId }),
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "x-love-strings-marketing": "write"
+        },
+        method: "DELETE"
+      });
 
-      if (error) {
-        throw error;
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error ?? `Campaign delete failed with status ${response.status}.`);
       }
     } catch (error) {
       console.warn("Unable to delete marketing campaign from Supabase.", error);
@@ -4399,29 +4783,37 @@ export default function Home() {
     setMarketingFocusTarget({ campaignId: localCampaign.id, token: Date.now() });
 
     try {
-      const supabase = createBrowserSupabaseClient();
       const slug = createCampaignSlug(localCampaign.releaseTitle);
-      const { data, error } = await supabase
-        .from("marketing_campaigns")
-        .insert({
+      const response = await fetch("/api/marketing/campaigns", {
+        body: JSON.stringify({
+          albumArtUrl: localCampaign.albumArtUrl,
+          releaseDate: releaseDate.toISOString().slice(0, 10),
           slug,
-          title: localCampaign.releaseTitle,
-          release_date: releaseDate.toISOString().slice(0, 10),
-          album_art_url: localCampaign.albumArtUrl,
-          status: "planned",
-          source: "app"
-        })
-        .select("id, slug")
-        .single();
+          title: localCampaign.releaseTitle
+        }),
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "x-love-strings-marketing": "write"
+        },
+        method: "POST"
+      });
 
-      if (error) {
-        throw error;
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error ?? `Campaign creation failed with status ${response.status}.`);
       }
+
+      const result = (await response.json()) as {
+        campaign?: { id: string; slug: string };
+      };
+
+      if (!result.campaign) throw new Error("Campaign creation returned no record.");
 
       const savedCampaign = {
         ...localCampaign,
-        id: data.slug,
-        dbId: data.id
+        id: result.campaign.slug,
+        dbId: result.campaign.id
       };
 
       setCampaigns((currentCampaigns) =>
@@ -4613,6 +5005,12 @@ export default function Home() {
 
       const result = await response.json();
       await loadPlatformStats();
+      recordDailyFocusStatus({
+        label: "Update Apple Music CSV",
+        source: "Other",
+        status: "done",
+        taskKey: "other:apple-music-csv-update"
+      });
       setAppleMusicImportStatus({
         message: `Imported ${result.songs} songs from ${formatDateForDisplay(result.reportEndDate)}.`,
         state: "success"
@@ -4627,6 +5025,18 @@ export default function Home() {
 
   const updateCampaignDays = useCallback(
     (campaignId: string, campaignDays: CampaignDay[]) => {
+      const campaign = campaigns.find((candidate) => candidate.id === campaignId);
+
+      if (campaign) {
+        const previousDays =
+          campaign.campaignDays ??
+          buildCampaignDays(campaign.releaseDate, campaign.daySeeds);
+        getChangedDailyProgressItems(
+          getCampaignDailyProgressItems(campaign, previousDays),
+          getCampaignDailyProgressItems(campaign, campaignDays)
+        ).forEach(recordDailyFocusStatus);
+      }
+
       setCampaigns((currentCampaigns) =>
         currentCampaigns.map((campaign) =>
           campaign.id === campaignId
@@ -4637,8 +5047,6 @@ export default function Home() {
             : campaign
         )
       );
-      const campaign = campaigns.find((candidate) => candidate.id === campaignId);
-
       if (campaign?.dbId) {
         void saveMarketingCampaignDays(campaign, campaignDays);
       }
@@ -4709,6 +5117,13 @@ export default function Home() {
             : currentSong.steps
         }
       : null;
+
+    if (currentSong && nextSong && updates.steps) {
+      getChangedDailyProgressItems(
+        getProductionDailyProgressItems(currentSong),
+        getProductionDailyProgressItems(nextSong)
+      ).forEach(recordDailyFocusStatus);
+    }
 
     setProductionSongDrafts((currentSongs) =>
       sortProductionSongsByDeadline(
@@ -4863,35 +5278,55 @@ export default function Home() {
     }
 
     const newTaskId = `other-task-${Date.now()}`;
+    const newTask: OtherTask = {
+      dueDate: formatDateForInput(getTodayUtcDate()),
+      id: newTaskId,
+      notes: "",
+      status: "not-started",
+      title: ""
+    };
 
     setOtherTasks((currentTasks) => {
-      return [
-        {
-          dueDate: formatDateForInput(getTodayUtcDate()),
-          id: newTaskId,
-          notes: "",
-          status: "not-started",
-          title: ""
-        },
-        ...currentTasks
-      ];
+      return [newTask, ...currentTasks];
     });
+    queueOtherTaskSave(newTask);
 
     return newTaskId;
   }
 
   function updateOtherTask(taskId: string, updates: Partial<OtherTask>) {
+    const previousTask = otherTasks.find((task) => task.id === taskId);
+
+    if (!previousTask) return;
+
+    const updatedTask = { ...previousTask, ...updates };
     setOtherTasks((currentTasks) =>
-      currentTasks.map((task) =>
-        task.id === taskId ? { ...task, ...updates } : task
-      )
+      currentTasks.map((task) => (task.id === taskId ? updatedTask : task))
     );
+    queueOtherTaskSave(updatedTask);
+
+    if (updates.status && previousTask.status !== updatedTask.status) {
+      recordDailyFocusStatus({
+        label: updatedTask.title || "Untitled task",
+        source: "Other",
+        status: updatedTask.status,
+        taskKey: `other:${updatedTask.id}`
+      });
+    }
   }
 
   function deleteOtherTask(taskId: string) {
+    const pendingSaveTimer = otherTaskSaveTimers.current[taskId];
+
+    if (pendingSaveTimer) {
+      window.clearTimeout(pendingSaveTimer);
+      delete otherTaskSaveTimers.current[taskId];
+    }
+
     setOtherTasks((currentTasks) =>
       currentTasks.filter((task) => task.id !== taskId)
     );
+    void deleteOtherTaskFromSupabase(taskId);
   }
 
   function addQrCodeLink() {
@@ -4922,14 +5357,19 @@ export default function Home() {
 
   useEffect(() => {
     const saveTimers = productionSaveTimers.current;
+    const focusSaveTimers = otherTaskSaveTimers.current;
 
     return () => {
       Object.values(saveTimers).forEach((timer) => window.clearTimeout(timer));
+      Object.values(focusSaveTimers).forEach((timer) => window.clearTimeout(timer));
       if (eventSaveTimer.current) {
         window.clearTimeout(eventSaveTimer.current);
       }
       if (budgetSaveTimer.current) {
         window.clearTimeout(budgetSaveTimer.current);
+      }
+      if (qrCodeSaveTimer.current) {
+        window.clearTimeout(qrCodeSaveTimer.current);
       }
     };
   }, []);
@@ -4992,20 +5432,7 @@ export default function Home() {
         const parsedQrLinks = JSON.parse(storedQrLinks);
 
         if (Array.isArray(parsedQrLinks)) {
-          const nextQrLinks = parsedQrLinks.map((link, index) => ({
-              id:
-                typeof link.id === "string" && link.id
-                  ? link.id
-                  : `qr-${Date.now()}-${index}`,
-              name:
-                typeof link.name === "string" && link.name
-                  ? link.name
-                  : "QR Code",
-              qrImageUrl:
-                typeof link.qrImageUrl === "string" ? link.qrImageUrl : "",
-              targetUrl:
-                typeof link.targetUrl === "string" ? link.targetUrl : ""
-            }));
+          const nextQrLinks = normalizeQrCodeLinks(parsedQrLinks);
 
           window.setTimeout(() => {
             if (!isCancelled) {
@@ -5048,6 +5475,54 @@ export default function Home() {
       console.warn("Unable to save local QR code links.", error);
     }
   }, [hasLoadedQrCodeLinks, qrCodeLinks]);
+
+  useEffect(() => {
+    if (
+      !hasLoadedQrCodeLinks ||
+      hasRequestedQrCodeSupabaseLoad.current
+    ) {
+      return;
+    }
+
+    hasRequestedQrCodeSupabaseLoad.current = true;
+    let isCancelled = false;
+
+    async function loadSharedQrCodeLinks() {
+      const remoteLinks = await loadQrCodeLinksFromSupabase();
+
+      if (isCancelled || remoteLinks === null) {
+        setHasLoadedQrCodeSupabaseSnapshot(true);
+        return;
+      }
+
+      const savedLinks =
+        remoteLinks.length === 0
+          ? await saveQrCodeLinksToSupabase(qrCodeLinks)
+          : remoteLinks;
+
+      if (!isCancelled && savedLinks) {
+        setQrCodeLinks(savedLinks);
+      }
+
+      if (!isCancelled) {
+        setHasLoadedQrCodeSupabaseSnapshot(true);
+      }
+    }
+
+    void loadSharedQrCodeLinks();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [hasLoadedQrCodeLinks, qrCodeLinks]);
+
+  useEffect(() => {
+    if (!hasLoadedQrCodeLinks || !hasLoadedQrCodeSupabaseSnapshot) {
+      return;
+    }
+
+    queueQrCodeLinksSave(qrCodeLinks);
+  }, [hasLoadedQrCodeLinks, hasLoadedQrCodeSupabaseSnapshot, qrCodeLinks]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -5396,6 +5871,50 @@ export default function Home() {
 
   useEffect(() => {
     if (
+      !hasLoadedOtherTasks ||
+      hasRequestedOtherTaskSupabaseLoad.current
+    ) {
+      return;
+    }
+
+    hasRequestedOtherTaskSupabaseLoad.current = true;
+    let isCancelled = false;
+
+    async function loadSharedOtherTasks() {
+      const remoteTasks = await loadOtherTasksFromSupabase();
+
+      if (isCancelled || remoteTasks === null) {
+        return;
+      }
+
+      const hasMigratedLocalTasks =
+        window.localStorage.getItem(otherTaskSupabaseMigrationKey) === "done";
+      const shouldMergeLocalTasks =
+        otherTasks.length > 0 && (!hasMigratedLocalTasks || remoteTasks.length === 0);
+      const mergedTasks = shouldMergeLocalTasks
+        ? await saveOtherTasksToSupabase(otherTasks)
+        : remoteTasks;
+
+      if (isCancelled || mergedTasks === null) {
+        return;
+      }
+
+      if (shouldMergeLocalTasks) {
+        window.localStorage.setItem(otherTaskSupabaseMigrationKey, "done");
+      }
+
+      setOtherTasks(mergedTasks);
+    }
+
+    void loadSharedOtherTasks();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [hasLoadedOtherTasks, otherTasks]);
+
+  useEffect(() => {
+    if (
       !hasLoadedEventDrafts ||
       !hasLoadedLocationAddressBook ||
       hasRequestedEventSupabaseLoad.current
@@ -5628,6 +6147,46 @@ export default function Home() {
     }, 0);
   }, [refreshPlatformStatsOnOpenIfMissing]);
 
+  useEffect(() => {
+    let isCancelled = false;
+
+    void loadDailyFocusProgress(getViennaDateKey()).then((items) => {
+      if (!isCancelled && items) {
+        setDailyFocusProgress(items);
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const loadTimer = window.setTimeout(() => {
+      setAppleMusicReminderDismissedDate(
+        window.localStorage.getItem(appleMusicReminderDismissedDateKey) ?? ""
+      );
+    }, 0);
+
+    return () => window.clearTimeout(loadTimer);
+  }, []);
+
+  function openAppleMusicImport() {
+    setActiveSection("Platforms");
+    window.setTimeout(() => {
+      document.getElementById("platform-card-apple-music")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+      });
+    }, 80);
+  }
+
+  function dismissAppleMusicReminderForToday() {
+    const todayKey = getViennaDateKey();
+    setAppleMusicReminderDismissedDate(todayKey);
+    window.localStorage.setItem(appleMusicReminderDismissedDateKey, todayKey);
+  }
+
   return (
     <main className="dashboard-shell">
       <aside className="sidebar" aria-label="Primary">
@@ -5718,6 +6277,7 @@ export default function Home() {
         {activeSection === "Events" ? (
           <EventsView
             entries={eventEntryDrafts}
+            isLoaded={hasLoadedEventSupabaseSnapshot}
             locations={locationAddressBook}
             onAddEntry={addEventEntry}
             onAddLocation={addLocationAddressBookEntry}
@@ -5736,17 +6296,22 @@ export default function Home() {
           <DashboardView
             budgetEntries={budgetEntriesWithForecast}
             campaigns={campaigns}
+            dailyFocusProgress={dailyFocusProgress}
             dashboardPlatformStats={dashboardPlatformStats}
             eventEntries={eventEntryDrafts}
+            eventsLoaded={hasLoadedEventSupabaseSnapshot}
             onAddQrCode={addQrCodeLink}
             onAddOtherTask={addOtherTask}
             onCampaignDaysChange={updateCampaignDays}
             onDeleteQrCode={deleteQrCodeLink}
             onDeleteOtherTask={deleteOtherTask}
+            onDismissAppleMusicReminder={dismissAppleMusicReminderForToday}
+            onOpenAppleMusicImport={openAppleMusicImport}
             onOtherTaskChange={updateOtherTask}
             onProductionSongChange={updateProductionSong}
             onQrCodeChange={updateQrCodeLink}
             otherTasks={otherTasks}
+            appleMusicReminderDismissedDate={appleMusicReminderDismissedDate}
             platformMetricRows={platformMetricRows}
             productionSongs={productionSongDrafts}
             qrCodeLinks={qrCodeLinks}
@@ -5795,6 +6360,7 @@ function ScrollAssistButton() {
 
 function EventsView({
   entries,
+  isLoaded,
   locations,
   onAddEntry,
   onAddLocation,
@@ -5804,6 +6370,7 @@ function EventsView({
   onLocationChange
 }: {
   entries: EventEntry[];
+  isLoaded: boolean;
   locations: LocationAddressBookEntry[];
   onAddEntry: () => void;
   onAddLocation: () => void;
@@ -5823,12 +6390,10 @@ function EventsView({
     <>
       <header className="topbar">
         <div className="topbar-title-block">
-          <div className="topbar-eyebrow-row">
-            <p className="eyebrow">Shows and appearances</p>
-            <ModuleHeaderDate />
-          </div>
+          <p className="eyebrow">Shows and appearances</p>
           <h1>Events</h1>
         </div>
+        <ModuleHeaderDate />
       </header>
 
       <section className="events-summary-grid" aria-label="Events summary">
@@ -5837,14 +6402,22 @@ function EventsView({
             <MapPin size={18} aria-hidden />
             <span>Next event</span>
           </div>
-          <strong>
-            {nextEventDate ? formatCampaignDate(nextEventDate) : "No upcoming events planned yet"}
-          </strong>
-          <p>
-            {nextEvent && nextEventDaysLeft !== null
-              ? `${nextEvent.locationName || "Location TBD"} - ${formatEventDaysLeft(nextEventDaysLeft)}`
-              : "No upcoming events planned yet"}
-          </p>
+          {!isLoaded ? (
+            <p className="event-card-loading">Loading events...</p>
+          ) : (
+            <>
+              <strong>
+                {nextEventDate
+                  ? formatCampaignDate(nextEventDate)
+                  : "No upcoming events planned yet"}
+              </strong>
+              <p>
+                {nextEvent && nextEventDaysLeft !== null
+                  ? `${nextEvent.locationName || "Location TBD"} - ${formatEventDaysLeft(nextEventDaysLeft)}`
+                  : "No upcoming events planned yet"}
+              </p>
+            </>
+          )}
         </article>
         <article className="metric-card event-summary-card">
           <div className="event-summary-card-title">
@@ -6538,12 +7111,10 @@ function BudgetView({
     <>
       <header className="topbar">
         <div className="topbar-title-block">
-          <div className="topbar-eyebrow-row">
-            <p className="eyebrow">Money tracker</p>
-            <ModuleHeaderDate />
-          </div>
+          <p className="eyebrow">Money tracker</p>
           <h1>Budget</h1>
         </div>
+        <ModuleHeaderDate />
       </header>
 
       <section className="budget-summary-grid" aria-label="Budget summary">
@@ -8137,12 +8708,10 @@ function MarketingView({
     <>
       <header className="topbar">
         <div className="topbar-title-block">
-          <div className="topbar-eyebrow-row">
-            <p className="eyebrow">Campaign execution</p>
-            <ModuleHeaderDate />
-          </div>
+          <p className="eyebrow">Campaign execution</p>
           <h1>Marketing</h1>
         </div>
+        <ModuleHeaderDate />
       </header>
 
       <div className="campaign-list">
@@ -8890,6 +9459,31 @@ function MarketingCampaignTaskCell({
             onStatusChange(day.dayNumber, "youtubeUpload", status)
           }
         />
+        {hasReleaseDayDefaultTasks(day) ? (
+          <>
+            <CampaignTaskStatus
+              label="Update website"
+              status={day.statuses.websiteUpdate}
+              onChange={(status) =>
+                onStatusChange(day.dayNumber, "websiteUpdate", status)
+              }
+            />
+            <CampaignTaskStatus
+              label="Facebook post"
+              status={day.statuses.facebookPost}
+              onChange={(status) =>
+                onStatusChange(day.dayNumber, "facebookPost", status)
+              }
+            />
+            <CampaignTaskStatus
+              label="YouTube post"
+              status={day.statuses.youtubePost}
+              onChange={(status) =>
+                onStatusChange(day.dayNumber, "youtubePost", status)
+              }
+            />
+          </>
+        ) : null}
         {day.extraTasks.map((task) => (
           <ExtraCampaignTaskRow
             dayNumber={day.dayNumber}
@@ -9085,15 +9679,20 @@ function AppleMusicCsvImportControl({
 }
 
 function DashboardView({
+  appleMusicReminderDismissedDate,
   budgetEntries,
   campaigns,
+  dailyFocusProgress,
   dashboardPlatformStats,
   eventEntries,
+  eventsLoaded,
   onAddQrCode,
   onAddOtherTask,
   onCampaignDaysChange,
   onDeleteQrCode,
   onDeleteOtherTask,
+  onDismissAppleMusicReminder,
+  onOpenAppleMusicImport,
   onOtherTaskChange,
   onProductionSongChange,
   onQrCodeChange,
@@ -9102,15 +9701,20 @@ function DashboardView({
   productionSongs,
   qrCodeLinks
 }: {
+  appleMusicReminderDismissedDate: string;
   budgetEntries: BudgetEntry[];
   campaigns: MarketingCampaignConfig[];
+  dailyFocusProgress: DailyFocusProgressItem[];
   dashboardPlatformStats: typeof platformStats;
   eventEntries: EventEntry[];
+  eventsLoaded: boolean;
   onAddQrCode: () => void;
   onAddOtherTask: () => string;
   onCampaignDaysChange: (campaignId: string, campaignDays: CampaignDay[]) => void;
   onDeleteQrCode: (linkId: string) => void;
   onDeleteOtherTask: (taskId: string) => void;
+  onDismissAppleMusicReminder: () => void;
+  onOpenAppleMusicImport: () => void;
   onOtherTaskChange: (taskId: string, updates: Partial<OtherTask>) => void;
   onProductionSongChange: (songId: string, updates: Partial<ProductionSongConfig>) => void;
   onQrCodeChange: (linkId: string, updates: Partial<QrCodeLink>) => void;
@@ -9131,7 +9735,11 @@ function DashboardView({
     dashboardPlatformStats,
     platformMetricRows
   );
-  const appleMusicUpdateTask = getAppleMusicUpdateTask(appleMusicLastUpdate);
+  const isCampaignStartToday = isMarketingCampaignStartToday(campaigns);
+  const appleMusicUpdateTask =
+    appleMusicReminderDismissedDate === getViennaDateKey()
+      ? null
+      : getAppleMusicUpdateTask(appleMusicLastUpdate, isCampaignStartToday);
   const focusQueue = getDashboardFocusQueue(
     campaignPreview,
     productionPreviewSongs,
@@ -9219,22 +9827,23 @@ function DashboardView({
 
   return (
     <>
-      <header className="topbar">
+      <header className="topbar dashboard-main-topbar">
         <div className="topbar-title-block">
-          <div className="topbar-eyebrow-row">
-            <p className="eyebrow">Daily command screen</p>
-            <ModuleHeaderDate />
-          </div>
-          <h1>Love Strings Dashboard</h1>
+          <p className="eyebrow">Daily command screen</p>
+          <h1 className="dashboard-main-title">Love Strings Dashboard</h1>
         </div>
+        <ModuleHeaderDate />
       </header>
 
-      <DashboardNextEventCard event={nextEvent} />
+      <DashboardNextEventCard event={nextEvent} isLoaded={eventsLoaded} />
 
       <DashboardFocusQueueCard
+        dailyProgress={dailyFocusProgress}
         focusQueue={focusQueue}
         onAddOtherTask={onAddOtherTask}
         onDeleteOtherTask={onDeleteOtherTask}
+        onDismissAppleMusicReminder={onDismissAppleMusicReminder}
+        onOpenAppleMusicImport={onOpenAppleMusicImport}
         onOtherTaskChange={onOtherTaskChange}
         onTaskStatusChange={updateFocusTaskStatus}
         otherTasks={otherTasks}
@@ -9339,7 +9948,11 @@ function DashboardCampaignCard({
 
   if (!campaign) {
     return (
-      <article className="dashboard-campaign-card dashboard-campaign-card-empty">
+      <article
+        className={`dashboard-campaign-card dashboard-campaign-card-empty${
+          label === "Next" ? " dashboard-campaign-card-empty-next" : ""
+        }`}
+      >
         <p className="eyebrow">{label}</p>
         <h3>{emptyText}</h3>
       </article>
@@ -9420,7 +10033,13 @@ function DashboardCampaignCard({
   );
 }
 
-function DashboardNextEventCard({ event }: { event: EventEntry | null }) {
+function DashboardNextEventCard({
+  event,
+  isLoaded
+}: {
+  event: EventEntry | null;
+  isLoaded: boolean;
+}) {
   const eventDate = event ? parseFlexibleBudgetDate(event.date) : null;
   const daysLeft = eventDate ? getDaysUntilDate(eventDate) : null;
 
@@ -9431,12 +10050,14 @@ function DashboardNextEventCard({ event }: { event: EventEntry | null }) {
           <MapPin size={18} aria-hidden />
           <span>Next event</span>
         </div>
-        {eventDate ? (
+        {!isLoaded ? (
+          <p className="event-card-loading">Loading events...</p>
+        ) : eventDate ? (
           <strong>{formatCampaignDate(eventDate)}</strong>
         ) : (
           <p className="dashboard-event-empty">No upcoming events planned yet</p>
         )}
-        {event && daysLeft !== null ? (
+        {isLoaded && event && daysLeft !== null ? (
           <p>
             <>
               <EventMaybeLink label={event.name} url={event.nameUrl} />
@@ -9456,19 +10077,25 @@ function DashboardNextEventCard({ event }: { event: EventEntry | null }) {
 }
 
 function DashboardFocusQueueCard({
+  dailyProgress,
   focusQueue,
   onAddOtherTask,
   onDeleteOtherTask,
+  onDismissAppleMusicReminder,
+  onOpenAppleMusicImport,
   onOtherTaskChange,
   onTaskStatusChange,
   otherTasks
 }: {
+  dailyProgress: DailyFocusProgressItem[];
   focusQueue: {
     allTasks: FocusQueueItem[];
     visibleTasks: FocusQueueItem[];
   };
   onAddOtherTask: () => string;
   onDeleteOtherTask: (taskId: string) => void;
+  onDismissAppleMusicReminder: () => void;
+  onOpenAppleMusicImport: () => void;
   onOtherTaskChange: (taskId: string, updates: Partial<OtherTask>) => void;
   onTaskStatusChange: (task: FocusQueueItem, status: MarketingStatus) => void;
   otherTasks: OtherTask[];
@@ -9477,6 +10104,28 @@ function DashboardFocusQueueCard({
   const [editingOtherTaskId, setEditingOtherTaskId] = useState<string | null>(null);
   const [openStatusTaskId, setOpenStatusTaskId] = useState<string | null>(null);
   const [showCompletedOtherTasks, setShowCompletedOtherTasks] = useState(false);
+  const eligibleDailyProgress = dailyProgress.filter(
+    (item) => item.status !== "irrelevant"
+  );
+  const dailyPoints = eligibleDailyProgress.reduce(
+    (total, item) =>
+      total + (item.status === "done" ? 2 : item.status === "in-progress" ? 1 : 0),
+    0
+  );
+  const dailyPercent = Math.round((dailyPoints / 6) * 100);
+  const dailyProgressSlots = [
+    ...eligibleDailyProgress,
+    ...Array.from(
+      { length: Math.max(0, 3 - eligibleDailyProgress.length) },
+      (_, index) => ({
+        date: getViennaDateKey(),
+        label: `Daily target slot ${eligibleDailyProgress.length + index + 1}`,
+        source: "Other" as const,
+        status: "not-started" as const,
+        taskKey: `daily-target-slot-${index}`
+      })
+    )
+  ];
   const tasks = focusQueue.visibleTasks;
   const activeOtherTasks = otherTasks
     .filter((task) => task.status !== "done" && task.status !== "irrelevant")
@@ -9513,6 +10162,31 @@ function DashboardFocusQueueCard({
         <div className="dashboard-focus-card-header">
           <Clock3 size={18} aria-hidden />
           <h2>Focus Queue</h2>
+          <div
+            aria-label={`Daily focus progress: ${dailyPoints} of 6 points, ${dailyPercent}%`}
+            className="dashboard-focus-score"
+          >
+            <div className="dashboard-focus-score-boxes">
+              {dailyProgressSlots.map((item) => {
+                const progressStatus =
+                  item.status === "done"
+                    ? "complete"
+                    : item.status === "in-progress"
+                      ? "partial"
+                      : "empty";
+
+                return (
+                  <span
+                    aria-label={`${item.label}: ${statusLabels[item.status]}`}
+                    className={`campaign-progress-box campaign-progress-box-${progressStatus}`}
+                    key={item.taskKey}
+                    title={`${item.label}: ${statusLabels[item.status]}`}
+                  />
+                );
+              })}
+            </div>
+            <strong>{dailyPercent}%</strong>
+          </div>
         </div>
         {tasks.length > 0 ? (
           <ul className="dashboard-focus-list">
@@ -9541,50 +10215,82 @@ function DashboardFocusQueueCard({
                     </button>
                     {openStatusTaskId === task.id ? (
                       <div className="dashboard-focus-status-menu">
-                        {getEditableOtherTaskId(task) ? (
-                          <button
-                            className="dashboard-focus-status-option"
-                            onClick={() => {
-                              setEditingOtherTaskId(getEditableOtherTaskId(task));
-                              setIsTaskListOpen(true);
-                              setOpenStatusTaskId(null);
-                            }}
-                            type="button"
-                          >
-                            <Pencil size={14} aria-hidden />
-                            Edit
-                          </button>
-                        ) : null}
-                        {getFocusQueueStatusOptions(task).map((status) => (
-                          <button
-                            className="dashboard-focus-status-option"
-                            disabled={
-                              !task.actionTarget && getEditableOtherTaskId(task) === null
-                            }
-                            key={status}
-                            onClick={() => {
-                              const editableOtherTaskId = getEditableOtherTaskId(task);
+                        {task.id === "other-apple-music-csv-update" ? (
+                          <>
+                            <button
+                              className="dashboard-focus-status-option"
+                              onClick={() => {
+                                setOpenStatusTaskId(null);
+                                onOpenAppleMusicImport();
+                              }}
+                              type="button"
+                            >
+                              <ArrowUpRight size={14} aria-hidden />
+                              Open Apple Music import
+                            </button>
+                            <button
+                              className="dashboard-focus-status-option"
+                              onClick={() => {
+                                setOpenStatusTaskId(null);
+                                onDismissAppleMusicReminder();
+                              }}
+                              type="button"
+                            >
+                              <Clock3 size={14} aria-hidden />
+                              Dismiss until tomorrow
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            {getEditableOtherTaskId(task) ? (
+                              <button
+                                className="dashboard-focus-status-option"
+                                onClick={() => {
+                                  setEditingOtherTaskId(getEditableOtherTaskId(task));
+                                  setIsTaskListOpen(true);
+                                  setOpenStatusTaskId(null);
+                                }}
+                                type="button"
+                              >
+                                <Pencil size={14} aria-hidden />
+                                Edit
+                              </button>
+                            ) : null}
+                            {getFocusQueueStatusOptions(task).map((status) => (
+                              <button
+                                className="dashboard-focus-status-option"
+                                disabled={
+                                  !task.actionTarget &&
+                                  getEditableOtherTaskId(task) === null
+                                }
+                                key={status}
+                                onClick={() => {
+                                  const editableOtherTaskId =
+                                    getEditableOtherTaskId(task);
 
-                              if (editableOtherTaskId) {
-                                onOtherTaskChange(editableOtherTaskId, {
-                                  status
-                                });
-                              } else {
-                                onTaskStatusChange(task, status);
-                              }
-                              setOpenStatusTaskId(null);
-                            }}
-                            title={
-                              task.actionTarget || getEditableOtherTaskId(task)
-                                ? statusLabels[status]
-                                : "This automatic reminder is updated from its source"
-                            }
-                            type="button"
-                          >
-                            <StatusDot status={status} label={statusLabels[status]} />
-                            {statusLabels[status]}
-                          </button>
-                        ))}
+                                  if (editableOtherTaskId) {
+                                    onOtherTaskChange(editableOtherTaskId, { status });
+                                  } else {
+                                    onTaskStatusChange(task, status);
+                                  }
+                                  setOpenStatusTaskId(null);
+                                }}
+                                title={
+                                  task.actionTarget || getEditableOtherTaskId(task)
+                                    ? statusLabels[status]
+                                    : "This automatic reminder is updated from its source"
+                                }
+                                type="button"
+                              >
+                                <StatusDot
+                                  status={status}
+                                  label={statusLabels[status]}
+                                />
+                                {statusLabels[status]}
+                              </button>
+                            ))}
+                          </>
+                        )}
                       </div>
                     ) : null}
                   </div>
@@ -10137,13 +10843,11 @@ function PlatformsView({
     <>
       <header className="topbar">
         <div className="topbar-title-block">
-          <div className="topbar-eyebrow-row">
-            <p className="eyebrow">Detailed platform statistics</p>
-            <ModuleHeaderDate />
-          </div>
+          <p className="eyebrow">Detailed platform statistics</p>
           <h1>Platforms</h1>
         </div>
         <div className="dashboard-refresh-control platform-refresh-control">
+          <ModuleHeaderDate />
           <button
             className="refresh-button"
             disabled={refreshStatus.state === "loading"}
@@ -10502,19 +11206,46 @@ function getAppleMusicLastUpdateDate(
   );
 }
 
-function getAppleMusicUpdateTask(updateDate?: string): FocusQueueItem | null {
-  if (!isPlatformUpdateStale(updateDate)) {
+function getAppleMusicUpdateTask(
+  updateDate: string | undefined,
+  isCampaignStartToday: boolean
+): FocusQueueItem | null {
+  const needsCampaignStartSnapshot =
+    isCampaignStartToday && !wasPlatformUpdatedToday(updateDate);
+
+  if (!isPlatformUpdateStale(updateDate) && !needsCampaignStartSnapshot) {
     return null;
   }
 
   return {
     id: "other-apple-music-csv-update",
     label: `Update Apple Music CSV${
+      needsCampaignStartSnapshot ? " - campaign starts today" : ""
+    }${
       updateDate ? ` - last update ${formatDateWithDots(updateDate)}` : ""
     }`,
     source: "Other",
     status: "not-started"
   };
+}
+
+function isMarketingCampaignStartToday(campaigns: MarketingCampaignConfig[]) {
+  const todayKey = getViennaDateKey();
+
+  return campaigns.some((campaign) => {
+    const campaignDays =
+      campaign.campaignDays ?? buildCampaignDays(campaign.releaseDate, campaign.daySeeds);
+    const firstDay = [...campaignDays].sort((first, second) =>
+      first.dateKey.localeCompare(second.dateKey)
+    )[0];
+
+    return firstDay?.dateKey === todayKey;
+  });
+}
+
+function wasPlatformUpdatedToday(updateDate?: string) {
+  const parsedDate = updateDate ? parsePlatformUpdateDate(updateDate) : null;
+  return parsedDate?.toISOString().slice(0, 10) === getViennaDateKey();
 }
 
 function getPlatformUpdateMetaClass(platformSlug: string, updateDate?: string) {
@@ -11409,6 +12140,17 @@ function isUnfinishedRelevantStatus(status: MarketingStatus) {
   return status !== "done" && isRelevantMarketingStatus(status);
 }
 
+function hasReleaseDayDefaultTasks(day: CampaignDay) {
+  return (
+    day.releaseOffset === 0 &&
+    [
+      day.statuses.websiteUpdate,
+      day.statuses.facebookPost,
+      day.statuses.youtubePost
+    ].some(isRelevantMarketingStatus)
+  );
+}
+
 function calculateCampaignCompletion(days: CampaignDay[]) {
   const statuses = days
     .flatMap((day) => [
@@ -11452,6 +12194,28 @@ function getNextCampaignTasks(days: CampaignDay[]): CampaignTaskItem[] {
             status: day.statuses.youtubeUpload
           });
         }
+      }
+
+      if (hasReleaseDayDefaultTasks(day)) {
+        [
+          {
+            id: `${day.dayNumber}-website-update`,
+            label: `${day.date} - Update website`,
+            status: day.statuses.websiteUpdate
+          },
+          {
+            id: `${day.dayNumber}-facebook-post`,
+            label: `${day.date} - Facebook post`,
+            status: day.statuses.facebookPost
+          },
+          {
+            id: `${day.dayNumber}-youtube-post`,
+            label: `${day.date} - YouTube post`,
+            status: day.statuses.youtubePost
+          }
+        ]
+          .filter((task) => isUnfinishedRelevantStatus(task.status))
+          .forEach((task) => tasks.push(task));
       }
 
       return [
@@ -11559,6 +12323,7 @@ function PlatformStatsSection({
           return (
             <article
               className={`platform-card platform-card-${platform.slug}`}
+              id={`platform-card-${platform.slug}`}
               key={platform.platform}
             >
               <div className="platform-card-header">
@@ -11644,12 +12409,10 @@ function RoadmapView() {
     <>
       <header className="topbar">
         <div className="topbar-title-block">
-          <div className="topbar-eyebrow-row">
-            <p className="eyebrow">Strategic overview</p>
-            <ModuleHeaderDate />
-          </div>
+          <p className="eyebrow">Strategic overview</p>
           <h1>Roadmap</h1>
         </div>
+        <ModuleHeaderDate />
       </header>
 
       <section className="roadmap-overview panel" aria-label="General roadmap progress">

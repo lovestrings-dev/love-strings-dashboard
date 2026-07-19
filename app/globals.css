@@ -125,7 +125,7 @@ button {
 }
 
 .topbar {
-  align-items: center;
+  align-items: flex-start;
   display: flex;
   gap: 14px;
   justify-content: space-between;
@@ -155,7 +155,7 @@ button {
 }
 
 .topbar-date {
-  align-self: end;
+  align-self: flex-start;
   color: var(--accent-strong);
   display: inline-flex;
   flex: 0 0 auto;
@@ -163,7 +163,7 @@ button {
   font-weight: 700;
   letter-spacing: 0;
   line-height: 1.2;
-  padding: 0 0 5px;
+  padding: 0;
   text-align: right;
   text-transform: uppercase;
   white-space: nowrap;
@@ -188,6 +188,10 @@ h1 {
   font-size: 36px;
   line-height: 1.1;
   margin-bottom: 0;
+}
+
+.dashboard-main-title {
+  white-space: nowrap;
 }
 
 h2 {
@@ -241,7 +245,7 @@ h2 {
 }
 
 .production-save-control {
-  align-items: center;
+  align-items: flex-start;
   display: flex;
   gap: 10px;
   justify-content: flex-end;
@@ -639,7 +643,7 @@ h2 {
 .dashboard-campaign-grid {
   display: grid;
   gap: 14px;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .dashboard-campaign-card {
@@ -655,6 +659,7 @@ h2 {
 
 .dashboard-campaign-card-compact {
   gap: 0;
+  grid-column: 1 / -1;
   padding-block: 12px;
 }
 
@@ -670,7 +675,7 @@ h2 {
 }
 
 .dashboard-campaign-card-empty {
-  align-content: center;
+  align-content: start;
   min-height: 156px;
 }
 
@@ -762,6 +767,13 @@ h2 {
   line-height: 1.35;
 }
 
+.event-card-loading {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .dashboard-event-card a {
   color: var(--accent-strong);
   overflow-wrap: anywhere;
@@ -807,6 +819,34 @@ h2 {
 .dashboard-focus-card-header svg {
   color: var(--accent);
   flex: 0 0 auto;
+}
+
+.dashboard-focus-score {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.dashboard-focus-score-boxes {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.dashboard-focus-score .campaign-progress-box {
+  height: 12px;
+  width: 12px;
+}
+
+.dashboard-focus-score strong {
+  flex: 0 0 auto;
+  font-size: 14px;
+  line-height: 1;
 }
 
 .dashboard-focus-list {
@@ -1089,7 +1129,7 @@ h2 {
 }
 
 .dashboard-budget-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .dashboard-budget-grid .budget-metric-card {
@@ -1558,6 +1598,7 @@ h2 {
 .platform-trend-body {
   display: grid;
   gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   padding-top: 10px;
 }
 
@@ -1567,8 +1608,8 @@ h2 {
 }
 
 .platform-trend-chart-block + .platform-trend-chart-block {
-  border-top: 1px solid #ebe8df;
-  padding-top: 18px;
+  border-top: 0;
+  padding-top: 0;
 }
 
 .platform-trend-summary {
@@ -3310,8 +3351,8 @@ h2 {
   transition: transform 160ms ease;
 }
 
-.campaign-toggle[aria-expanded="false"] svg {
-  transform: rotate(-90deg);
+.campaign-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
 }
 
 .production-song-board {
@@ -4081,11 +4122,30 @@ h2 {
     font-size: 28px;
   }
 
+  .dashboard-main-topbar .topbar-title-block {
+    display: contents;
+  }
+
+  .dashboard-main-topbar .eyebrow {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .dashboard-main-topbar .topbar-date {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .dashboard-main-title {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
   .topbar {
     align-items: start;
     display: grid;
-    gap: 14px;
-    grid-template-columns: minmax(0, 1fr);
+    gap: 8px 12px;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .topbar-date {
@@ -4098,17 +4158,39 @@ h2 {
   }
 
   .platform-refresh-control {
-    justify-items: stretch;
-    width: 100%;
+    justify-items: end;
+    width: auto;
   }
 
   .platform-refresh-control .refresh-button {
     justify-content: center;
-    width: 100%;
+    width: auto;
   }
 
   .summary-grid {
     grid-template-columns: 1fr;
+  }
+
+  .dashboard-budget-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-campaign-card-empty-next {
+    min-height: 0;
+    padding-block: 12px;
+  }
+
+  .dashboard-campaign-card-empty-next h3 {
+    font-size: 16px;
+  }
+
+  .platform-trend-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .platform-trend-chart-block + .platform-trend-chart-block {
+    border-top: 1px solid #ebe8df;
+    padding-top: 18px;
   }
 
   .budget-summary-grid,

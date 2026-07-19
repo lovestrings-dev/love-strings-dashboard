@@ -27,8 +27,9 @@
 
 ## Marketing
 
-- Should "update Apple Music" appear on both first and last campaign day for every campaign by default?
-- Should Apple Music import reminders be linked to the Apple Music CSV import workflow in Platforms?
+- Apple Music import reminder is linked to the Platforms CSV workflow and appears when the latest import is older than 7 days or on the first campaign day. No separate campaign-end reminder is needed.
+- Parked observation: Yuliia saw a campaign task form shift slightly while typing. Reproduce the exact sequence before changing the layout.
+- Historical campaign statuses that were lost during prototype rebuilding will be restored manually after the build logic stabilizes, to avoid repeating cleanup during active schema/workflow changes.
 
 ## Platforms Analytics
 
@@ -56,9 +57,10 @@
 
 ## Other Tasks
 
-- Where should non-marketing/non-production tasks live?
-- Should they be module-linked when possible, or all go into a general task pool?
-- How should manually added non-standard tasks appear in Dashboard In Focus?
+- Beta 1.7 answered the product placement question: non-marketing/non-production tasks should live inside Dashboard Focus Queue, not in a separate tab.
+- Completed: `Other` tasks are wired to Supabase and shared across browsers/devices.
+- Decide whether `Other` tasks need lightweight source/context fields later, or whether title/date/status/notes/history is enough for v1.
+- Watch one rare local test edge case: repeated fast use of `+ Other task` plus detail edits may occasionally leave a newly created task in edit view unexpectedly. Reproduce before fixing if possible.
 
 ## Voice Control
 
@@ -90,4 +92,22 @@
 
 ## QR Codes
 
-- QR Codes dropdown on Dashboard and Platforms is useful for sharing Love Strings links from a phone screen, but the current Beta 1.4 implementation stores QR edits in local browser state only. Decide when to move QR code records into Supabase so Dmitrii and Yuliia share the same QR list across devices.
+- Completed locally for Beta 1.8: QR records use private Supabase storage through `/api/qr-links`, with browser storage retained as migration/offline fallback.
+
+## Beta 1.8 Candidate Backlog
+
+- Completed locally: Focus Queue `Other` tasks are wired to Supabase so the daily task memory is shared across devices.
+- Completed: Dashboard Budget cards show all four cards in one desktop row and a two-by-two mobile layout.
+- Completed: current campaign completion percentage sits next to the campaign title, like Benchmark campaign, while the progress strip remains below.
+- Completed locally: empty Next campaign whitespace is tightened on mobile.
+- Completed locally: Benchmark campaign spans the Dashboard width while Current and Next campaigns share a two-column desktop row and stack on smaller screens.
+- Completed locally: Marketing and Production cards use a down arrow when closed and an up arrow when expanded.
+- Completed locally: Platforms evolution graphs use two columns on desktop and one column on mobile.
+- Observe during continued testing: repeated rapid `Other task` add/edit actions may rarely leave a newly created task in edit view unexpectedly; reproduce before changing the workflow.
+- Future design exploration: discuss a skin/theme system before building it. Possible study case: old-school Winamp-inspired skin, with changeable app visual skins after core v1 logic is stable.
+
+## Version 1.0 Remaining Shape
+
+- Add real logic behind Roadmap progress instead of manually staged visuals.
+- Decide how far to go with UI graphic design/skins before or after v1.0.
+- Continue small polish/backlog fixes discovered in real mobile and deployed app use.

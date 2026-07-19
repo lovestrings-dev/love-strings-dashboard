@@ -117,6 +117,9 @@ Initial tables:
 - `marketing_campaigns`
 - `marketing_campaign_days`
 - `marketing_campaign_tasks`
+- `focus_other_tasks`
+- `focus_daily_progress`
+- `qr_links`
 
 RLS is enabled on all project tables.
 
@@ -131,7 +134,7 @@ Read policies currently allow anonymous reads for public dashboard data:
 - `marketing_campaign_days`
 - `marketing_campaign_tasks`
 
-Temporary prototype write policies allow anonymous writes to Marketing campaign tables only. Replace these with authenticated policies before public launch.
+Anonymous Marketing writes were removed in migration `202607190005_remove_marketing_anon_writes.sql`. Campaign create/header/delete mutations now use the protected `/api/marketing/campaigns` service-role route, while day/task replacement uses the protected atomic `/api/marketing/campaign-days` route.
 
 Current seeded metric source:
 
@@ -167,7 +170,9 @@ Current campaign seed source:
 - Local fallback campaign seed data still lives in `app/page.tsx`.
 - Historical campaign seed source: Google Sheet `Love Strings ADMIN`, tab `RELEASE MEDIA PLAN`, export gid `1970846657`.
 - The Marketing UI now reads from `marketing_campaigns`, `marketing_campaign_days`, and `marketing_campaign_tasks` when Supabase is available.
-- Campaign title/date changes, campaign deletion, new campaigns, and day/task plan changes are written back to Supabase through prototype anon write policies.
+- Campaign title/date changes, campaign deletion, and new campaigns are written through `/api/marketing/campaigns`.
+- Day/task plan changes are replaced atomically through `/api/marketing/campaign-days`; a rejected task can no longer leave a campaign deleted or partially saved.
+- QR links are shared through private `qr_links` records and `/api/qr-links`; browser storage remains a fallback and first-load migration source.
 
 Production seed source:
 

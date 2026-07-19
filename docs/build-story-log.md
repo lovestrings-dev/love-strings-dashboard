@@ -552,6 +552,27 @@ Short script add-on:
 - "Tomorrow we make it shared, so it becomes real app memory."
 - "We also added a musician-style benchmark: not just what is next, but what record am I trying to beat?"
 
+Viewer-series connection:
+- This episode should connect back to the earlier Marketing-module story: Yuliia was already using the app daily while the rest of the system continued growing around it.
+- The viewer should feel that each beta is not random feature stuffing. Each beta answers a musician-life problem:
+  - Marketing: "How do we promote a release every day without losing track?"
+  - Production: "How do we know what song is really next?"
+  - Events: "How do gigs and locations become reusable memory?"
+  - Budget: "How do money lines stop being scattered?"
+  - Platforms: "How do daily stats become visual momentum?"
+  - Focus Queue: "Where do all the small tasks go?"
+- Keep showing Dmitrii's testing inputs as part of the story, not as interruptions: "I tried it on mobile", "Yuliia noticed the screen jumping", "the first scheduler was unreliable", "we moved the scheduler", "we found duplicates", "we cleaned them up". The audience should see that useful software is shaped by real use.
+- Today contained a strong "near autopilot" moment: generated Budget lines, platform snapshots, and Focus Queue reminders are starting to feel like the dashboard actively helps instead of just storing notes.
+
+Possible short/reel structure for Beta 1.7:
+1. Hook: "Today the dashboard started feeling less like a spreadsheet and more like a control room."
+2. Show platform graphs: "Numbers became curves, not just cards."
+3. Show Budget graphs/ledger: "Expenses and income started explaining themselves."
+4. Show Focus Queue: "The tiny tasks finally got a home."
+5. Show Events poster and benchmarks: "Even posters and personal records became part of the workflow."
+6. Honest beta note: "One rare add-task behavior is still on the watch list, and tomorrow we wire Other tasks to the database."
+7. Close: "This is how a musician's private tool becomes useful one tested habit at a time."
+
 ### Reel: Irrelevant Is A Real Status
 
 Core story:
@@ -563,3 +584,62 @@ Core story:
 Caption angle:
 
 Sometimes better software is not about adding more automation. Sometimes it is about adding one word that describes real life.
+
+### Reel: Beat Yesterday, Not Everybody
+
+Core story:
+- Focus Queue gained a daily target: complete at least three useful tasks.
+- Done earns two points, In progress earns one, and Irrelevant does not distort the score.
+- Three completed tasks equal 100%, but a strong day can go beyond 100% instead of being capped.
+- The app stores each day's score in Supabase so daily consistency can become an evolution graph later.
+- This connects three personal benchmarks: daily Focus momentum, best Marketing campaign completion, and fastest Production cycle.
+
+### Reel: The Progress Bar That Forgot After Refresh
+
+Core story:
+- The new daily Focus score looked correct until the page was refreshed.
+- That exposed the difference between optimistic UI and real persistence: a feature is not finished because the screen changed once.
+- We traced the save path, corrected the protected API flow, and retested Marketing release-day tasks and Focus progress after refresh.
+- Dmitrii's test was the acceptance criterion: change it, refresh it, and make sure the same truth comes back.
+
+Short hook:
+- "The feature worked perfectly, until I refreshed the page."
+- "That is how a nice-looking prototype tells you it is not a real tool yet."
+
+### Reel: One Failed Task Nearly Reset A Campaign
+
+Core story:
+- Adding new standard release-day tasks exposed a dangerous save sequence: old campaign days could be removed before a new task failed validation.
+- The visible symptom was frighteningly simple: Rock and Roll came back with tasks reset to Not started.
+- We changed the database operation into one atomic transaction and deliberately sent a bad task to test the rollback.
+- The failed save was rejected and all 14 campaign days remained intact.
+
+Short hook:
+- "We did not test only the happy path. We tried to break the campaign on purpose."
+- "Now either the whole campaign saves, or nothing changes."
+
+Story lesson:
+- Database safety is not abstract infrastructure. It protects hours of real work entered by Yuliia and Dmitrii.
+- This is a strong continuation of the story that Marketing was already used daily while the rest of the app was still being built.
+
+### Reel: The QR Drawer Becomes A Shared Backstage Toolkit
+
+Core story:
+- The app already carried QR codes for the website, music platforms, and dashboard so Dmitrii could open one drawer and let someone scan the right destination.
+- But edits lived only in one browser, which meant another phone or Yuliia's browser could show a different list.
+- We moved the QR configuration into private Supabase storage while keeping local fallback for offline use and first migration.
+- A tiny sharing feature became another example of the app turning from one person's prototype into a shared working tool.
+
+### Reel: Tightening A Beta Without Changing Its Face
+
+Core story:
+- Some of the most important Beta 1.8 work is almost invisible: anonymous Marketing writes were removed, mutations moved behind protected server routes, and multi-step campaign saves became transactional.
+- The app looks nearly the same, but the risk of an accidental or malformed write is much lower.
+- Pair this with small visible polish: a stable Next-event loading state, consistent module dates, and compact dashboard layouts.
+
+Series connection:
+- Earlier episodes show features appearing quickly.
+- This episode shows the second half of building: revisiting what already works, learning from real use, and making it trustworthy.
+
+Short hook:
+- "The dashboard is not asking me to beat another artist. It is asking: can I beat yesterday?"

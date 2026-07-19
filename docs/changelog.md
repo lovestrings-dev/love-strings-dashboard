@@ -219,7 +219,7 @@ Storytelling angle:
 
 ## Beta 1.7
 
-Status: Release candidate prepared locally
+Status: Released to production and verified after GitHub push/Vercel deploy.
 
 Release theme:
 
@@ -269,7 +269,51 @@ Already added locally since Beta 1.6:
 
 Deferred after Beta 1.7:
 - Wire `Other` tasks to Supabase once the local workflow is confirmed.
+- Investigate one rare Focus Queue edge case where repeated quick `Other task` add/edit actions may leave a newly created task in edit view unexpectedly.
+- Dashboard mobile: use two-by-two Budget card layout while keeping four Budget cards in one desktop row.
+- Dashboard Marketing preview: move current campaign completion percentage next to the title, matching Benchmark campaign, while keeping the progress strip below.
+- Dashboard Marketing preview: tighten empty Next campaign whitespace on mobile and show current/next campaign cards as two columns on desktop.
+- Marketing and Production module cards: expanded/collapsed arrow should point down when details are closed.
+- Platforms: show two evolution graphs per row on desktop and keep single-column graphs on mobile.
 - Roadmap work is likely the next larger module after this beta.
+
+Post-deploy observations:
+- Focus Queue worked as expected and survived browser refresh in production testing.
+- Event poster links survived refresh; new poster links also saved and reloaded correctly.
+- Budget ledger looked clean after the duplicate cleanup and is now close to an autopilot tracker for generated lines.
+- Remaining work is mainly polish/backlog plus the planned Supabase wiring for `Other` tasks.
+
+## Beta 1.8
+
+Status: Release candidate verified locally; ready for GitHub/Vercel deployment.
+
+Release theme:
+
+Shared Focus Queue memory plus the practical Dashboard and Platforms polish collected after Beta 1.7.
+
+Completed locally:
+- Wired Focus Queue `Other` tasks to Supabase with server-side create, read, update, and delete support.
+- Added Supabase-backed daily Focus scoring: 6-point target, Done = 2, In progress = 1, Not started = 0, Irrelevant excluded, and percentages allowed beyond 100%.
+- Added compact daily score boxes and percentage to the Focus Queue header, with status changes captured from Focus Queue and directly from Marketing, Production, and Other-task editors.
+- Successful Apple Music CSV import now completes one daily Focus task for 2 points; opening or dismissing the reminder does not score, and repeated same-day imports cannot create duplicate points.
+- Added non-deletable release-day Marketing defaults for Update website, Facebook post, and YouTube post; they participate in completion, Focus Queue, daily scoring, and persistence without changing completed historical campaign benchmarks.
+- Added a one-time local-to-Supabase merge so existing browser tasks are preserved instead of discarded during the move to shared storage.
+- Added task-level debounced updates and retained local storage as an offline/failure fallback.
+- Verified Other-task creation, editing, status changes, deletion, refresh survival, and cross-browser visibility.
+- Confirmed the Dashboard Budget preview already uses four cards in one desktop row and a two-by-two mobile layout.
+- Confirmed current campaign completion percentage is already positioned next to the campaign title for direct comparison with Benchmark campaign.
+- Tightened the empty Next campaign card on mobile only.
+- Kept Benchmark campaign full-width and placed Current and Next campaign cards side-by-side on desktop, matching the Production preview rhythm; smaller screens remain stacked.
+- Standardized Marketing and Production card arrows: down when closed, up when expanded.
+- Reflowed Platforms evolution graphs into two columns on desktop and one column on mobile.
+- Shared QR records across devices through private Supabase storage and a protected server API, while retaining browser fallback and first-load migration.
+- Removed anonymous Marketing write policies and moved campaign create/header/delete operations behind a protected server route.
+- Made Marketing day/task replacement atomic so validation or database failure rolls back the entire save instead of leaving a partially reset campaign.
+- Standardized module headers with the Vienna date in the top-right corner and kept `Love Strings Dashboard` on one line without reducing its display size.
+- Fixed the Dashboard Next-event loading flash so the empty-state message is not shown before Supabase data finishes loading.
+
+Known observation:
+- A rare rapid-add Focus Queue sequence may leave a newly created Other task in edit view; it has not yet been reliably reproduced and does not block normal use.
 
 ## Version 1.0
 
