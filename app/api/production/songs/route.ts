@@ -30,6 +30,8 @@ type ProductionSongConfig = {
   dbId?: string;
   title: string;
   deadline: string;
+  releaseDate: string;
+  roadmapPhaseId: string | null;
   albumArtUrl: string;
   steps: ProductionStep[];
 };
@@ -68,8 +70,9 @@ export async function POST(request: NextRequest) {
       status: "ok"
     });
   } catch (error) {
+    console.error("Production save failed.", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Production save failed." },
+      { error: getErrorMessage(error, "Production save failed.") },
       { status: 500 }
     );
   }
@@ -102,15 +105,22 @@ export async function DELETE(request: NextRequest) {
 async function saveProductionSong(song: ProductionSongConfig) {
   const supabase = createServiceSupabaseClient();
   const productionDeadline = formatInputDateForDatabase(song.deadline);
+  const releaseDate = formatInputDateForDatabase(song.releaseDate);
 
   if (!productionDeadline) {
     throw new Error(`Invalid production deadline for ${song.title}.`);
+  }
+
+  if (!releaseDate) {
+    throw new Error(`Invalid release date for ${song.title}.`);
   }
 
   const songPayload = {
     slug: createStableId(song.id || song.title) || createStableId(song.title),
     title: song.title,
     production_deadline: productionDeadline,
+    release_date: releaseDate,
+    roadmap_phase_id: song.roadmapPhaseId,
     album_art_url: song.albumArtUrl,
     source: "app",
     ...(song.dbId ? { id: song.dbId } : {})
@@ -123,6 +133,15 @@ async function saveProductionSong(song: ProductionSongConfig) {
 
   if (songError) {
     throw songError;
+  }
+
+  const { error: campaignSyncError } = await supabase
+    .from("marketing_campaigns")
+    .update({ release_date: releaseDate })
+    .eq("production_song_id", savedSong.id);
+
+  if (campaignSyncError) {
+    throw campaignSyncError;
   }
 
   const { error: deleteStepsError } = await supabase
@@ -306,6 +325,23 @@ function createServiceSupabaseClient() {
   }
 
   return createClient(supabaseUrl, supabaseServiceRoleKey);
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+
+  return fallback;
 }
 
 function createStableId(value: string) {

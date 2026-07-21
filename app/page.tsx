@@ -113,6 +113,8 @@ type ProductionSongConfig = {
   dbId?: string;
   title: string;
   deadline: string;
+  releaseDate: string;
+  roadmapPhaseId: string | null;
   albumArtUrl: string;
   steps: ProductionStep[];
 };
@@ -182,11 +184,11 @@ type LocationAddressBookEntry = {
   contactPhone: string;
   contactNotes: string;
 };
-type RoadmapBoxStatus = "done" | "active" | "planned" | "partial";
+type RoadmapBoxStatus = "done" | "active" | "planned" | "partial" | "missed";
 type RoadmapMonth = {
   id: string;
   label: string;
-  phase: 1 | 2 | 3;
+  phase: number;
   planned: number;
   released: number;
 };
@@ -201,6 +203,8 @@ type RoadmapPhase = {
   accent: "blue" | "berry" | "green";
   summary: string;
   milestones: string[];
+  startMonth: string;
+  endMonth: string;
 };
 type CampaignDaySeed = {
   dateKey: string;
@@ -213,6 +217,7 @@ type MarketingCampaignConfig = {
   dbId?: string;
   releaseTitle: string;
   releaseDate: string;
+  productionSongDbId?: string;
   albumArtUrl: string;
   budgetLines?: ProductionBudgetLine[];
   campaignDays?: CampaignDay[];
@@ -286,6 +291,7 @@ type MarketingCampaignDbRow = {
   slug: string;
   title: string;
   release_date: string;
+  production_song_id: string | null;
   album_art_url: string;
   marketing_campaign_days: MarketingCampaignDayDbRow[] | null;
 };
@@ -294,6 +300,8 @@ type ProductionSongDbRow = {
   slug: string;
   title: string;
   production_deadline: string;
+  release_date: string;
+  roadmap_phase_id: string | null;
   album_art_url: string;
 };
 type ProductionStepDbRow = {
@@ -545,7 +553,7 @@ const defaultQrCodeLinks: QrCodeLink[] = [
   }))
 ];
 
-const appVersionLabel = "Beta 1.8";
+const appVersionLabel = "Beta 1.9";
 
 const sections = [
   "Dashboard",
@@ -1616,7 +1624,9 @@ const roadmapPhases: RoadmapPhase[] = [
     accent: "blue",
     summary:
       "Launch Love Strings, build the first English cover catalog, and make the release process repeatable.",
-    milestones: ["5 releases by Jul 2026", "10 releases by Oct 2026", "20 releases by Jul 2027"]
+    milestones: [],
+    startMonth: "2026-04",
+    endMonth: "2027-07"
   },
   {
     id: "phase-2",
@@ -1629,7 +1639,9 @@ const roadmapPhases: RoadmapPhase[] = [
     accent: "berry",
     summary:
       "Add Russian-language covers while English covers continue in parallel.",
-    milestones: ["First Russian cover", "Two-language catalog", "25-30 releases in catalog"]
+    milestones: [],
+    startMonth: "2027-08",
+    endMonth: "2027-12"
   },
   {
     id: "phase-3",
@@ -1642,9 +1654,33 @@ const roadmapPhases: RoadmapPhase[] = [
     accent: "green",
     summary:
       "Start original Love Strings material and build long-term owned music assets.",
-    milestones: ["First original single", "Original campaign", "35+ releases by 2028+"]
+    milestones: [],
+    startMonth: "2028-01",
+    endMonth: "2028-12"
   }
 ];
+
+function normalizeRoadmapPhases(phases: Array<Partial<RoadmapPhase>>) {
+  const accents: RoadmapPhase["accent"][] = ["blue", "berry", "green"];
+  return phases
+    .filter((phase): phase is Partial<RoadmapPhase> & { id: string; phaseNumber: number } =>
+      Boolean(phase.id && phase.phaseNumber)
+    )
+    .map((phase, index) => ({
+      accent: accents[index % accents.length],
+      activeCount: 0,
+      endMonth: phase.endMonth ?? "2028-12",
+      id: phase.id,
+      milestones: [],
+      period: "",
+      phaseNumber: phase.phaseNumber,
+      releasedCount: 0,
+      startMonth: phase.startMonth ?? "2028-01",
+      summary: phase.summary ?? "",
+      targetCount: 0,
+      title: phase.title ?? `Phase ${phase.phaseNumber}`
+    })) satisfies RoadmapPhase[];
+}
 
 function sortCampaignsByReleaseDate(campaigns: MarketingCampaignConfig[]) {
   return [...campaigns].sort(
@@ -1708,11 +1744,20 @@ function createProductionSongSeed({
   statusPattern: MarketingStatus[];
   title: string;
 }): ProductionSongConfig {
+  const releaseDate = formatDateForInput(
+    addUtcDays(parseCampaignDate(deadline) ?? getTodayUtcDate(), 14)
+  );
+
   return {
     albumArtUrl,
     deadline,
     id,
-    steps: buildProductionSteps(deadline, title, statusPattern),
+    releaseDate,
+    roadmapPhaseId: null,
+    steps: ensureProductionReleaseStep(
+      buildProductionSteps(deadline, title, statusPattern),
+      releaseDate
+    ),
     title
   };
 }
@@ -1720,13 +1765,24 @@ function createProductionSongSeed({
 function createProductionSongFromWorkbookSeed(
   seed: ProductionWorkbookSeed
 ): ProductionSongConfig {
+  const releaseDate =
+    seed.releaseDate ??
+    formatDateForInput(
+      addUtcDays(parseCampaignDate(seed.deadline) ?? getTodayUtcDate(), 14)
+    );
+
   return {
     albumArtUrl: seed.id === "rock-and-roll"
       ? "https://res.cloudinary.com/zg6yhttv/image/upload/v1782829034/Rock_and_Roll_-_Love_Strings_-_Cover_Art_web_avazio.jpg"
       : "",
     deadline: seed.deadline,
     id: seed.id,
-    steps: buildProductionStepsFromWorkbookSeed(seed),
+    releaseDate,
+    roadmapPhaseId: null,
+    steps: ensureProductionReleaseStep(
+      buildProductionStepsFromWorkbookSeed(seed),
+      releaseDate
+    ),
     title: seed.title
   };
 }
@@ -1808,20 +1864,124 @@ function getDefaultProductionStepBudgetLines(stepLabel: string): ProductionBudge
 function normalizeProductionSongsWithBudgetDefaults(
   songs: ProductionSongConfig[]
 ) {
-  return songs.map((song) => ({
+  return songs.map((song) => {
+    const releaseDate =
+      song.releaseDate ??
+      formatDateForInput(
+        addUtcDays(parseCampaignDate(song.deadline) ?? getTodayUtcDate(), 14)
+      );
+
+    return {
+      ...song,
+      releaseDate,
+      roadmapPhaseId: song.roadmapPhaseId ?? null,
+      steps: ensureProductionReleaseStep(
+        song.steps.map((step) => ({
+          ...step,
+          budgetLines:
+            step.budgetLines !== undefined
+              ? step.budgetLines
+              : getDefaultProductionStepBudgetLines(step.label),
+          extraTasks: step.extraTasks.map((task) => ({
+            ...task,
+            budgetLines: task.budgetLines ?? []
+          }))
+        })),
+        releaseDate
+      )
+    };
+  });
+}
+
+function ensureProductionReleaseStep(
+  steps: ProductionStep[],
+  releaseDate: string
+) {
+  const releaseStatus: MarketingStatus =
+    (parseCampaignDate(releaseDate)?.getTime() ?? Number.MAX_SAFE_INTEGER) <=
+    getTodayUtcDate().getTime()
+      ? "done"
+      : "not-started";
+  const existingReleaseStep = steps.find(
+    (step) => step.id === "release" || step.label.toLowerCase() === "release"
+  );
+
+  if (existingReleaseStep) {
+    return sortProductionStepsByDeadline(
+      steps.map((step) =>
+        step === existingReleaseStep
+          ? {
+              ...step,
+              deadline: releaseDate,
+              id: "release",
+              isDefaultStep: true,
+              label: "Release",
+              status: releaseStatus
+            }
+          : step
+      )
+    );
+  }
+
+  return sortProductionStepsByDeadline([
+    ...steps,
+    {
+      id: "release",
+      label: "Release",
+      deadline: releaseDate,
+      isDefaultStep: true,
+      notes: "",
+      budgetLines: [],
+      status: releaseStatus,
+      extraTasks: []
+    }
+  ]);
+}
+
+const productionReleaseScheduleOffsets: Record<string, number> = {
+  drums: -33,
+  guitars: -30,
+  bass: -29,
+  vocals: -26,
+  edit: -23,
+  mix: -18,
+  master: -17,
+  license: -16,
+  "cover-art": -15,
+  distributor: -14,
+  release: 0
+};
+
+function applyProductionReleaseSchedule(
+  song: ProductionSongConfig,
+  releaseDateInput: string
+): ProductionSongConfig {
+  const releaseDate = parseCampaignDate(releaseDateInput);
+
+  if (!releaseDate) {
+    return song;
+  }
+
+  const scheduledSteps = ensureProductionReleaseStep(
+    song.steps,
+    releaseDateInput
+  ).map((step) => {
+    const offset = productionReleaseScheduleOffsets[createStableId(step.label)];
+
+    return offset === undefined
+      ? step
+      : {
+          ...step,
+          deadline: formatDateForInput(addUtcDays(releaseDate, offset))
+        };
+  });
+
+  return {
     ...song,
-    steps: song.steps.map((step) => ({
-      ...step,
-      budgetLines:
-        step.budgetLines !== undefined
-          ? step.budgetLines
-          : getDefaultProductionStepBudgetLines(step.label),
-      extraTasks: step.extraTasks.map((task) => ({
-        ...task,
-        budgetLines: task.budgetLines ?? []
-      }))
-    }))
-  }));
+    deadline: formatDateForInput(addUtcDays(releaseDate, -14)),
+    releaseDate: releaseDateInput,
+    steps: sortProductionStepsByDeadline(scheduledSteps)
+  };
 }
 
 function getProductionSongForRelease(
@@ -3615,6 +3775,29 @@ function buildCampaignDays(
   );
 }
 
+function alignCampaignDaysToReleaseDate(
+  days: CampaignDay[] | undefined,
+  releaseDateInput: string
+) {
+  const releaseDate = parseCampaignDate(releaseDateInput);
+
+  if (!days || !releaseDate) {
+    return days;
+  }
+
+  return days.map((day) => {
+    const dateKey = addUtcDays(releaseDate, day.releaseOffset)
+      .toISOString()
+      .slice(0, 10);
+
+    return {
+      ...day,
+      date: formatCampaignDateKey(dateKey),
+      dateKey
+    };
+  });
+}
+
 function mapMarketingCampaignRows(rows: MarketingCampaignDbRow[]) {
   return sortCampaignsByReleaseDate(
     rows.map((campaign) => ({
@@ -3622,6 +3805,7 @@ function mapMarketingCampaignRows(rows: MarketingCampaignDbRow[]) {
       dbId: campaign.id,
       releaseTitle: campaign.title,
       releaseDate: formatDateKeyForInput(campaign.release_date),
+      productionSongDbId: campaign.production_song_id ?? undefined,
       albumArtUrl: campaign.album_art_url,
       campaignDays: mapMarketingCampaignDayRows(
         campaign.marketing_campaign_days ?? [],
@@ -3765,6 +3949,8 @@ function mapProductionRows({
       albumArtUrl: song.album_art_url,
       dbId: song.id,
       deadline: formatDateKeyForInput(song.production_deadline),
+      releaseDate: formatDateKeyForInput(song.release_date),
+      roadmapPhaseId: song.roadmap_phase_id,
       id: song.slug,
       steps: steps
         .filter((step) => step.production_song_id === song.id)
@@ -4522,6 +4708,7 @@ export default function Home() {
       normalizeProductionSongsWithBudgetDefaults(productionSongs)
     )
   );
+  const [roadmapPhaseDrafts, setRoadmapPhaseDrafts] = useState(roadmapPhases);
   const [budgetEntryDrafts, setBudgetEntryDrafts] = useState(() =>
     sortBudgetEntriesByDate(budgetEntries)
   );
@@ -4766,15 +4953,22 @@ export default function Home() {
       releaseTitle?.trim() ||
       productionSongDrafts[0]?.title ||
       `New Campaign ${campaigns.length + 1}`;
+    const linkedProductionSong = productionSongDrafts.find(
+      (song) => song.title === campaignReleaseTitle
+    );
+    const releaseDateInput =
+      linkedProductionSong?.releaseDate ?? newMarketingCampaign.releaseDate;
     const releaseDate =
-      parseCampaignDate(newMarketingCampaign.releaseDate) ??
+      parseCampaignDate(releaseDateInput) ??
       new Date(Date.UTC(2026, 6, 10));
     const localCampaign: MarketingCampaignConfig = {
       ...newMarketingCampaign,
       id: `campaign-${campaigns.length + 1}-${Date.now()}`,
       releaseTitle: campaignReleaseTitle,
+      releaseDate: releaseDateInput,
+      productionSongDbId: linkedProductionSong?.dbId,
       budgetLines: [],
-      campaignDays: buildCampaignDays(newMarketingCampaign.releaseDate)
+      campaignDays: buildCampaignDays(releaseDateInput)
     };
 
     setCampaigns((currentCampaigns) =>
@@ -4788,6 +4982,7 @@ export default function Home() {
         body: JSON.stringify({
           albumArtUrl: localCampaign.albumArtUrl,
           releaseDate: releaseDate.toISOString().slice(0, 10),
+          productionSongDbId: linkedProductionSong?.dbId,
           slug,
           title: localCampaign.releaseTitle
         }),
@@ -4831,6 +5026,7 @@ export default function Home() {
   }
 
   function updateCampaignReleaseDate(campaignId: string, releaseDate: string) {
+    const campaign = campaigns.find((candidate) => candidate.id === campaignId);
     setMarketingFocusTarget({ campaignId, token: Date.now() });
     setCampaigns((currentCampaigns) =>
       sortCampaignsByReleaseDate(
@@ -4839,6 +5035,18 @@ export default function Home() {
         )
       )
     );
+
+    if (campaign) {
+      const campaignSlug = createStableId(campaign.releaseTitle);
+      setProductionSongDrafts((currentSongs) =>
+        currentSongs.map((song) =>
+          (campaign.productionSongDbId && song.dbId === campaign.productionSongDbId) ||
+          createStableId(song.title) === campaignSlug
+            ? applyProductionReleaseSchedule(song, releaseDate)
+            : song
+        )
+      );
+    }
     void saveMarketingCampaignHeader(campaignId, { releaseDate });
   }
 
@@ -4978,10 +5186,16 @@ export default function Home() {
         file.name,
         csvText
       );
-      const currentReleaseName =
+      const previousCurrentReleaseName =
         getPlatformMetric(platformStatsData, "apple-music", "current_release_name")?.value ??
         getPlatformMetric(platformStatsData, "apple-music", "current_release_plays")?.context ??
-        "Flowers";
+        "";
+      const currentReleaseName = selectCurrentAppleMusicRelease({
+        campaigns,
+        previousCurrentReleaseName,
+        reportEndDate,
+        rows
+      });
       const response = await fetch("/api/apple-music/import", {
         body: JSON.stringify({
           currentReleaseName,
@@ -5108,15 +5322,18 @@ export default function Home() {
 
   function updateProductionSong(songId: string, updates: Partial<ProductionSongConfig>) {
     const currentSong = productionSongDrafts.find((song) => song.id === songId);
-    const nextSong = currentSong
-      ? {
+    const mergedSong = currentSong
+      ? ({
           ...currentSong,
           ...updates,
           steps: updates.steps
             ? sortProductionStepsByDeadline(updates.steps)
             : currentSong.steps
-        }
+        } satisfies ProductionSongConfig)
       : null;
+    const nextSong = mergedSong && updates.releaseDate
+      ? applyProductionReleaseSchedule(mergedSong, updates.releaseDate)
+      : mergedSong;
 
     if (currentSong && nextSong && updates.steps) {
       getChangedDailyProgressItems(
@@ -5130,6 +5347,27 @@ export default function Home() {
         currentSongs.map((song) => (song.id === songId && nextSong ? nextSong : song))
       )
     );
+
+    if (nextSong && updates.releaseDate) {
+      const songSlug = createStableId(nextSong.title);
+      setCampaigns((currentCampaigns) =>
+        sortCampaignsByReleaseDate(
+          currentCampaigns.map((campaign) =>
+            (nextSong.dbId && campaign.productionSongDbId === nextSong.dbId) ||
+            createStableId(campaign.releaseTitle) === songSlug
+              ? {
+                  ...campaign,
+                  campaignDays: alignCampaignDaysToReleaseDate(
+                    campaign.campaignDays,
+                    updates.releaseDate as string
+                  ),
+                  releaseDate: updates.releaseDate as string
+                }
+              : campaign
+          )
+        )
+      );
+    }
 
     if (nextSong) {
       queueProductionSongSave(nextSong);
@@ -6000,6 +6238,7 @@ export default function Home() {
               slug,
               title,
               release_date,
+              production_song_id,
               album_art_url,
               marketing_campaign_days (
                 id,
@@ -6073,7 +6312,7 @@ export default function Home() {
         ] = await Promise.all([
           supabase
             .from("production_songs")
-            .select("id, slug, title, production_deadline, album_art_url")
+            .select("id, slug, title, production_deadline, release_date, roadmap_phase_id, album_art_url")
             .order("production_deadline", { ascending: true }),
           supabase
             .from("production_steps")
@@ -6142,6 +6381,26 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    let isCancelled = false;
+
+    void fetch("/api/roadmap/phases")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Roadmap phases load failed.");
+        return response.json() as Promise<{ phases?: Array<Partial<RoadmapPhase>> }>;
+      })
+      .then((result) => {
+        if (!isCancelled && result.phases?.length) {
+          setRoadmapPhaseDrafts(normalizeRoadmapPhases(result.phases));
+        }
+      })
+      .catch((error) => console.warn("Using Roadmap phase fallback.", error));
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     window.setTimeout(() => {
       void refreshPlatformStatsOnOpenIfMissing();
     }, 0);
@@ -6187,6 +6446,67 @@ export default function Home() {
     window.localStorage.setItem(appleMusicReminderDismissedDateKey, todayKey);
   }
 
+  function openRoadmapProductionSong(songId: string) {
+    setActiveSection("Production");
+    setProductionFocusTarget({ songId, token: Date.now() });
+  }
+
+  function openRoadmapMarketingCampaign(song: ProductionSongConfig) {
+    const songSlug = createStableId(song.title);
+    const campaign = campaigns.find(
+      (candidate) =>
+        (song.dbId && candidate.productionSongDbId === song.dbId) ||
+        createStableId(candidate.releaseTitle) === songSlug
+    );
+
+    if (!campaign) {
+      return;
+    }
+
+    setActiveSection("Marketing");
+    setMarketingFocusTarget({ campaignId: campaign.id, token: Date.now() });
+  }
+
+  async function createRoadmapPhase() {
+    const response = await fetch("/api/roadmap/phases", {
+      headers: { "x-love-strings-roadmap": "write" },
+      method: "POST"
+    });
+    const result = (await response.json()) as {
+      error?: string;
+      phases?: Array<Partial<RoadmapPhase>>;
+    };
+    if (!response.ok || !result.phases) {
+      throw new Error(result.error ?? "Roadmap phase creation failed.");
+    }
+    setRoadmapPhaseDrafts(normalizeRoadmapPhases(result.phases));
+  }
+
+  async function saveRoadmapPhase(phase: RoadmapPhase) {
+    const response = await fetch("/api/roadmap/phases", {
+      body: JSON.stringify({
+        description: phase.summary,
+        endMonth: phase.endMonth,
+        id: phase.id,
+        startMonth: phase.startMonth,
+        title: phase.title
+      }),
+      headers: {
+        "content-type": "application/json",
+        "x-love-strings-roadmap": "write"
+      },
+      method: "PATCH"
+    });
+    const result = (await response.json()) as {
+      error?: string;
+      phases?: Array<Partial<RoadmapPhase>>;
+    };
+    if (!response.ok || !result.phases) {
+      throw new Error(result.error ?? "Roadmap phase save failed.");
+    }
+    setRoadmapPhaseDrafts(normalizeRoadmapPhases(result.phases));
+  }
+
   return (
     <main className="dashboard-shell">
       <aside className="sidebar" aria-label="Primary">
@@ -6221,7 +6541,18 @@ export default function Home() {
       </aside>
 
       <section className="workspace">
-        {activeSection === "Roadmap" ? <RoadmapView /> : null}
+        {activeSection === "Roadmap" ? (
+          <RoadmapView
+            campaigns={campaigns}
+            onCreatePhase={createRoadmapPhase}
+            onOpenMarketing={openRoadmapMarketingCampaign}
+            onOpenProduction={openRoadmapProductionSong}
+            onSavePhase={saveRoadmapPhase}
+            onSongChange={updateProductionSong}
+            phases={roadmapPhaseDrafts}
+            songs={productionSongDrafts}
+          />
+        ) : null}
         {activeSection === "Marketing" ? (
           <MarketingView
             campaigns={campaigns}
@@ -6262,6 +6593,10 @@ export default function Home() {
               setProductionFocusTarget({ elementId, songId, token: Date.now() })
             }
             onSongChange={updateProductionSong}
+            phaseOptions={roadmapPhaseDrafts.map((phase) => ({
+              id: phase.id,
+              label: `Phase ${phase.phaseNumber}: ${phase.title}`
+            }))}
             saveStatus={productionSaveStatus}
             songs={productionSongDrafts}
           />
@@ -6315,6 +6650,7 @@ export default function Home() {
             platformMetricRows={platformMetricRows}
             productionSongs={productionSongDrafts}
             qrCodeLinks={qrCodeLinks}
+            roadmapPhasesData={roadmapPhaseDrafts}
           />
         ) : null}
       </section>
@@ -7771,6 +8107,7 @@ function ProductionView({
   onDeleteSong,
   onFocusSong,
   onSongChange,
+  phaseOptions,
   saveStatus,
   songs
 }: {
@@ -7779,6 +8116,7 @@ function ProductionView({
   onDeleteSong: (songId: string) => void;
   onFocusSong: (songId: string, elementId?: string) => void;
   onSongChange: (songId: string, updates: Partial<ProductionSongConfig>) => void;
+  phaseOptions: Array<{ id: string; label: string }>;
   saveStatus: RefreshStatus;
   songs: ProductionSongConfig[];
 }) {
@@ -7828,6 +8166,7 @@ function ProductionView({
             onChange={onSongChange}
             onDelete={onDeleteSong}
             onFocus={onFocusSong}
+            phaseOptions={phaseOptions}
             refCallback={(element) => {
               songElementRefs.current[song.id] = element;
             }}
@@ -7849,6 +8188,7 @@ function ProductionSongBoard({
   onChange,
   onDelete,
   onFocus,
+  phaseOptions,
   refCallback,
   song
 }: {
@@ -7856,22 +8196,28 @@ function ProductionSongBoard({
   onChange: (songId: string, updates: Partial<ProductionSongConfig>) => void;
   onDelete: (songId: string) => void;
   onFocus: (songId: string, elementId?: string) => void;
+  phaseOptions: Array<{ id: string; label: string }>;
   refCallback: (element: HTMLElement | null) => void;
   song: ProductionSongConfig;
 }) {
   const [songTitle, setSongTitle] = useState(song.title);
   const [songTitleInput, setSongTitleInput] = useState(song.title);
-  const [deadlineInput, setDeadlineInput] = useState(song.deadline);
-  const [appliedDeadlineInput, setAppliedDeadlineInput] = useState(song.deadline);
+  const [deadlineInput, setDeadlineInput] = useState(song.releaseDate);
+  const [appliedDeadlineInput, setAppliedDeadlineInput] = useState(song.releaseDate);
   const [albumArtUrl, setAlbumArtUrl] = useState(song.albumArtUrl);
   const [isAlbumArtEditorOpen, setIsAlbumArtEditorOpen] = useState(false);
   const [isFocusHighlighted, setIsFocusHighlighted] = useState(false);
   const [isSongOpen, setIsSongOpen] = useState(false);
   const [isSongTitleEditorOpen, setIsSongTitleEditorOpen] = useState(false);
   const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
-  const deadlineDate = parseCampaignDate(appliedDeadlineInput);
-  const deadlineDisplay = deadlineDate ? formatCampaignDate(deadlineDate) : null;
-  const daysToDeadline = deadlineDate ? getDaysToRelease(deadlineDate) : null;
+  const releaseDate = parseCampaignDate(appliedDeadlineInput);
+  const productionDeadlineDate = releaseDate ? addUtcDays(releaseDate, -14) : null;
+  const productionDeadlineDisplay = productionDeadlineDate
+    ? formatCampaignDate(productionDeadlineDate)
+    : null;
+  const daysToProductionDeadline = productionDeadlineDate
+    ? getDaysToRelease(productionDeadlineDate)
+    : null;
   const nextTasks = getNextProductionTasks(song.steps).slice(0, 3);
   const hasPendingDeadline = deadlineInput !== appliedDeadlineInput;
   const canUpdateDeadline = Boolean(parseCampaignDate(deadlineInput));
@@ -7881,11 +8227,11 @@ function ProductionSongBoard({
     window.setTimeout(() => {
       setSongTitle(song.title);
       setSongTitleInput(song.title);
-      setDeadlineInput(song.deadline);
-      setAppliedDeadlineInput(song.deadline);
+      setDeadlineInput(song.releaseDate);
+      setAppliedDeadlineInput(song.releaseDate);
       setAlbumArtUrl(song.albumArtUrl);
     }, 0);
-  }, [song.albumArtUrl, song.deadline, song.title]);
+  }, [song.albumArtUrl, song.releaseDate, song.title]);
 
   useEffect(() => {
     if (albumArtUrl === song.albumArtUrl) {
@@ -7940,8 +8286,7 @@ function ProductionSongBoard({
     setAppliedDeadlineInput(deadlineInput);
     onFocus(song.id);
     onChange(song.id, {
-      deadline: deadlineInput,
-      steps: shiftProductionStepDeadlines(song.steps, nextDeadline)
+      releaseDate: deadlineInput
     });
   }
 
@@ -8124,20 +8469,39 @@ function ProductionSongBoard({
               </>
             )}
           </div>
+          <label className="roadmap-phase-select">
+            <span>Roadmap phase</span>
+            <select
+              aria-label={`${songTitle} roadmap phase`}
+              onChange={(event) =>
+                onChange(song.id, {
+                  roadmapPhaseId: event.target.value || null
+                })
+              }
+              value={song.roadmapPhaseId ?? ""}
+            >
+              <option value="">Unassigned</option>
+              {phaseOptions.map((phase) => (
+                <option key={phase.id} value={phase.id}>
+                  {phase.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <HeaderTaskList tasks={nextTasks} />
         </div>
         <label className="release-date-field">
-          <span>Production deadline</span>
+          <span>Release date</span>
           <div className="release-date-input-row">
             <input
-              aria-label="Production deadline in dd/mm/yyyy format"
+              aria-label="Release date in dd/mm/yyyy format"
               inputMode="numeric"
               onChange={(event) => setDeadlineInput(event.target.value)}
               placeholder="dd/mm/yyyy"
               value={deadlineInput}
             />
             <button
-              aria-label="Update production deadline"
+              aria-label="Update release date"
               disabled={!hasPendingDeadline || !canUpdateDeadline}
               onClick={applyDeadlineUpdate}
               type="button"
@@ -8146,8 +8510,8 @@ function ProductionSongBoard({
             </button>
           </div>
           <strong className="release-date-summary">
-            <span>{formatDaysToProductionDeadline(daysToDeadline)}</span>
-            {deadlineDisplay ? <span>{deadlineDisplay}</span> : null}
+            <span>{formatProductionDeadlineCountdown(daysToProductionDeadline)}</span>
+            {productionDeadlineDisplay ? <span>{productionDeadlineDisplay}</span> : null}
           </strong>
         </label>
         <button
@@ -8311,6 +8675,8 @@ function ProductionStepRow({
   songId: string;
   step: ProductionStep;
 }) {
+  const isReleaseStep = step.id === "release";
+
   return (
     <tr id={getProductionStepElementId(songId, step.id)}>
       <td>
@@ -8318,6 +8684,7 @@ function ProductionStepRow({
           <span>{formatCampaignDateKey(formatInputDateForDatabase(step.deadline) ?? "")}</span>
           <input
             aria-label={`${step.label} deadline`}
+            disabled={isReleaseStep}
             inputMode="numeric"
             onChange={(event) =>
               onStepChange(step.id, { deadline: event.target.value })
@@ -8354,6 +8721,7 @@ function ProductionStepRow({
             </label>
             <select
               aria-label={`${step.label} status`}
+              disabled={isReleaseStep}
               onChange={(event) =>
                 onStepChange(step.id, {
                   status: event.target.value as MarketingStatus
@@ -8829,6 +9197,8 @@ function MarketingCampaignBoard({
           albumArtUrl: "",
           deadline: "",
           id: "current-marketing-title",
+          releaseDate: campaign.releaseDate,
+          roadmapPhaseId: null,
           steps: [],
           title: displayedCampaignTitle
         }
@@ -9699,7 +10069,8 @@ function DashboardView({
   otherTasks,
   platformMetricRows,
   productionSongs,
-  qrCodeLinks
+  qrCodeLinks,
+  roadmapPhasesData
 }: {
   appleMusicReminderDismissedDate: string;
   budgetEntries: BudgetEntry[];
@@ -9722,6 +10093,7 @@ function DashboardView({
   platformMetricRows: MetricRow[];
   productionSongs: ProductionSongConfig[];
   qrCodeLinks: QrCodeLink[];
+  roadmapPhasesData: RoadmapPhase[];
 }) {
   const campaignPreview = getDashboardCampaignPreview(campaigns);
   const budgetSummary = getBudgetSummary(budgetEntries);
@@ -9746,7 +10118,7 @@ function DashboardView({
     otherTasks,
     appleMusicUpdateTask ? [appleMusicUpdateTask] : []
   );
-  const phaseOne = roadmapPhases[0];
+  const phaseOne = roadmapPhasesData[0] ?? roadmapPhases[0];
 
   function updateFocusTaskStatus(task: FocusQueueItem, nextStatus: MarketingStatus) {
     const target = task.actionTarget;
@@ -9878,7 +10250,7 @@ function DashboardView({
 
       <DashboardBudgetPreview summary={budgetSummary} />
 
-      <DashboardRoadmapPhasePreview phase={phaseOne} />
+      <DashboardRoadmapPhasePreview phase={phaseOne} songs={productionSongs} />
 
       <QrCodeLinksSection
         links={qrCodeLinks}
@@ -9951,6 +10323,8 @@ function DashboardCampaignCard({
       <article
         className={`dashboard-campaign-card dashboard-campaign-card-empty${
           label === "Next" ? " dashboard-campaign-card-empty-next" : ""
+        }${
+          label === "Current" ? " dashboard-campaign-card-empty-current" : ""
         }`}
       >
         <p className="eyebrow">{label}</p>
@@ -10729,31 +11103,73 @@ function DashboardBudgetPreview({
   );
 }
 
-function DashboardRoadmapPhasePreview({ phase }: { phase: RoadmapPhase }) {
+function DashboardRoadmapPhasePreview({
+  phase,
+  songs
+}: {
+  phase: RoadmapPhase;
+  songs: ProductionSongConfig[];
+}) {
+  const [isSongListOpen, setIsSongListOpen] = useState(false);
+  const phaseSongs = sortRoadmapSongs(
+    songs.filter((song) => song.roadmapPhaseId === phase.id)
+  );
+  const releasedCount = phaseSongs.filter(isRoadmapSongReleased).length;
+
   return (
     <section className="dashboard-roadmap" aria-label="Roadmap phase preview">
       <article className={`roadmap-phase-card roadmap-phase-${phase.accent}`}>
         <div className="roadmap-phase-heading">
-          <div>
+          <div className="roadmap-phase-kicker-row">
             <p className="eyebrow">Phase {phase.phaseNumber}</p>
-            <h2>{phase.title}</h2>
+            <span>{formatRoadmapMonthRange(phase.startMonth, phase.endMonth)}</span>
           </div>
-          <span>{phase.period}</span>
+          <h2>{phase.title}</h2>
         </div>
 
-        <div className="roadmap-phase-counts">
-          <strong>
-            {phase.releasedCount} / {phase.targetCount}
-          </strong>
-          <span>
-            {phase.releasedCount} released
-            {phase.activeCount ? `, ${phase.activeCount} active` : ""}
-          </span>
+        <div className="roadmap-phase-progress-row">
+          <RoadmapReleaseStrip
+            leadingCount={`${releasedCount} / ${phaseSongs.length}`}
+            songs={phaseSongs}
+          />
         </div>
 
-        <RoadmapReleaseStrip phase={phase} />
+        <div className="dashboard-roadmap-actions">
+          <button
+            aria-expanded={isSongListOpen}
+            className="dashboard-task-toggle"
+            onClick={() => setIsSongListOpen((current) => !current)}
+            type="button"
+          >
+            {isSongListOpen ? "Hide all songs" : "Show all songs"}
+          </button>
+        </div>
 
-        <p>{phase.summary}</p>
+        {isSongListOpen ? (
+          <ul className="dashboard-roadmap-song-list">
+            {phaseSongs.map((song) => {
+              const releaseDate = parseCampaignDate(song.releaseDate);
+              const status = getRoadmapSongStatus(song);
+
+              return (
+                <li className="dashboard-roadmap-song-row" key={song.id}>
+                  <span
+                    aria-label={`${song.title}: ${status}`}
+                    className={`dashboard-roadmap-song-status roadmap-box-${status}`}
+                    title={status}
+                  />
+                  <span className="dashboard-roadmap-song-text">
+                    <time dateTime={formatInputDateForDatabase(song.releaseDate) ?? undefined}>
+                      {releaseDate ? formatCampaignDate(releaseDate) : song.releaseDate}
+                    </time>
+                    {" - "}
+                    <strong>{song.title}</strong>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
       </article>
     </section>
   );
@@ -11667,6 +12083,61 @@ function parseAppleMusicCsvFile(fileName: string, csvText: string) {
   };
 }
 
+function selectCurrentAppleMusicRelease({
+  campaigns,
+  previousCurrentReleaseName,
+  reportEndDate,
+  rows
+}: {
+  campaigns: MarketingCampaignConfig[];
+  previousCurrentReleaseName: string;
+  reportEndDate: string;
+  rows: Array<{ song: string }>;
+}) {
+  const songsByNormalizedTitle = new Map(
+    rows.map((row) => [normalizeAppleMusicSongTitle(row.song), row.song])
+  );
+  const reportEndTime = Date.parse(`${reportEndDate}T23:59:59Z`);
+  const latestReleasedCampaign = [...campaigns]
+    .filter((campaign) => {
+      const releaseTime = getCampaignSortTime(campaign.releaseDate);
+      return (
+        releaseTime > 0 &&
+        releaseTime <= reportEndTime &&
+        songsByNormalizedTitle.has(
+          normalizeAppleMusicSongTitle(campaign.releaseTitle)
+        )
+      );
+    })
+    .sort(
+      (firstCampaign, secondCampaign) =>
+        getCampaignSortTime(secondCampaign.releaseDate) -
+        getCampaignSortTime(firstCampaign.releaseDate)
+    )[0];
+
+  if (latestReleasedCampaign) {
+    return (
+      songsByNormalizedTitle.get(
+        normalizeAppleMusicSongTitle(latestReleasedCampaign.releaseTitle)
+      ) ?? latestReleasedCampaign.releaseTitle
+    );
+  }
+
+  const previousReleaseFromCsv = songsByNormalizedTitle.get(
+    normalizeAppleMusicSongTitle(previousCurrentReleaseName)
+  );
+
+  return previousReleaseFromCsv ?? rows[0]?.song ?? previousCurrentReleaseName;
+}
+
+function normalizeAppleMusicSongTitle(title: string) {
+  return title
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 function parseAppleMusicCsvDates(fileName: string) {
   const matches = Array.from(fileName.matchAll(/\d{4}-\d{2}-\d{2}/g)).map(
     (match) => match[0]
@@ -12021,6 +12492,22 @@ function formatDaysToProductionDeadline(days: number | null) {
   }
 
   return `${Math.abs(days)} days after deadline`;
+}
+
+function formatProductionDeadlineCountdown(days: number | null) {
+  if (days === null) {
+    return "Invalid production deadline";
+  }
+
+  if (days === 0) {
+    return "Production deadline today";
+  }
+
+  if (days > 0) {
+    return `Production deadline in ${days} days`;
+  }
+
+  return `Production deadline ${Math.abs(days)} days ago`;
 }
 
 function shiftProductionStepDeadlines(
@@ -12395,15 +12882,31 @@ function PlatformStatsSection({
   );
 }
 
-function RoadmapView() {
-  const releasedSongs = roadmapPhases.reduce(
-    (sum, phase) => sum + phase.releasedCount,
-    0
-  );
-  const totalTargetSongs = roadmapPhases.reduce(
-    (sum, phase) => sum + phase.targetCount,
-    0
-  );
+function RoadmapView({
+  campaigns,
+  onCreatePhase,
+  onOpenMarketing,
+  onOpenProduction,
+  onSavePhase,
+  onSongChange,
+  phases,
+  songs
+}: {
+  campaigns: MarketingCampaignConfig[];
+  onCreatePhase: () => Promise<void>;
+  onOpenMarketing: (song: ProductionSongConfig) => void;
+  onOpenProduction: (songId: string) => void;
+  onSavePhase: (phase: RoadmapPhase) => Promise<void>;
+  onSongChange: (songId: string, updates: Partial<ProductionSongConfig>) => void;
+  phases: RoadmapPhase[];
+  songs: ProductionSongConfig[];
+}) {
+  const [openCardId, setOpenCardId] = useState<string | null>(null);
+  const [settingsPhaseId, setSettingsPhaseId] = useState<string | null>(null);
+  const releasedSongs = songs.filter(isRoadmapSongReleased).length;
+  const months = buildLiveRoadmapMonths(songs, phases);
+  const firstPhase = phases[0] ?? roadmapPhases[0];
+  const lastPhase = phases[phases.length - 1] ?? roadmapPhases[roadmapPhases.length - 1];
 
   return (
     <>
@@ -12417,58 +12920,120 @@ function RoadmapView() {
 
       <section className="roadmap-overview panel" aria-label="General roadmap progress">
         <div className="roadmap-overview-header">
-          <div>
-            <p className="eyebrow">General Roadmap Progress</p>
-            <h2>{releasedSongs} / {totalTargetSongs}+ releases</h2>
+          <p className="eyebrow">General Roadmap Progress</p>
+          <div className="roadmap-overview-summary">
+            <h2>{releasedSongs} / {songs.length} released</h2>
+            <span>
+              {formatRoadmapMonthRange(firstPhase.startMonth, lastPhase.endMonth)}
+            </span>
           </div>
-          <span>Apr 2026 - 2028+</span>
         </div>
 
-        <RoadmapMonthStrip months={roadmapMonths} />
-        <RoadmapLegend includePartial />
+        <RoadmapMonthStrip months={months} />
+        <div className="roadmap-overview-toggle-row">
+          <button
+            aria-expanded={openCardId === "general"}
+            aria-label={openCardId === "general" ? "Hide all roadmap songs" : "Show all roadmap songs"}
+            className="roadmap-toggle"
+            onClick={() =>
+              setOpenCardId((current) => current === "general" ? null : "general")
+            }
+            type="button"
+          >
+            <ChevronDown size={19} aria-hidden />
+          </button>
+        </div>
+        {openCardId === "general" ? (
+          <RoadmapSongList
+            campaigns={campaigns}
+            onOpenMarketing={onOpenMarketing}
+            onOpenProduction={onOpenProduction}
+            onSongChange={onSongChange}
+            phases={phases}
+            songs={songs}
+          />
+        ) : null}
       </section>
 
       <section className="roadmap-phase-grid" aria-label="Roadmap phases">
-        {roadmapPhases.map((phase) => (
-          <article
-            className={`roadmap-phase-card roadmap-phase-${phase.accent}`}
-            key={phase.id}
-          >
-            <div className="roadmap-phase-heading">
-              <div>
-                <p className="eyebrow">Phase {phase.phaseNumber}</p>
+        {phases.map((phase) => {
+          const phaseSongs = sortRoadmapSongs(
+            songs.filter((song) => song.roadmapPhaseId === phase.id)
+          );
+          const phaseReleasedCount = phaseSongs.filter(isRoadmapSongReleased).length;
+
+          return (
+            <article
+              className={`roadmap-phase-card roadmap-phase-${phase.accent}`}
+              key={phase.id}
+            >
+              <div className="roadmap-phase-heading">
+                <div className="roadmap-phase-kicker-row">
+                  <p className="eyebrow">Phase {phase.phaseNumber}</p>
+                  <span>{formatRoadmapMonthRange(phase.startMonth, phase.endMonth)}</span>
+                </div>
                 <h2>{phase.title}</h2>
               </div>
-              <span>{phase.period}</span>
-            </div>
 
-            <div className="roadmap-phase-counts">
-              <strong>
-                {phase.releasedCount} / {phase.targetCount}
-              </strong>
-              <span>
-                {phase.releasedCount} released
-                {phase.activeCount ? `, ${phase.activeCount} active` : ""}
-              </span>
-            </div>
+              <div className="roadmap-phase-progress-row">
+                <RoadmapReleaseStrip
+                  leadingCount={`${phaseReleasedCount} / ${phaseSongs.length}`}
+                  songs={phaseSongs}
+                />
+              </div>
+              <p>{phase.summary}</p>
 
-            <RoadmapReleaseStrip phase={phase} />
+              <div className="roadmap-overview-toggle-row">
+                <button
+                  aria-expanded={openCardId === phase.id}
+                  aria-label={openCardId === phase.id ? `Hide Phase ${phase.phaseNumber} songs` : `Show Phase ${phase.phaseNumber} songs`}
+                  className="roadmap-toggle"
+                  onClick={() =>
+                    setOpenCardId((current) => current === phase.id ? null : phase.id)
+                  }
+                  type="button"
+                >
+                  <ChevronDown size={19} aria-hidden />
+                </button>
+              </div>
 
-            <p>{phase.summary}</p>
-
-            <ul className="roadmap-milestones">
-              {phase.milestones.map((milestone) => (
-                <li key={milestone}>{milestone}</li>
-              ))}
-            </ul>
-          </article>
-        ))}
+              {openCardId === phase.id ? (
+                <>
+                  <RoadmapSongList
+                    campaigns={campaigns}
+                    onOpenMarketing={onOpenMarketing}
+                    onOpenProduction={onOpenProduction}
+                    onSongChange={onSongChange}
+                    phases={phases}
+                    songs={phaseSongs}
+                  />
+                  <button
+                    className="roadmap-settings-link"
+                    onClick={() => setSettingsPhaseId((current) => current === phase.id ? null : phase.id)}
+                    type="button"
+                  >
+                    Phase settings
+                  </button>
+                  {settingsPhaseId === phase.id ? (
+                    <RoadmapPhaseSettings phase={phase} onSave={onSavePhase} />
+                  ) : null}
+                </>
+              ) : null}
+            </article>
+          );
+        })}
       </section>
+      <button className="add-campaign-button roadmap-add-phase" onClick={() => void onCreatePhase()} type="button">
+        <Plus size={16} aria-hidden />
+        Create new phase
+      </button>
     </>
   );
 }
 
 function RoadmapMonthStrip({ months }: { months: RoadmapMonth[] }) {
+  const currentMonthKey = getViennaDateKey().slice(0, 7);
+
   return (
     <div className="roadmap-month-strip">
       {months.map((month) => {
@@ -12477,7 +13042,9 @@ function RoadmapMonthStrip({ months }: { months: RoadmapMonth[] }) {
         return (
           <div
             aria-label={`${month.label}: ${month.released} of ${month.planned} planned releases`}
-            className={`roadmap-month-box roadmap-box-${status} roadmap-month-phase-${month.phase}`}
+            className={`roadmap-month-box roadmap-box-${status} roadmap-month-phase-${month.phase}${
+              month.id === currentMonthKey ? " roadmap-month-current" : ""
+            }`}
             key={month.id}
             title={`${month.label}: ${month.released}/${month.planned}`}
           >
@@ -12489,18 +13056,24 @@ function RoadmapMonthStrip({ months }: { months: RoadmapMonth[] }) {
   );
 }
 
-function RoadmapReleaseStrip({ phase }: { phase: RoadmapPhase }) {
+function RoadmapReleaseStrip({
+  leadingCount,
+  songs
+}: {
+  leadingCount?: string;
+  songs: ProductionSongConfig[];
+}) {
   return (
     <div className="roadmap-release-strip">
-      {Array.from({ length: phase.targetCount }, (_, index) => {
-        const status = getRoadmapReleaseStatus(index, phase);
-
+      {leadingCount ? <strong className="roadmap-release-count">{leadingCount}</strong> : null}
+      {songs.map((song) => {
+        const status = getRoadmapSongStatus(song);
         return (
           <span
-            aria-label={`Phase ${phase.phaseNumber} release ${index + 1}: ${status}`}
+            aria-label={`${song.title}: ${status}`}
             className={`roadmap-release-box roadmap-box-${status}`}
-            key={`${phase.id}-${index}`}
-            title={`Release ${index + 1}: ${status}`}
+            key={song.id}
+            title={`${song.title}: ${status}`}
           />
         );
       })}
@@ -12508,40 +13081,339 @@ function RoadmapReleaseStrip({ phase }: { phase: RoadmapPhase }) {
   );
 }
 
-function RoadmapLegend({ includePartial = false }: { includePartial?: boolean }) {
+function getRoadmapMonthStatus(month: RoadmapMonth): RoadmapBoxStatus {
+  if (month.released > 0) {
+    return "done";
+  }
+
+  if (month.planned > 0) {
+    return "active";
+  }
+
+  if (month.id <= getViennaDateKey().slice(0, 7)) {
+    return "missed";
+  }
+
+  return "planned";
+}
+
+function getRoadmapSongStatus(song: ProductionSongConfig): RoadmapBoxStatus {
+  if (!parseCampaignDate(song.releaseDate)) return "planned";
+  return isRoadmapSongReleased(song) ? "done" : "active";
+}
+
+function isRoadmapSongReleased(song: ProductionSongConfig) {
+  const releaseDate = parseCampaignDate(song.releaseDate);
+  return Boolean(releaseDate && releaseDate <= getTodayUtcDate());
+}
+
+function getRoadmapProductionStatus(song: ProductionSongConfig): MarketingStatus {
+  const statuses = song.steps.flatMap((step) => [
+    step.status,
+    ...step.extraTasks.map((task) => task.status)
+  ]).filter((status) => status !== "irrelevant");
+
+  if (isRoadmapSongReleased(song) || (statuses.length > 0 && statuses.every((status) => status === "done"))) {
+    return "done";
+  }
+
+  if (statuses.some((status) => status === "done" || status === "in-progress")) {
+    return "in-progress";
+  }
+
+  return "not-started";
+}
+
+function getRoadmapMarketingStatus(
+  campaign: MarketingCampaignConfig | null,
+  song: ProductionSongConfig
+): MarketingStatus {
+  if (!campaign) return "irrelevant";
+  return isRoadmapSongReleased(song) ? "done" : "in-progress";
+}
+
+function sortRoadmapSongs(songs: ProductionSongConfig[]) {
+  return [...songs].sort(
+    (firstSong, secondSong) =>
+      getProductionDeadlineSortTime(firstSong.releaseDate) -
+      getProductionDeadlineSortTime(secondSong.releaseDate)
+  );
+}
+
+function buildLiveRoadmapMonths(
+  songs: ProductionSongConfig[],
+  phases: RoadmapPhase[] = roadmapPhases
+) {
+  const firstPhase = phases[0] ?? roadmapPhases[0];
+  const lastPhase = phases[phases.length - 1] ?? roadmapPhases[roadmapPhases.length - 1];
+  const [startYear, startMonth] = firstPhase.startMonth.split("-").map(Number);
+  const [endYear, endMonth] = lastPhase.endMonth.split("-").map(Number);
+  const cursor = new Date(Date.UTC(startYear, startMonth - 1, 1));
+  const endDate = new Date(Date.UTC(endYear, endMonth - 1, 1));
+  const today = getTodayUtcDate();
+  const months: RoadmapMonth[] = [];
+
+  while (cursor <= endDate) {
+    const id = cursor.toISOString().slice(0, 7);
+    const monthSongs = songs.filter(
+      (song) => formatInputDateForDatabase(song.releaseDate)?.slice(0, 7) === id
+    );
+    const phase = phases.find(
+      (candidate) => id >= candidate.startMonth && id <= candidate.endMonth
+    ) ?? lastPhase;
+
+    months.push({
+      id,
+      label: cursor.toLocaleString("en-US", {
+        month: "short",
+        timeZone: "UTC",
+        year: "2-digit"
+      }),
+      phase: phase.phaseNumber,
+      planned: monthSongs.length,
+      released: monthSongs.filter((song) => {
+        const releaseDate = parseCampaignDate(song.releaseDate);
+        return Boolean(releaseDate && releaseDate <= today);
+      }).length
+    });
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+
+  return months;
+}
+
+function formatRoadmapMonthRange(startMonth: string, endMonth: string) {
+  return `${formatRoadmapMonth(startMonth)} - ${formatRoadmapMonth(endMonth)}`;
+}
+
+function formatRoadmapMonth(monthKey: string) {
+  const [year, month] = monthKey.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, 1)).toLocaleString("en-US", {
+    month: "short",
+    timeZone: "UTC",
+    year: "numeric"
+  });
+}
+
+function getRoadmapMarketingCampaign(
+  song: ProductionSongConfig,
+  campaigns: MarketingCampaignConfig[]
+) {
+  const songSlug = createStableId(song.title);
+  return campaigns.find(
+    (campaign) =>
+      (song.dbId && campaign.productionSongDbId === song.dbId) ||
+      createStableId(campaign.releaseTitle) === songSlug
+  ) ?? null;
+}
+
+function RoadmapPhaseSettings({
+  onSave,
+  phase
+}: {
+  onSave: (phase: RoadmapPhase) => Promise<void>;
+  phase: RoadmapPhase;
+}) {
+  const [draft, setDraft] = useState(phase);
+  const [saveStatus, setSaveStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
+  const canSave = Boolean(
+    draft.title.trim() &&
+    /^\d{4}-\d{2}$/.test(draft.startMonth) &&
+    /^\d{4}-\d{2}$/.test(draft.endMonth) &&
+    draft.endMonth >= draft.startMonth
+  );
+
+  async function saveSettings() {
+    if (!canSave) return;
+    setSaveStatus({ message: "Saving...", state: "loading" });
+    try {
+      await onSave(draft);
+      setSaveStatus({ message: "Phase saved.", state: "success" });
+    } catch (error) {
+      setSaveStatus({
+        message: error instanceof Error ? error.message : "Phase save failed.",
+        state: "error"
+      });
+    }
+  }
+
   return (
-    <div className="roadmap-legend">
-      <span><i className="roadmap-box-done" /> Released</span>
-      <span><i className="roadmap-box-active" /> Active</span>
-      {includePartial ? <span><i className="roadmap-box-partial" /> Partial month</span> : null}
-      <span><i className="roadmap-box-planned" /> Planned</span>
+    <section className="roadmap-phase-settings" aria-label={`Phase ${phase.phaseNumber} settings`}>
+      <label>
+        <span>Phase name</span>
+        <input
+          onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
+          value={draft.title}
+        />
+      </label>
+      <label>
+        <span>Begin month</span>
+        <input
+          onChange={(event) => setDraft((current) => ({ ...current, startMonth: event.target.value }))}
+          type="month"
+          value={draft.startMonth}
+        />
+      </label>
+      <label>
+        <span>End month</span>
+        <input
+          onChange={(event) => setDraft((current) => ({ ...current, endMonth: event.target.value }))}
+          type="month"
+          value={draft.endMonth}
+        />
+      </label>
+      <label className="roadmap-phase-description-field">
+        <span>Description</span>
+        <textarea
+          onChange={(event) => setDraft((current) => ({ ...current, summary: event.target.value }))}
+          rows={3}
+          value={draft.summary}
+        />
+      </label>
+      <div className="roadmap-phase-settings-actions">
+        {saveStatus.message ? (
+          <span className={`refresh-status refresh-status-${saveStatus.state}`}>{saveStatus.message}</span>
+        ) : null}
+        <button disabled={!canSave} onClick={() => void saveSettings()} type="button">
+          <Save size={15} aria-hidden />
+          Save phase
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function RoadmapSongList({
+  campaigns,
+  onOpenMarketing,
+  onOpenProduction,
+  onSongChange,
+  phases,
+  songs
+}: {
+  campaigns: MarketingCampaignConfig[];
+  onOpenMarketing: (song: ProductionSongConfig) => void;
+  onOpenProduction: (songId: string) => void;
+  onSongChange: (songId: string, updates: Partial<ProductionSongConfig>) => void;
+  phases: RoadmapPhase[];
+  songs: ProductionSongConfig[];
+}) {
+  return (
+    <div className="roadmap-song-list">
+      {sortRoadmapSongs(songs).map((song) => (
+        <RoadmapSongRow
+          campaign={getRoadmapMarketingCampaign(song, campaigns)}
+          key={`${song.id}-${song.releaseDate}`}
+          onOpenMarketing={onOpenMarketing}
+          onOpenProduction={onOpenProduction}
+          onSongChange={onSongChange}
+          phases={phases}
+          song={song}
+        />
+      ))}
+      {songs.length === 0 ? (
+        <p className="roadmap-empty-list">No songs assigned to this phase yet.</p>
+      ) : null}
     </div>
   );
 }
 
-function getRoadmapMonthStatus(month: RoadmapMonth): RoadmapBoxStatus {
-  if (month.released > 0 && month.released >= month.planned) {
-    return "done";
+function RoadmapSongRow({
+  campaign,
+  onOpenMarketing,
+  onOpenProduction,
+  onSongChange,
+  phases,
+  song
+}: {
+  campaign: MarketingCampaignConfig | null;
+  onOpenMarketing: (song: ProductionSongConfig) => void;
+  onOpenProduction: (songId: string) => void;
+  onSongChange: (songId: string, updates: Partial<ProductionSongConfig>) => void;
+  phases: RoadmapPhase[];
+  song: ProductionSongConfig;
+}) {
+  const [releaseDateInput, setReleaseDateInput] = useState(song.releaseDate);
+  const canSaveReleaseDate = Boolean(parseCampaignDate(releaseDateInput));
+  const productionStatus = getRoadmapProductionStatus(song);
+  const marketingStatus = getRoadmapMarketingStatus(campaign, song);
+
+  function saveReleaseDate() {
+    if (!canSaveReleaseDate) return;
+    onSongChange(song.id, {
+      releaseDate: releaseDateInput
+    });
   }
 
-  if (month.released > 0) {
-    return "partial";
-  }
-
-  return "planned";
-}
-
-function getRoadmapReleaseStatus(
-  releaseIndex: number,
-  phase: RoadmapPhase
-): RoadmapBoxStatus {
-  if (releaseIndex < phase.releasedCount) {
-    return "done";
-  }
-
-  if (releaseIndex < phase.releasedCount + phase.activeCount) {
-    return "active";
-  }
-
-  return "planned";
+  return (
+    <div className="roadmap-song-row">
+      <div className="roadmap-song-identity">
+        <strong>{song.title}</strong>
+        <button
+          className="roadmap-row-link roadmap-status-link"
+          onClick={() => onOpenProduction(song.id)}
+          type="button"
+        >
+          <StatusDot label={`Production: ${statusLabels[productionStatus]}`} status={productionStatus} />
+          {isRoadmapSongReleased(song) ? "Released" : "Scheduled"}
+          <ArrowUpRight size={14} aria-hidden />
+        </button>
+      </div>
+      <div className="roadmap-song-marketing-status">
+        <span>Marketing</span>
+        {campaign ? (
+          <button
+            className="roadmap-row-link roadmap-status-link"
+            onClick={() => onOpenMarketing(song)}
+            type="button"
+          >
+            <StatusDot label={`Marketing: ${statusLabels[marketingStatus]}`} status={marketingStatus} />
+            {isCampaignActive(campaign, getTodayUtcDate()) ? "Active" : isRoadmapSongReleased(song) ? "Completed" : "Planned"}
+            <ArrowUpRight size={14} aria-hidden />
+          </button>
+        ) : (
+          <strong>
+            <StatusDot label="Marketing: No campaign" status="irrelevant" />
+            No campaign
+          </strong>
+        )}
+      </div>
+      <label>
+        <select
+          aria-label={`${song.title} Roadmap phase`}
+          onChange={(event) =>
+            onSongChange(song.id, {
+              roadmapPhaseId: event.target.value || null
+            })
+          }
+          value={song.roadmapPhaseId ?? ""}
+        >
+          <option value="">Unassigned</option>
+          {phases.map((phase) => (
+            <option key={phase.id} value={phase.id}>
+              Phase {phase.phaseNumber}: {phase.title}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <div className="roadmap-release-date-control">
+          <input
+            aria-label={`${song.title} release date`}
+            inputMode="numeric"
+            onChange={(event) => setReleaseDateInput(event.target.value)}
+            value={releaseDateInput}
+          />
+          <button
+            aria-label={`Save ${song.title} release date`}
+            disabled={!canSaveReleaseDate || releaseDateInput === song.releaseDate}
+            onClick={saveReleaseDate}
+            type="button"
+          >
+            <Save size={15} aria-hidden />
+          </button>
+        </div>
+      </label>
+    </div>
+  );
 }

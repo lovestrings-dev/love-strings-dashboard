@@ -13,6 +13,7 @@ export async function POST(request: NextRequest) {
     const payload = (await request.json()) as {
       albumArtUrl?: string;
       releaseDate?: string;
+      productionSongDbId?: string;
       slug?: string;
       title?: string;
     };
@@ -29,15 +30,25 @@ export async function POST(request: NextRequest) {
       .insert({
         album_art_url: normalizeText(payload.albumArtUrl, 2000),
         release_date: payload.releaseDate,
+        production_song_id: isUuid(payload.productionSongDbId)
+          ? payload.productionSongDbId
+          : null,
         slug,
         source: "app",
         status: "planned",
         title
       })
-      .select("id, slug")
+      .select("id, slug, production_song_id")
       .single();
 
     if (error) throw error;
+
+    const { error: productionSyncError } = await supabase
+      .from("production_songs")
+      .update({ release_date: payload.releaseDate })
+      .eq("id", data.production_song_id ?? "00000000-0000-0000-0000-000000000000");
+
+    if (productionSyncError) throw productionSyncError;
     return NextResponse.json({ campaign: data, status: "ok" });
   } catch (error) {
     return errorResponse(error, "Marketing campaign creation failed.");
@@ -82,12 +93,23 @@ export async function PATCH(request: NextRequest) {
     }
 
     const supabase = createServiceSupabaseClient();
-    const { error } = await supabase
+    const { data: campaign, error } = await supabase
       .from("marketing_campaigns")
       .update(updates)
-      .eq("id", payload.campaignId);
+      .eq("id", payload.campaignId)
+      .select("slug, production_song_id")
+      .single();
 
     if (error) throw error;
+
+    if (updates.release_date) {
+      const { error: productionSyncError } = await supabase
+        .from("production_songs")
+        .update({ release_date: updates.release_date })
+        .eq("id", campaign.production_song_id ?? "00000000-0000-0000-0000-000000000000");
+
+      if (productionSyncError) throw productionSyncError;
+    }
     return NextResponse.json({ status: "ok" });
   } catch (error) {
     return errorResponse(error, "Marketing campaign update failed.");

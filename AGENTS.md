@@ -50,6 +50,16 @@ Notes:
 - Budget is for profit/loss and financial detail.
 - Roadmap is the strategic overview of the global Love Strings plan.
 
+Current Roadmap architecture (2026-07-20):
+
+- Roadmap phases are live Supabase records managed through `/api/roadmap/phases`.
+- Production songs own `roadmap_phase_id` and the shared `release_date` used by Production, Marketing, and Roadmap.
+- Release date is represented as the final Production step and is the Roadmap achievement metric.
+- Date updates synchronize linked Marketing campaigns and shift campaign days through a collision-safe database function.
+- General and phase progress, month statuses, phase assignment, settings, and new-phase numbering are derived from live records.
+- Phase 4 `Go on tour` was created through the UI and verified on mobile.
+- Next planned behavior: shifting the main release date should shift subordinate Production step dates by the same delta. Clarify whether completed steps stay fixed before implementing.
+
 Current Marketing layout:
 
 - Reads campaign records from Supabase when available, with local seeded/browser fallback.

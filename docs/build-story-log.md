@@ -643,3 +643,88 @@ Series connection:
 
 Short hook:
 - "The dashboard is not asking me to beat another artist. It is asking: can I beat yesterday?"
+
+### Reel: The Roadmap Stopped Being A Picture
+
+Core story:
+
+- The first Roadmap looked convincing, but it was still a manually arranged picture based on a PDF.
+- We turned phases into database records and connected every song to a phase and release date.
+- The month boxes now react to the real catalog: released, scheduled, missed, or not planned.
+- Dmitrii created Phase 4 `Go on tour` from the app itself, proving the Roadmap can grow without another coding pass for every new phase.
+- The result is not just a strategic overview; it is now a place to reorder the future.
+
+Short hook:
+
+- "Yesterday this roadmap was decoration. Today it can change the production plan."
+- "I added a new phase to my music career from the app we built ourselves."
+
+Series connection:
+
+- Marketing was the first module Yuliia could use daily while the rest was still being built.
+- Production made every song operational.
+- Budget connected the costs and income.
+- Roadmap now connects those working modules to the longer Love Strings story.
+
+### Reel: One Date, Three Modules
+
+Core story:
+
+- A song's release date appeared in Production, Marketing, and Roadmap, which created three opportunities for the plan to disagree with itself.
+- We made release date one shared fact and treated it as the final Production step.
+- Moving it in either Production or Marketing now updates all three places and shifts every Marketing campaign day.
+- The first version exposed a duplicate-date database constraint; instead of hiding the error, we changed the shift into one collision-safe operation and retested both directions after refresh.
+
+Short hook:
+
+- "Changing one date used to create three different realities."
+- "The database said no, and it was right."
+
+Human-build detail:
+
+- Dmitrii repeatedly tested the workflow from the user's side: change in Production, refresh, change in Marketing, refresh.
+- Small layout corrections mattered too. A short Phase 4 title exposed a mobile alignment rule that longer titles had accidentally hidden.
+
+### Reel Teaser: Move The Release, Move The Whole Plan
+
+Next story:
+
+- The shared release date now moves Marketing automatically.
+- The next step is to shift the subordinate Production deadlines when Dmitrii changes release order.
+- This turns rescheduling from many manual edits into one planning action while preserving the production sequence.
+
+Short hook:
+
+- "What if moving one release could move the whole production calendar with it?"
+
+### Reel: One Release Date Moves The Studio Calendar
+
+Core story:
+
+- The teaser became working software: changing one release date now rebuilds the real Production sequence from Drums to Release.
+- Demo stays outside the formula because a demo can exist for a year before the band starts full production.
+- The calendar follows the way Dmitrii actually works: three days to Guitars, one to Bass, three to Vocals, three to Edit, five to Mix, then the final delivery steps and fourteen distributor days.
+- Production deadline means Distributor day; Release date remains the public achievement shared with Marketing and Roadmap.
+
+Short hook:
+
+- "I moved one release, and the whole studio calendar moved with it."
+- "The difficult part was not coding dates. It was describing how music production really happens."
+
+Human-build detail:
+
+- The schedule came from Dmitrii thinking aloud about his actual process, then correcting one missing interval: Bass to Vocals is three days.
+- This is a strong example of AI collaboration working best when the user supplies lived workflow knowledge rather than only asking for a generic feature.
+
+### Reel: The Dashboard Becomes A Window Into The Roadmap
+
+Core story:
+
+- The main Dashboard used to show a static Phase 1 illustration.
+- Beta 1.9 replaces it with the same live phase data as Roadmap: real song count, status boxes, dates, and an expandable compact song list.
+- The full planning controls stay in Roadmap; Dashboard gives the quick strategic glance.
+
+Series connection:
+
+- Earlier betas made each operational module real one by one.
+- Beta 1.9 connects those modules into one longer plan, while keeping the Dashboard useful on a phone.

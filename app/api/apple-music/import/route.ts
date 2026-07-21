@@ -49,10 +49,7 @@ async function importAppleMusicCsvMetrics(payload: AppleMusicImportPayload) {
   const fileName = payload.fileName ?? "Apple Music CSV";
   const source = "apple-music-csv";
   const accountName = "Love Strings Apple Music";
-  const currentReleaseName =
-    payload.currentReleaseName && payload.currentReleaseName.trim().length > 0
-      ? payload.currentReleaseName.trim()
-      : payload.rows[0].song;
+  const currentReleaseName = await resolveCurrentReleaseName(supabase, payload);
   const currentReleaseRow =
     payload.rows.find(
       (row) => row.song.toLowerCase() === currentReleaseName.toLowerCase()
@@ -255,6 +252,46 @@ async function importAppleMusicCsvMetrics(payload: AppleMusicImportPayload) {
     totalPlays,
     totalShazams
   };
+}
+
+async function resolveCurrentReleaseName(
+  supabase: ReturnType<typeof createServiceSupabaseClient>,
+  payload: AppleMusicImportPayload
+) {
+  const songsByNormalizedTitle = new Map(
+    payload.rows.map((row) => [normalizeSongTitle(row.song), row.song])
+  );
+  const { data: releasedCampaigns, error } = await supabase
+    .from("marketing_campaigns")
+    .select("title,release_date")
+    .lte("release_date", payload.reportEndDate)
+    .order("release_date", { ascending: false });
+
+  if (error) throw error;
+
+  for (const campaign of releasedCampaigns ?? []) {
+    const matchingSong = songsByNormalizedTitle.get(
+      normalizeSongTitle(campaign.title)
+    );
+
+    if (matchingSong) {
+      return matchingSong;
+    }
+  }
+
+  const requestedRelease = songsByNormalizedTitle.get(
+    normalizeSongTitle(payload.currentReleaseName ?? "")
+  );
+
+  return requestedRelease ?? payload.rows[0].song;
+}
+
+function normalizeSongTitle(title: string) {
+  return title
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 async function findOrCreateSong(

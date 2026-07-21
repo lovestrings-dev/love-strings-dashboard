@@ -239,3 +239,41 @@ To make the roadmap live rather than static, the app should calculate:
 - Release pace: actual vs planned
 - Strategic health status
 - Related active sprint and next tasks
+
+## Live Roadmap Checkpoint - 2026-07-20
+
+The earlier UI-only recommendation above is now implemented as a live module.
+
+Current behavior:
+
+- Roadmap phases are Supabase records rather than hardcoded cards.
+- Production songs carry a Roadmap phase assignment and one shared release date.
+- Release date is the final Production step and the single Roadmap achievement metric.
+- Editing the date in Production, Marketing, or Roadmap updates the linked views and survives refresh.
+- Linked Marketing campaign days move with the release date through a collision-safe database function.
+- The general card derives its released/total count, month range, and month statuses from current phases and songs.
+- Phase cards derive their counts and progress boxes from assigned songs.
+- Expanded song rows expose Production and Marketing status links, phase reassignment, and release-date editing.
+- Phase settings edit name, start month, end month, and description.
+- `Create new phase` assigns the next phase number automatically; Phase 4 `Go on tour` was created and tested through the UI.
+
+Month status rules:
+
+- Green: at least one release is completed in that month.
+- Orange: at least one release is scheduled in that month but not yet completed.
+- Red: current or completed month with no release achieved.
+- White: future month with no release planned.
+- The current month uses the established dark outline convention.
+
+Release-driven Production schedule completed 2026-07-21:
+
+- Moving the shared release date recalculates the subordinate Production schedule and persists it.
+- Demo remains independent because it may predate full production by months or years.
+- Release to Distributor is 14 days; then 1 day each to Cover Art, License, and Master; 1 day from Master to Mix; 5 days from Mix to Edit; 3 days from Edit to Vocals; 3 days from Vocals to Bass; 1 day from Bass to Guitars; and 3 days from Guitars to Drums.
+- The full release-driven sequence is 33 calendar days from Drums to Release.
+- Production cards use Distributor as the operational Production deadline while Marketing and Roadmap continue to emphasize Release.
+- Dashboard now reuses the live Phase 1 Roadmap summary and can expand a compact list of its songs.
+
+Remaining follow-up:
+
+- Revisit the Dashboard Production benchmark calculation so it measures the intended production cycle rather than time elapsed since an old Demo.

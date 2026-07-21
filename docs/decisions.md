@@ -621,3 +621,56 @@ Reason:
 - QR links are useful specifically when the app is opened on different phones and by both Dmitrii and Yuliia.
 - Local-only QR configuration made each browser a separate source of truth.
 - The collection is small enough that one protected snapshot is simpler and safer than many independent reorder/update calls.
+
+## 2026-07-20 - Release Date Is The Shared Planning Date
+
+Decision:
+
+- Treat release date as the final Production step and the primary Roadmap achievement date.
+- Production, Marketing, and Roadmap edit the same underlying planning fact rather than maintaining separate plan/fact dates.
+- When the shared date changes, update the linked Marketing campaign release date and shift its campaign days by the same date delta.
+- Use a collision-safe database operation so campaign-day dates can be shifted without violating the campaign/date uniqueness constraint.
+
+Reason:
+
+- The release is the outcome that matters most for the Love Strings catalog; a separate production-finished headline metric added complexity without improving planning.
+- One shared date prevents the three modules from quietly disagreeing.
+- Dmitrii tested updates from both Production and Marketing and confirmed all three views persist the same date after refresh.
+
+Implemented scheduling rule captured 2026-07-21:
+
+- Exclude `Demo` from release-date backward scheduling. A demo may exist for months or a year before full production begins.
+- Treat `Drums` as the beginning of the release-driven production schedule.
+- Intervals: Drums to Guitars 3 days; Guitars to Bass 1 day; Bass to Vocals 3 days; Vocals to Edit 3 days; Edit to Mix 5 days; Mix to Master 1 day; Master to License 1 day; License to Cover Art 1 day; Cover Art to Distributor 1 day; Distributor to Release 14 days.
+- The complete release-driven schedule runs 33 calendar days from Drums to Release.
+- Recalculate the release-driven Production steps whenever the shared release date changes; keep Demo unchanged.
+- Use Distributor as the Production deadline because active production is effectively complete once delivery begins, while Release remains the shared Roadmap/Marketing achievement date.
+- Review the Dashboard Production benchmark calculation against this new definition of real production before relying on it as a target.
+
+## 2026-07-20 - Roadmap Phases Are Live Records
+
+Decision:
+
+- Store Roadmap phases in Supabase and expose protected phase create/update operations through `/api/roadmap/phases`.
+- Give every Production song a phase assignment and shared release date.
+- Derive phase counts, general release count, month status, and the overall timeline range from live song/phase data.
+- Allow phase name, start month, end month, and description to be edited in nested Phase settings.
+- Create new phases through one full-width action and assign the next phase number automatically.
+- Keep song names as labels; make Production and Marketing statuses the direct links into their respective modules.
+
+Reason:
+
+- Roadmap should be a planning control surface, not a manually maintained infographic.
+- Phase 4 `Go on tour` proved that the model can grow without adding another hardcoded card.
+- Status links save mobile space while preserving fast navigation to the operational source.
+
+## 2026-07-20 - Beta 1.9 Headline
+
+Decision:
+
+- Frame the upcoming beta as backlog refinement plus the first fully functional Roadmap module.
+- Include the completed release-driven Production schedule and live Dashboard Roadmap preview in Beta 1.9.
+
+Reason:
+
+- The beta-by-beta story remains consistent: one meaningful functional module becomes real, accompanied by smaller improvements discovered through daily use.

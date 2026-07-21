@@ -327,6 +327,7 @@ Planned milestone:
 - Production planning module.
 - Budget tracker.
 - Roadmap tracker.
+
 - Events/show tracking module with future persistence.
 - Functional Dashboard In Focus section.
 - UI tidy-up and mobile polish.
@@ -344,3 +345,27 @@ Planned milestone:
 
 - Adapt the app for other musicians if public storytelling creates demand.
 - Focus on setup-light onboarding, templates, permissions, and per-artist configuration.
+
+## Beta 1.9 (Release Candidate)
+
+Headline: **The Roadmap becomes a live planning module.**
+
+- Replaced the static Roadmap prototype with Supabase-backed phases and Production-song phase assignments.
+- Made release date the shared planning date across Production, Marketing, and Roadmap.
+- Added bidirectional release-date persistence and collision-safe Marketing campaign-day shifting.
+- Added live general and per-phase released/total counts, a dynamic phase-bounded month timeline, and release-status month colors.
+- Added expandable all-song and phase-song lists with direct Production and Marketing status links.
+- Added editable phase name, start/end month, and description settings.
+- Added full-width `Create new phase` flow with automatic next-phase numbering; verified with Phase 4 `Go on tour`.
+- Added responsive Roadmap refinements for dates, progress counts, expansion controls, and phase settings.
+- Added a release-driven Production schedule: Demo remains independent, while Drums through Release are recalculated from the shared release date using the agreed 33-day production sequence.
+- Kept Production deadline distinct from release date in Production cards by using the Distributor date as the operational deadline.
+- Replaced the static Dashboard Roadmap preview with the live Phase 1 card, compact progress boxes, and an expandable song list.
+- Included smaller backlog fixes and mobile/desktop UI polish collected after Beta 1.8.
+
+Release checks:
+
+- Shared date changes were tested from Production and Marketing and survived refresh in all linked modules.
+- Production schedule recalculation was tested from a release-date change.
+- Roadmap phase creation, reassignment, settings, and responsive layouts were user-tested.
+- Lint and production build pass locally.
