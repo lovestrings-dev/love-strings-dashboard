@@ -369,3 +369,30 @@ Release checks:
 - Production schedule recalculation was tested from a release-date change.
 - Roadmap phase creation, reassignment, settings, and responsive layouts were user-tested.
 - Lint and production build pass locally.
+
+## Beta 1.10 (Release Candidate)
+
+Headline: **The planning system becomes flexible enough for real daily work.**
+
+- Completed the live Roadmap workflow: phase-backed month rows, song assignment, editable phase settings, expandable song lists, and linked release planning across Roadmap, Production, and Marketing.
+- Added general Marketing campaigns for posts that do not belong to a song release, including independent start/end dates, artwork, optional progress, removable campaign days, and safe two-step deletion.
+- Persisted Marketing campaign budget lines in Supabase so mobile and desktop use the same records and Budget receives one reliable source row.
+- Reworked Marketing and Production cards around a mobile-first options pattern, protected release-date editing, clearer deadline summaries, and compact budget controls with reusable positive/negative amount toggles.
+- Improved Budget source navigation and recurring-payment controls, treated a blank recurring end date as active until cancelled, opened newly created historical rows automatically, and removed false zero-value bars from Income vs Spend.
+- Grouped the Roadmap month strip by phase, keeping every phase on its own visual row.
+- Added precise platform update timestamps, corrected Apple Music current-release selection, made the module menu sticky, and prevented iPhone form-focus zoom without disabling normal pinch zoom.
+- Refined Events empty states and archive dates, while preserving linked event posters and budget records.
+- Excluded local video-production assets and an obsolete duplicate Vercel file from release commits.
+
+Database changes:
+
+- `202608050001_create_marketing_campaign_budget_lines.sql`
+- `202608050002_add_general_marketing_campaigns.sql`
+- `202608050003_add_marketing_progress_visibility.sql`
+
+Release checks:
+
+- User-tested campaign budgets across browsers and refreshes.
+- User-tested general campaign creation, options, progress visibility, day/task deletion, and Focus Queue priority.
+- User-tested recurring yearly generation without an end date and linked release-date behavior.
+- TypeScript, lint, migration status, and production build are checked during final release preparation.

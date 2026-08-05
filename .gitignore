@@ -37,3 +37,9 @@ imports/screenshots/*
 !imports/screenshots/.gitkeep
 imports/spreadsheets/*
 !imports/spreadsheets/.gitkeep
+
+# Local video production assets
+VIDEO/
+
+# Local duplicate of an obsolete Vercel cron configuration
+vercel 2.json

@@ -264,6 +264,7 @@ async function resolveCurrentReleaseName(
   const { data: releasedCampaigns, error } = await supabase
     .from("marketing_campaigns")
     .select("title,release_date")
+    .eq("campaign_kind", "song")
     .lte("release_date", payload.reportEndDate)
     .order("release_date", { ascending: false });
 

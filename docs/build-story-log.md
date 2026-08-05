@@ -594,6 +594,25 @@ Core story:
 - The app stores each day's score in Supabase so daily consistency can become an evolution graph later.
 - This connects three personal benchmarks: daily Focus momentum, best Marketing campaign completion, and fastest Production cycle.
 
+Autopilot story add-on:
+- Apple Music cannot currently give the app the same automatic daily data feed as YouTube and Instagram, so the app watches the date of the latest manual CSV import.
+- When the Apple data is more than seven days old, or a new Marketing campaign begins, Focus Queue creates an Apple Music update reminder.
+- Dmitrii opened Platforms and imported the new Apple Music CSV at the real source of the work.
+- The app recognized that action, marked the Focus reminder Done, removed it from the active queue, and awarded two daily-progress points without asking for a second manual status update.
+- After a large historical campaign reconstruction temporarily inflated the daily score, we reset only that day's `focus_daily_progress` snapshot while preserving every real Marketing status.
+- This is the moment Focus Queue stopped feeling like another to-do list: it detected work, watched the source module, and rewarded completion automatically.
+
+Short script add-on:
+- "My dashboard reminded me that Apple Music data was getting old."
+- "I did the real job once: uploaded the CSV in Platforms."
+- "The reminder completed itself, disappeared from Focus Queue, and gave me two points."
+- "That tiny loop is what I mean by building an assistant, not another list."
+
+Viewer-series connection:
+- Earlier episodes show the daily target and the rule that Done earns two points.
+- This scene proves the points can come from real actions elsewhere in the app, not only from pressing status buttons.
+- It also gives an honest correction beat: importing months of historical work should not count as today's productivity, so the daily snapshot was reset without erasing the reconstructed history.
+
 ### Reel: The Progress Bar That Forgot After Refresh
 
 Core story:
@@ -728,3 +747,104 @@ Series connection:
 
 - Earlier betas made each operational module real one by one.
 - Beta 1.9 connects those modules into one longer plan, while keeping the Dashboard useful on a phone.
+
+### Reel: Rebuilding The Campaign History Without Guessing
+
+Core story:
+
+- The Marketing module worked for new campaigns, but the old campaigns still contained rough planning data rather than the content Love Strings actually published.
+- We collected Instagram Posts, Reels, and Carousels through the connected API, then requested the Instagram archive because Stories were not available through the same historical API.
+- The first Story export contained reposts of feed content. We filtered those out so one Reel shared to Stories would not be counted as two separate pieces of work.
+- We added the YouTube upload history from the original Release Media Plan and put Instagram, Stories, and YouTube into one review spreadsheet.
+- Automation could suggest a campaign from the date and caption, but overlapping campaigns such as Wonderful Life and Jukebox still needed human knowledge. Dmitrii reviewed the final campaign assignment row by row.
+- We agreed explicit reconstruction rules before touching the database:
+  - a main Instagram publication completes Make video/post and IG Upload;
+  - a YouTube publication completes Make video/post and YT Upload;
+  - a unique Story becomes its own completed extra task;
+  - platform tasks that genuinely did not apply become Irrelevant rather than falsely unfinished;
+  - confirmed content after a normal campaign window adds only that individual date, not a fake continuous tail.
+- Before writing anything, we generated a dry-run report showing every proposed date, clip name, task status, and extra Story task.
+- The final import backed up all five campaigns, checked that Supabase had not changed since the dry run, updated each campaign atomically, and verified the saved result against the approved proposal.
+
+Result:
+
+- Five historical campaigns became evidence-based operating records: Intro, Wonderful Life, Jukebox, Flowers, and Rock and Roll.
+- The reconstruction added 36 confirmed post-campaign dates and 80 completed Story tasks while preserving unrelated and pre-campaign evidence outside the campaign calendars.
+- Dmitrii then reviewed every campaign in the real app and made the final small human corrections.
+
+Short script:
+
+- "Our app knew how we planned the campaigns, but not what we actually published."
+- "So we pulled Instagram posts, exported Stories, opened the old YouTube plan, and built one review sheet."
+- "AI suggested the matches. I corrected the campaign context."
+- "Then we made a dry run, backed up the database, and rebuilt five campaigns from real evidence."
+- "The point was not to make history look perfect. It was to make the dashboard remember what really happened."
+
+Visual sequence:
+
+1. Show the Instagram export screen and the raw archive folder.
+2. Flash the consolidated Google Sheet with `Final campaign (EDIT)`.
+3. Show the dry-run report with before/after statuses.
+4. Show one campaign before reconstruction.
+5. Refresh and expand the reconstructed campaign with Story tasks and extended dates.
+6. End on the Focus Queue score reset: historical cleanup is valuable work, but it should not pretend that 44 old tasks were completed today.
+
+Human-build detail:
+
+- Dmitrii noticed that the campaign tails often continued beyond the official 14-day framework. Instead of forcing the past to fit the ideal process, the app now records those confirmed individual dates.
+- `Blooming` looked ambiguous to an automatic matcher but Dmitrii knew it belonged to Jukebox.
+- This episode should show the division of labor clearly: APIs and scripts collect and compare; the musician supplies meaning; guarded database tools make the final change safely.
+
+Series connection:
+
+- Marketing was the first working module and Yuliia was already using it daily while the rest of the dashboard was still being developed.
+- Reconstructing the earlier campaigns closes that loop: the first useful module now contains not only future plans, but the real path Love Strings took while learning its own release system.
+- This is also a strong bridge into future analytics. Campaign percentages, benchmarks, and content patterns become meaningful only after the historical records reflect reality.
+
+### Reel: Not Every Post Belongs To A Song
+
+Core story:
+
+- Marketing originally assumed every campaign belonged to a Production song. That made the data tidy, but it did not match Yuliia's real work.
+- She also needs to plan band updates, event promotion, and standalone social ideas without inventing a fake song in Production.
+- Beta 1.10 introduces a separate general-campaign workflow: its own title, date range, artwork, optional progress, and days that can be removed when the plan changes.
+- Song campaigns remain strict and release-linked; general campaigns are deliberately flexible.
+
+Short hook:
+
+- "The database was organized. Real life was not."
+- "We stopped forcing every social post to pretend it belonged to a song."
+
+Human-build detail:
+
+- This feature came from daily use, not a roadmap workshop. Yuliia described the missing workflow and the data model changed around the work instead of asking the work to fit the model.
+
+### Reel: One Number, One Owner
+
+Core story:
+
+- A campaign expense once saved differently on mobile and desktop because browser storage had become an accidental second source of truth.
+- We moved campaign budget lines into Supabase and kept each generated ledger row owned by its source module.
+- The Budget ledger now sends edits back to Marketing, Production, or Events instead of allowing a derived number to drift away from its origin.
+- Recurring subscriptions without an end date now mean exactly what they mean in real life: active until cancelled, with only the useful forecast window shown.
+
+Short hook:
+
+- "The same expense had two values on two screens. That was the clue."
+- "A financial dashboard only works when every number has one owner."
+
+Series connection:
+
+- Earlier episodes showed modules becoming functional one by one. Beta 1.10 is about tightening the connections so those modules behave like one system.
+
+### Reel: Mobile Use Is Product Design
+
+Core story:
+
+- The desktop build looked correct, but iPhone use exposed the operational details: no minus key on the numeric keyboard, fields zooming the whole interface, navigation disappearing above a long card, and important controls using too much width.
+- The app gained reusable positive/negative controls, 16px mobile inputs to prevent focus zoom, and a sticky module menu while the brand header scrolls away.
+- These are small changes individually, but together they decide whether the app can be used in the moment or only admired later on a laptop.
+
+Short hook:
+
+- "The feature worked on desktop. Then I tried to enter an expense on an iPhone."

@@ -111,3 +111,44 @@
 - Add real logic behind Roadmap progress instead of manually staged visuals.
 - Decide how far to go with UI graphic design/skins before or after v1.0.
 - Continue small polish/backlog fixes discovered in real mobile and deployed app use.
+
+## Upcoming Beta Field Notes - 28 July 2026
+
+Captured from Dmitrii's shared Focus Queue after hands-on app use. These remain
+live Other tasks as well as being recorded here; completing one list does not
+automatically complete the other.
+
+- Focus Queue:
+  - Refine the expanded task list so its visual treatment follows the compact Marketing and Production task lists.
+- Mobile input:
+  - Prevent text-entry focus from zooming the interface and leaving the whole app wider than the phone screen or horizontally movable.
+- Events:
+  - Align poster and date consistently in historical event cards.
+  - Correct the empty-state styling in the Events tab: `No upcoming events planned yet` should be compact and red.
+- Budget:
+  - Restore an edit action for module-linked ledger lines, but route editing to the actual source record in Production, Marketing, or Events rather than editing the derived ledger row.
+  - Make equivalent Budget values use consistent colors everywhere they appear across modules.
+  - Fix yearly recurring-payment generation.
+  - Fix Income vs Spend graph rendering where a zero value appears as a visible bar.
+  - Ensure a newly created manual Budget line appears in the appropriate visible section instead of being hidden immediately.
+- Marketing:
+  - Keep Marketing campaign song names governed by their Production song records.
+  - Review whether Marketing completion should use the newer points model rather than the current percentage calculation.
+  - Investigate why the Shallow campaign is not appearing at the top of the expected Marketing list.
+- Production:
+  - Move the Roadmap phase selector into a less prominent dropdown area within Production song details.
+- Roadmap:
+  - Begin each phase's monthly progress on a new visual row.
+  - Review the strategic release plan after the newly rescheduled two-week release cadence settles.
+- Platforms:
+  - Store and display a precise timestamp, not only a date, for platform data updates.
+
+## Beta 1.10 Post-Deploy Checks
+
+- Verify the visible version reads `Beta 1.10` on Vercel.
+- Create or edit one general campaign on mobile, then confirm title, dates, artwork, progress visibility, and campaign days on desktop after refresh.
+- Edit a song-campaign budget line on one device and confirm the shared value and generated Budget row on another.
+- Verify an open-ended monthly and yearly recurring payment each produce the next occurrence only inside the one-month forecast window.
+- Confirm the sticky module menu and form-focus behavior on a physical iPhone.
+- Confirm Roadmap phase rows, phase settings, and release-date changes survive the deployed refresh cycle.
+- Continue observing the rare rapid-add Focus Queue edit-state issue until a reproducible sequence is found.

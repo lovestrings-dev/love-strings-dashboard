@@ -100,6 +100,9 @@ button {
 .nav-list {
   display: grid;
   gap: 4px;
+  position: sticky;
+  top: 18px;
+  z-index: 20;
 }
 
 .nav-list button {
@@ -464,6 +467,13 @@ h2 {
 }
 
 .roadmap-month-strip {
+  display: grid;
+  gap: 8px;
+}
+
+.roadmap-month-phase-row {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -2403,6 +2413,10 @@ h2 {
   min-height: 12px;
 }
 
+.budget-bar b.is-zero {
+  min-height: 0;
+}
+
 .budget-income-bar {
   background: #1f7a58;
 }
@@ -2632,12 +2646,12 @@ h2 {
 
 .budget-table th:first-child,
 .budget-table td:first-child {
-  width: 140px;
+  width: 130px;
 }
 
 .budget-table th:nth-child(2),
 .budget-table td:nth-child(2) {
-  width: 130px;
+  width: 150px;
 }
 
 .budget-table th:nth-child(3),
@@ -2670,6 +2684,18 @@ h2 {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
+.budget-recurring-parent-row > td {
+  border-bottom: 0;
+}
+
+.budget-recurring-detail-row > td {
+  padding-top: 0;
+}
+
+.budget-recurring-detail-row > td:last-child {
+  padding: 0;
+}
+
 .budget-generated-note {
   color: var(--muted);
   font-size: 12px;
@@ -2692,6 +2718,34 @@ h2 {
   max-width: 96px;
 }
 
+.budget-source-link {
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+  max-width: 96px;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.budget-source-link:hover,
+.budget-source-link:focus-visible {
+  color: var(--accent-strong);
+}
+
+.budget-source-action {
+  align-items: center;
+  display: flex;
+  min-height: 34px;
+}
+
 .budget-row-action-button {
   align-items: center;
   background: var(--surface);
@@ -2703,6 +2757,12 @@ h2 {
   height: 34px;
   justify-content: center;
   width: 34px;
+}
+
+.budget-row-action-button.budget-row-delete-button {
+  background: #fff5f4;
+  border-color: #efc8c4;
+  color: #c3372d;
 }
 
 .budget-row-action-button:hover {
@@ -2778,6 +2838,13 @@ h2 {
   color: var(--muted);
   font-size: 13px;
   font-weight: 700;
+}
+
+.event-summary-card .event-summary-empty {
+  color: #b73131;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.35;
 }
 
 .location-address-book {
@@ -2996,14 +3063,18 @@ h2 {
   align-items: start;
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(0, 1fr) 42px;
+  grid-template-areas:
+    "main date"
+    "main toggle";
+  grid-template-columns: minmax(0, 1fr) 126px;
 }
 
 .event-card-main {
   align-items: start;
   display: grid;
   gap: 12px;
-  grid-template-columns: 64px 126px minmax(0, 1fr);
+  grid-area: main;
+  grid-template-columns: 64px minmax(0, 1fr);
 }
 
 .event-header-poster-thumb {
@@ -3040,8 +3111,15 @@ h2 {
 
 .event-date-display {
   display: inline-flex;
+  grid-area: date;
   justify-content: center;
   line-height: 1.2;
+}
+
+.event-card-header > .campaign-toggle {
+  align-self: end;
+  grid-area: toggle;
+  justify-self: end;
 }
 
 .event-title-block {
@@ -3260,6 +3338,41 @@ h2 {
   font-weight: 800;
 }
 
+.signed-budget-amount-control {
+  align-items: stretch;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 38px minmax(0, 1fr);
+}
+
+.signed-budget-toggle {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid currentColor;
+  border-radius: 7px;
+  display: inline-flex;
+  font: inherit;
+  font-size: 20px;
+  font-weight: 900;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0;
+  width: 38px;
+}
+
+.signed-budget-toggle.is-income {
+  color: #1f7a58;
+}
+
+.signed-budget-toggle.is-expense {
+  color: #2f6f9f;
+}
+
+.signed-budget-toggle:focus-visible {
+  outline: 3px solid rgba(15, 139, 141, 0.18);
+  outline-offset: 1px;
+}
+
 .event-budget-actions-cell {
   align-items: end;
   display: grid;
@@ -3357,6 +3470,44 @@ h2 {
 
 .marketing-budget-section .event-budget-action-panel {
   justify-self: start;
+}
+
+.marketing-budget-toolbar {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.marketing-budget-toolbar.has-delete {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.marketing-budget-toolbar button {
+  justify-content: center;
+  min-width: 0;
+  width: 100%;
+}
+
+.marketing-budget-delete-button {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 7px;
+  min-height: 42px;
+  padding: 8px 10px;
+}
+
+.marketing-budget-delete-button.is-armed {
+  background: #fff3f2;
+  border-color: #e9aaa4;
+  color: #b73131;
 }
 
 .main-grid {
@@ -3758,6 +3909,21 @@ h2 {
   outline: 3px solid rgba(15, 139, 141, 0.14);
 }
 
+.release-date-field input:disabled {
+  background: #f0f1ed;
+  color: var(--text);
+  cursor: default;
+  opacity: 1;
+}
+
+.release-date-field .release-date-change-warning {
+  color: #b73131;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.3;
+  text-transform: none;
+}
+
 .release-date-field strong {
   font-size: 13px;
   line-height: 1.25;
@@ -3802,6 +3968,158 @@ h2 {
 
 .marketing-campaign-board {
   scroll-margin-block: 96px;
+}
+
+.marketing-mobile-progress {
+  display: none;
+}
+
+.marketing-campaign-board .marketing-release-summary {
+  align-self: start;
+  background: #f7f8f5;
+  border: 1px solid #e6e4dc;
+  border-radius: 8px;
+  display: grid;
+  font-size: 13px;
+  gap: 2px;
+  justify-self: end;
+  line-height: 1.25;
+  padding: 10px;
+  text-align: right;
+  width: 100%;
+}
+
+.marketing-campaign-board .marketing-release-summary span {
+  color: var(--text);
+  font-size: inherit;
+  font-weight: 800;
+  text-transform: none;
+}
+
+.marketing-campaign-board .marketing-release-date-editor {
+  align-items: stretch;
+  display: grid;
+  flex: 1 0 100%;
+  margin: 0;
+  width: 100%;
+}
+
+.production-song-board .production-release-summary {
+  align-self: start;
+  background: #f7f8f5;
+  border: 1px solid #e6e4dc;
+  border-radius: 8px;
+  display: grid;
+  font-size: 13px;
+  gap: 2px;
+  justify-self: end;
+  line-height: 1.25;
+  padding: 10px;
+  text-align: right;
+  width: 100%;
+}
+
+.production-song-board .production-release-summary span {
+  color: var(--text);
+  font-size: inherit;
+  font-weight: 800;
+  text-transform: none;
+}
+
+.production-song-board .production-release-date-editor {
+  align-items: stretch;
+  display: grid;
+  flex: 1 0 100%;
+  margin: 0;
+  width: 100%;
+}
+
+.production-mobile-progress {
+  display: none;
+}
+
+.production-song-board .song-release-options-field {
+  display: grid;
+  flex: 1 0 100%;
+  gap: 5px;
+  width: 100%;
+}
+
+.production-song-board .campaign-danger-zone .roadmap-phase-select {
+  align-items: stretch;
+  display: grid;
+  flex: 1 0 100%;
+  margin: 0;
+  max-width: none;
+  width: 100%;
+}
+
+.production-song-board .campaign-danger-zone .song-title-options-editor,
+.production-song-board .campaign-danger-zone .song-artwork-options-editor {
+  align-items: stretch;
+  display: grid;
+  flex: 1 0 100%;
+  gap: 5px;
+  width: 100%;
+}
+
+.song-title-options-editor > span,
+.song-artwork-options-editor > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.production-song-board .song-option-field-heading {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.song-title-options-editor input,
+.song-artwork-options-editor input,
+.song-release-options-field input {
+  background: var(--surface);
+  border: 1px solid #dfddd5;
+  border-radius: 7px;
+  color: var(--text);
+  font: inherit;
+  font-weight: 800;
+  min-height: 36px;
+  padding: 7px 9px;
+  width: 100%;
+}
+
+.production-song-board .song-title-options-editor input,
+.production-song-board .song-artwork-options-editor input,
+.production-song-board .song-release-options-field input,
+.production-song-board .roadmap-phase-select select {
+  color: var(--text);
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.25;
+}
+
+.song-title-options-editor input:disabled,
+.song-artwork-options-editor input:disabled,
+.song-release-options-field input:disabled {
+  background: #f0f1ed;
+  cursor: default;
+  opacity: 1;
+}
+
+.production-release-date-editor .release-date-change-warning {
+  color: #b73131;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.3;
+  text-transform: none;
 }
 
 .platform-trend-panel {
@@ -4147,6 +4465,23 @@ h2 {
   background: #fdecea;
 }
 
+.extra-task-delete-button {
+  background: transparent;
+  border-color: #d8d6cf;
+  color: var(--text);
+}
+
+.extra-task-delete-button:hover {
+  background: #f4f3ee;
+}
+
+.extra-task-delete-button.is-armed,
+.extra-task-delete-button.is-armed:hover {
+  background: #fff3f2;
+  border-color: #e9aaa4;
+  color: #b73131;
+}
+
 .campaign-day-actions {
   border-top: 1px solid var(--line);
   display: flex;
@@ -4186,6 +4521,102 @@ h2 {
   justify-self: start;
   max-width: 100%;
   min-width: 0;
+}
+
+.general-campaign-create-fields {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(180px, 1.5fr) repeat(2, minmax(140px, 1fr));
+  max-width: 720px;
+  min-width: 0;
+  width: min(720px, 100%);
+}
+
+.general-campaign-create-fields input,
+.general-campaign-settings-fields input {
+  background: var(--surface);
+  border: 1px solid #dfddd5;
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  min-height: 42px;
+  min-width: 0;
+  padding: 9px 12px;
+  width: 100%;
+}
+
+.general-campaign-options-content {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.general-campaign-options-content .marketing-budget-section {
+  margin: 0;
+  padding: 12px 0 0;
+}
+
+.campaign-delete-controls {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 12px;
+}
+
+.general-campaign-settings-fields {
+  display: grid;
+  gap: 8px;
+  grid-template-columns:
+    minmax(160px, 0.9fr)
+    minmax(220px, 1.4fr)
+    repeat(2, minmax(140px, 190px))
+    42px;
+}
+
+.general-campaign-date-summary {
+  align-self: start;
+  background: #f7f8f5;
+  border: 1px solid #e6e4dc;
+  border-radius: 8px;
+  display: grid;
+  font-size: 13px;
+  gap: 4px;
+  justify-self: end;
+  line-height: 1.25;
+  padding: 9px 11px;
+  text-align: right;
+  width: 100%;
+}
+
+.general-campaign-date-summary span {
+  white-space: nowrap;
+}
+
+.general-campaign-settings-fields button {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid #dfddd5;
+  border-radius: 8px;
+  color: var(--accent);
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 42px;
+}
+
+.general-campaign-settings-fields input:disabled {
+  background: #f4f3ee;
+  color: var(--text);
+  opacity: 1;
+}
+
+.add-campaign-button:disabled,
+.general-campaign-settings-fields button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .add-campaign-control select {
@@ -4241,7 +4672,7 @@ h2 {
   text-transform: uppercase;
 }
 
-.campaign-danger-zone div {
+.campaign-danger-zone > div {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
@@ -4296,6 +4727,25 @@ h2 {
 
 .delete-campaign-day-button:hover {
   background: #fdecea;
+}
+
+.marketing-campaign-day-delete-button {
+  background: transparent;
+  border-color: #d8d6cf;
+  color: var(--text);
+  justify-content: flex-start;
+  width: auto;
+}
+
+.marketing-campaign-day-delete-button:hover {
+  background: #f4f3ee;
+}
+
+.marketing-campaign-day-delete-button.is-armed,
+.marketing-campaign-day-delete-button.is-armed:hover {
+  background: #fff3f2;
+  border-color: #e9aaa4;
+  color: #b73131;
 }
 
 .campaign-table-wrap {
@@ -4418,18 +4868,22 @@ h2 {
   }
 
   .sidebar {
-    padding: 16px;
+    display: contents;
   }
 
   .brand-mark {
-    margin-bottom: 14px;
+    background: var(--surface-strong);
+    margin: 0;
+    padding: 16px 16px 10px;
   }
 
   .nav-list {
+    background: var(--surface-strong);
     display: flex;
     gap: 8px;
     overflow-x: auto;
-    padding-bottom: 2px;
+    padding: 4px 16px 10px;
+    top: 0;
   }
 
   .nav-list button {
@@ -4510,6 +4964,10 @@ h2 {
   }
 
   .release-date-field {
+    grid-area: date;
+  }
+
+  .production-song-board .production-release-summary {
     grid-area: date;
   }
 
@@ -4599,6 +5057,23 @@ h2 {
     font-size: 28px;
   }
 
+  .general-campaign-create-fields,
+  .general-campaign-settings-fields {
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+  }
+
+  .general-campaign-settings-fields button {
+    justify-self: end;
+    width: 42px;
+  }
+
+  .marketing-campaign-board .general-campaign-date-summary {
+    font-size: 12px;
+    grid-area: date;
+    padding: 6px;
+  }
+
   .dashboard-main-topbar .topbar-title-block {
     display: contents;
   }
@@ -4656,6 +5131,111 @@ h2 {
   .dashboard-campaign-card-empty-next {
     min-height: 0;
     padding-block: 12px;
+  }
+
+  .marketing-campaign-board .campaign-board-header {
+    grid-template-areas:
+      "art title date"
+      "progress progress progress"
+      "tasks tasks tasks"
+      ". . toggle";
+    column-gap: 8px;
+    grid-template-columns: 74px minmax(0, 1fr) 112px;
+  }
+
+  .marketing-campaign-board .campaign-title-block {
+    display: contents;
+  }
+
+  .marketing-campaign-board .campaign-title-row {
+    grid-area: title;
+    margin-bottom: 0;
+  }
+
+  .marketing-campaign-board .campaign-header-tasks {
+    grid-area: tasks;
+  }
+
+  .marketing-campaign-board .marketing-release-summary {
+    align-self: start;
+    font-size: 12px;
+    grid-area: date;
+    justify-self: end;
+    padding: 6px;
+    width: 100%;
+  }
+
+  .marketing-campaign-board .marketing-release-date-editor {
+    margin: 0;
+    padding: 10px;
+    width: 100%;
+  }
+
+  .marketing-campaign-board .marketing-release-date-editor input {
+    font-size: 12px;
+    padding-inline: 7px;
+  }
+
+  .marketing-campaign-board .release-date-input-row {
+    gap: 5px;
+  }
+
+  .marketing-campaign-board .marketing-mobile-progress {
+    display: block;
+    grid-area: progress;
+  }
+
+  .marketing-campaign-board .marketing-mobile-progress .campaign-progress-strip {
+    padding: 12px 0;
+  }
+
+  .marketing-campaign-board .marketing-desktop-progress {
+    display: none;
+  }
+
+  .production-song-board .campaign-board-header {
+    column-gap: 8px;
+    grid-template-areas:
+      "art title date"
+      "progress progress progress"
+      "tasks tasks tasks"
+      ". . toggle";
+    grid-template-columns: 74px minmax(0, 1fr) 112px;
+  }
+
+  .production-song-board .campaign-title-block {
+    display: contents;
+  }
+
+  .production-song-board .campaign-title-row {
+    grid-area: title;
+    margin-bottom: 0;
+  }
+
+  .production-song-board .campaign-header-tasks {
+    grid-area: tasks;
+  }
+
+  .production-song-board .production-mobile-progress {
+    display: block;
+    grid-area: progress;
+  }
+
+  .production-song-board .production-mobile-progress .campaign-progress-strip {
+    padding: 12px 0;
+  }
+
+  .production-song-board .production-desktop-progress {
+    display: none;
+  }
+
+  .production-song-board .production-release-summary {
+    align-self: start;
+    font-size: 12px;
+    grid-area: date;
+    justify-self: end;
+    padding: 6px;
+    width: 100%;
   }
 
   .dashboard-campaign-card-empty-current h3,
@@ -4783,11 +5363,11 @@ h2 {
   }
 
   .event-card-header {
-    grid-template-columns: minmax(0, 1fr) 42px;
+    grid-template-columns: minmax(0, 1fr) 112px;
   }
 
   .event-card-main {
-    grid-template-columns: 1fr;
+    grid-template-columns: 64px minmax(0, 1fr);
   }
 
   .event-budget-line {
@@ -4857,15 +5437,43 @@ h2 {
   }
 
   .marketing-budget-section {
-    padding: 14px 16px;
+    background: #f7f8f5;
+    border: 1px solid #e6e4dc;
+    border-radius: 8px;
+    margin: 16px;
+    padding: 10px;
+  }
+
+  .marketing-budget-section .event-budget-line + .event-budget-line {
+    border-top: 1px solid #e6e4dc;
+    padding-top: 10px;
+  }
+
+  .marketing-budget-section .marketing-budget-field-label {
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    height: 1px;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+    width: 1px;
+  }
+
+  .marketing-budget-section .production-budget-add-button {
+    justify-content: center;
+    width: 100%;
   }
 
   .marketing-budget-section .event-budget-line {
-    grid-template-columns: minmax(0, 1fr) 40px;
+    grid-template-columns: minmax(0, 1fr) minmax(122px, 145px);
   }
 
   .marketing-budget-section .event-budget-line label:first-child {
-    grid-column: 1 / -1;
+    grid-column: 1;
+  }
+
+  .marketing-budget-section .event-budget-line label:nth-of-type(2) {
+    grid-column: 2;
   }
 
   .marketing-budget-section .event-budget-actions-cell {
@@ -4911,7 +5519,7 @@ h2 {
     padding: 16px;
   }
 
-  .roadmap-month-strip {
+  .roadmap-month-phase-row {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
@@ -5071,9 +5679,33 @@ h2 {
     border-radius: 8px;
     display: grid;
     gap: 8px;
-    grid-template-columns: 104px minmax(0, 1fr) 70px 40px;
+    grid-template-columns: 118px minmax(0, 1fr) 70px 40px;
     margin-bottom: 12px;
     padding: 10px;
+  }
+
+  .budget-table tr.budget-recurring-parent-row {
+    border-bottom: 0;
+    border-radius: 8px 8px 0 0;
+    margin-bottom: 0;
+    padding-bottom: 8px;
+  }
+
+  .budget-table tr.budget-recurring-detail-row {
+    border-radius: 0 0 8px 8px;
+    border-top: 0;
+    display: grid;
+    margin-bottom: 12px;
+    padding-top: 0;
+  }
+
+  .budget-table tr.budget-recurring-detail-row > td {
+    display: block;
+    width: 100% !important;
+  }
+
+  .budget-table tr.budget-recurring-detail-row > td:last-child {
+    display: none;
   }
 
   .budget-table td {
@@ -5130,11 +5762,20 @@ h2 {
   }
 
   .budget-date-cell input {
-    font-size: 13px;
+    font-size: inherit;
     padding-inline: 6px;
   }
 
+
   .budget-actions-cell {
     justify-items: end;
+  }
+}
+
+@media (max-width: 620px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
   }
 }

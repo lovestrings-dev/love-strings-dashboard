@@ -15,6 +15,7 @@ import {
   Headphones,
   Link as LinkIcon,
   MapPin,
+  Megaphone,
   Upload,
   Music2,
   Pencil,
@@ -212,13 +213,25 @@ type CampaignDaySeed = {
   instagramDone?: boolean;
   youtubeDone?: boolean;
 };
+type MarketingCampaignKind = "general" | "song";
+type NewMarketingCampaignInput =
+  | { campaignKind: "song"; productionSongId: string }
+  | {
+      campaignKind: "general";
+      endDate: string;
+      startDate: string;
+      title: string;
+    };
 type MarketingCampaignConfig = {
   id: string;
   dbId?: string;
+  campaignKind?: MarketingCampaignKind;
   releaseTitle: string;
   releaseDate: string;
+  startDate?: string;
   productionSongDbId?: string;
   albumArtUrl: string;
+  showProgressBar?: boolean;
   budgetLines?: ProductionBudgetLine[];
   campaignDays?: CampaignDay[];
   daySeeds?: CampaignDaySeed[];
@@ -286,13 +299,23 @@ type MarketingCampaignDayDbRow = {
   is_default_day: boolean;
   marketing_campaign_tasks: MarketingCampaignTaskDbRow[] | null;
 };
+type MarketingCampaignBudgetLineDbRow = {
+  id: string;
+  description: string;
+  amount: number | string;
+  position: number;
+};
 type MarketingCampaignDbRow = {
   id: string;
   slug: string;
   title: string;
+  campaign_kind: MarketingCampaignKind;
   release_date: string;
+  start_date: string;
   production_song_id: string | null;
   album_art_url: string;
+  show_progress_bar: boolean;
+  marketing_campaign_budget_lines: MarketingCampaignBudgetLineDbRow[] | null;
   marketing_campaign_days: MarketingCampaignDayDbRow[] | null;
 };
 type ProductionSongDbRow = {
@@ -553,7 +576,7 @@ const defaultQrCodeLinks: QrCodeLink[] = [
   }))
 ];
 
-const appVersionLabel = "Beta 1.9";
+const appVersionLabel = "Beta 1.10";
 
 const sections = [
   "Dashboard",
@@ -809,6 +832,7 @@ const appleMusicReminderDismissedDateKey =
   "love-strings-apple-music-reminder-dismissed-date-v1";
 
 const newMarketingCampaign: Omit<MarketingCampaignConfig, "id"> = {
+  campaignKind: "song",
   releaseTitle: "New Campaign",
   releaseDate: "10/07/2026",
   albumArtUrl: ""
@@ -2873,19 +2897,22 @@ function generateBudgetRecurringEntries(entry: BudgetEntry) {
   const startDate = parseFlexibleBudgetDate(entry.date);
   const endDate = parseFlexibleBudgetDate(entry.paymentPlanEndDate ?? "");
 
-  if (!startDate || !endDate) {
+  if (!startDate) {
     return [];
   }
 
   const today = getTodayUtcDate();
   const forecastEndDate = addMonthsToDate(today, 1);
+  const generationEndDate =
+    endDate && endDate.getTime() < forecastEndDate.getTime()
+      ? endDate
+      : forecastEndDate;
   const cadenceMonths = entry.recurringCadence === "yearly" ? 12 : 1;
   const generatedEntries: BudgetEntry[] = [];
   let occurrenceDate = addMonthsToDate(startDate, cadenceMonths);
 
   while (
-    occurrenceDate.getTime() <= endDate.getTime() &&
-    occurrenceDate.getTime() <= forecastEndDate.getTime()
+    occurrenceDate.getTime() <= generationEndDate.getTime()
   ) {
     generatedEntries.push({
       ...entry,
@@ -3320,7 +3347,9 @@ function getCampaignCompletionScore(campaign: MarketingCampaignConfig) {
 
 function getDashboardCampaignPreview(campaigns: MarketingCampaignConfig[]) {
   const today = getTodayUtcDate();
-  const sortedCampaigns = sortCampaignsByReleaseDate(campaigns);
+  const sortedCampaigns = sortCampaignsByReleaseDate(
+    campaigns.filter((campaign) => (campaign.campaignKind ?? "song") === "song")
+  );
   const current =
     sortedCampaigns.find((campaign) => isCampaignActive(campaign, today)) ??
     null;
@@ -3403,16 +3432,55 @@ function getDashboardFocusQueue(
   campaignPreview: ReturnType<typeof getDashboardCampaignPreview>,
   productionPreviewSongs: ProductionSongConfig[],
   otherTasks: OtherTask[] = [],
-  utilityTasks: FocusQueueItem[] = []
+  utilityTasks: FocusQueueItem[] = [],
+  campaigns: MarketingCampaignConfig[] = []
 ) {
-  const selectedCampaign = campaignPreview.current ?? campaignPreview.next;
+  const todayTime = getTodayUtcDate().getTime();
+  const marketingCandidate = campaigns
+    .map((campaign) => {
+      const days = campaign.campaignDays ?? getCampaignDays(campaign);
+      const task = getNextCampaignTasks(days)[0];
+      const dayNumber = task ? Number(task.id.split("-")[0]) : 0;
+      const taskDay = days.find((day) => day.dayNumber === dayNumber);
+      const campaignEnd = getCampaignEndDate(campaign);
+
+      return { campaign, task, taskDay, campaignEnd };
+    })
+    .filter(
+      (candidate) =>
+        candidate.task &&
+        candidate.taskDay &&
+        candidate.campaignEnd &&
+        candidate.campaignEnd.getTime() >= todayTime
+    )
+    .sort(
+      (firstCandidate, secondCandidate) => {
+        const dateDifference =
+          (parseCampaignDateKey(firstCandidate.taskDay?.dateKey ?? "")?.getTime() ??
+            Number.MAX_SAFE_INTEGER) -
+          (parseCampaignDateKey(secondCandidate.taskDay?.dateKey ?? "")?.getTime() ??
+            Number.MAX_SAFE_INTEGER);
+
+        if (dateDifference !== 0) {
+          return dateDifference;
+        }
+
+        const firstKindPriority =
+          (firstCandidate.campaign.campaignKind ?? "song") === "song" ? 0 : 1;
+        const secondKindPriority =
+          (secondCandidate.campaign.campaignKind ?? "song") === "song" ? 0 : 1;
+
+        return firstKindPriority - secondKindPriority;
+      }
+    )[0];
+  const selectedCampaign =
+    marketingCandidate?.campaign ?? campaignPreview.current ?? campaignPreview.next;
   const selectedSong = productionPreviewSongs[0] ?? productionPreviewSongs[1] ?? null;
-  const marketingTasks = selectedCampaign
-    ? getNextCampaignTasks(
-        selectedCampaign.campaignDays ??
-          buildCampaignDays(selectedCampaign.releaseDate, selectedCampaign.daySeeds)
-      )
-    : [];
+  const marketingTasks = marketingCandidate?.task
+    ? [marketingCandidate.task]
+    : selectedCampaign
+      ? getNextCampaignTasks(getCampaignDays(selectedCampaign))
+      : [];
   const productionTasks = selectedSong ? getNextProductionTasks(selectedSong.steps) : [];
   const marketingFocusItems = selectedCampaign
     ? marketingTasks.map((task) =>
@@ -3717,6 +3785,74 @@ function getCampaignEndDate(campaign: MarketingCampaignConfig) {
   return addUtcDays(addUtcDays(releaseDate, -4), defaultCampaignDayCount - 1);
 }
 
+function getCampaignStartDate(campaign: MarketingCampaignConfig) {
+  if (campaign.campaignDays?.length) {
+    const campaignDates = campaign.campaignDays
+      .map((day) => parseCampaignDateKey(day.dateKey))
+      .filter((date): date is Date => Boolean(date))
+      .sort((firstDate, secondDate) => firstDate.getTime() - secondDate.getTime());
+
+    return campaignDates[0] ?? null;
+  }
+
+  const releaseDate = parseCampaignDate(campaign.releaseDate);
+  return releaseDate ? addUtcDays(releaseDate, -4) : null;
+}
+
+function orderMarketingModuleCampaigns(campaigns: MarketingCampaignConfig[]) {
+  const today = getTodayUtcDate();
+  const chronologicalCampaigns = sortCampaignsByReleaseDate(campaigns);
+  const songCampaigns = campaigns.filter(
+    (campaign) => (campaign.campaignKind ?? "song") === "song"
+  );
+  const activeSongCampaign = songCampaigns
+    .filter((campaign) => isCampaignActive(campaign, today))
+    .sort(
+      (firstCampaign, secondCampaign) =>
+        getCampaignSortTime(firstCampaign.releaseDate) -
+        getCampaignSortTime(secondCampaign.releaseDate)
+    )[0];
+  const upcomingSongCampaigns = songCampaigns
+    .filter((campaign) => {
+      const startDate = getCampaignStartDate(campaign);
+      return startDate ? startDate.getTime() > today.getTime() : false;
+    })
+    .sort(
+      (firstCampaign, secondCampaign) =>
+        (getCampaignStartDate(firstCampaign)?.getTime() ?? Number.MAX_SAFE_INTEGER) -
+        (getCampaignStartDate(secondCampaign)?.getTime() ?? Number.MAX_SAFE_INTEGER)
+    );
+  const primarySongCampaign = activeSongCampaign ?? upcomingSongCampaigns[0];
+  const activeGeneralCampaign = campaigns
+    .filter(
+      (campaign) =>
+        campaign.campaignKind === "general" && isCampaignActive(campaign, today)
+    )
+    .sort(
+      (firstCampaign, secondCampaign) =>
+        (getCampaignEndDate(firstCampaign)?.getTime() ?? Number.MAX_SAFE_INTEGER) -
+        (getCampaignEndDate(secondCampaign)?.getTime() ?? Number.MAX_SAFE_INTEGER)
+    )[0];
+  const nextUpcomingSongCampaign = upcomingSongCampaigns.find(
+    (campaign) => campaign.id !== primarySongCampaign?.id
+  );
+  const prioritizedCampaigns = [
+    primarySongCampaign,
+    activeGeneralCampaign,
+    nextUpcomingSongCampaign
+  ].filter((campaign): campaign is MarketingCampaignConfig => Boolean(campaign));
+  const prioritizedCampaignIds = new Set(
+    prioritizedCampaigns.map((campaign) => campaign.id)
+  );
+
+  return [
+    ...prioritizedCampaigns,
+    ...chronologicalCampaigns.filter(
+      (campaign) => !prioritizedCampaignIds.has(campaign.id)
+    )
+  ];
+}
+
 function isCampaignActive(campaign: MarketingCampaignConfig, today: Date) {
   const releaseDate = parseCampaignDate(campaign.releaseDate);
 
@@ -3775,6 +3911,71 @@ function buildCampaignDays(
   );
 }
 
+function buildGeneralCampaignDays(
+  startDateInput: string,
+  endDateInput: string,
+  currentDays: CampaignDay[] = []
+) {
+  const startDate = parseCampaignDate(startDateInput);
+  const endDate = parseCampaignDate(endDateInput);
+
+  if (!startDate || !endDate || startDate > endDate) {
+    return currentDays;
+  }
+
+  const dayCount = Math.min(
+    366,
+    Math.round((endDate.getTime() - startDate.getTime()) / 86400000) + 1
+  );
+  const currentDayByDate = new Map(currentDays.map((day) => [day.dateKey, day]));
+
+  return Array.from({ length: dayCount }, (_, index) => {
+    const date = addUtcDays(startDate, index);
+    const dateKey = date.toISOString().slice(0, 10);
+    const existingDay = currentDayByDate.get(dateKey);
+
+    if (existingDay) {
+      return {
+        ...existingDay,
+        dayNumber: index + 1,
+        date: formatCampaignDate(date),
+        isDefaultDay: true,
+        releaseOffset: Math.round(
+          (date.getTime() - endDate.getTime()) / 86400000
+        )
+      };
+    }
+
+    return {
+      dayNumber: index + 1,
+      date: formatCampaignDate(date),
+      dateKey,
+      isDefaultDay: true,
+      releaseOffset: Math.round((date.getTime() - endDate.getTime()) / 86400000),
+      clipName: "General content",
+      extraTasks: [],
+      statuses: {
+        facebookPost: "irrelevant" as const,
+        instagramUpload: "not-started" as const,
+        production: "not-started" as const,
+        websiteUpdate: "irrelevant" as const,
+        youtubePost: "irrelevant" as const,
+        youtubeUpload: "not-started" as const
+      }
+    };
+  });
+}
+
+function getCampaignDays(campaign: MarketingCampaignConfig) {
+  if (campaign.campaignDays) return campaign.campaignDays;
+
+  if ((campaign.campaignKind ?? "song") === "general" && campaign.startDate) {
+    return buildGeneralCampaignDays(campaign.startDate, campaign.releaseDate);
+  }
+
+  return buildCampaignDays(campaign.releaseDate, campaign.daySeeds);
+}
+
 function alignCampaignDaysToReleaseDate(
   days: CampaignDay[] | undefined,
   releaseDateInput: string
@@ -3803,13 +4004,24 @@ function mapMarketingCampaignRows(rows: MarketingCampaignDbRow[]) {
     rows.map((campaign) => ({
       id: campaign.slug,
       dbId: campaign.id,
+      campaignKind: campaign.campaign_kind ?? "song",
       releaseTitle: campaign.title,
       releaseDate: formatDateKeyForInput(campaign.release_date),
+      startDate: formatDateKeyForInput(campaign.start_date),
       productionSongDbId: campaign.production_song_id ?? undefined,
       albumArtUrl: campaign.album_art_url,
+      showProgressBar: campaign.show_progress_bar ?? true,
+      budgetLines: [...(campaign.marketing_campaign_budget_lines ?? [])]
+        .sort((firstLine, secondLine) => firstLine.position - secondLine.position)
+        .map((line) => ({
+          amount: Number(line.amount) || 0,
+          description: line.description,
+          id: line.id
+        })),
       campaignDays: mapMarketingCampaignDayRows(
         campaign.marketing_campaign_days ?? [],
-        shouldIncludeReleaseDayDefaults(campaign.release_date)
+        campaign.campaign_kind === "song" &&
+          shouldIncludeReleaseDayDefaults(campaign.release_date)
       )
     }))
   );
@@ -3847,7 +4059,10 @@ function mergeMarketingCampaignLocalBudgetLines(
 
       return {
         ...campaign,
-        budgetLines: localCampaign?.budgetLines ?? campaign.budgetLines ?? []
+        budgetLines:
+          campaign.budgetLines && campaign.budgetLines.length > 0
+            ? campaign.budgetLines
+            : localCampaign?.budgetLines ?? []
       };
     })
   );
@@ -4661,6 +4876,7 @@ async function saveBudgetSnapshotToSupabase({
 
 export default function Home() {
   const productionSaveTimers = useRef<Record<string, number>>({});
+  const marketingBudgetSaveTimers = useRef<Record<string, number>>({});
   const otherTaskSaveTimers = useRef<Record<string, number>>({});
   const eventSaveTimer = useRef<number | null>(null);
   const budgetSaveTimer = useRef<number | null>(null);
@@ -4698,6 +4914,10 @@ export default function Home() {
   const [marketingFocusTarget, setMarketingFocusTarget] = useState<{
     campaignId: string;
     elementId?: string;
+    token: number;
+  } | null>(null);
+  const [eventFocusTarget, setEventFocusTarget] = useState<{
+    entryId: string;
     token: number;
   } | null>(null);
   const [campaigns, setCampaigns] = useState(() =>
@@ -4877,7 +5097,12 @@ export default function Home() {
 
   async function saveMarketingCampaignHeader(
     campaignId: string,
-    updates: Partial<Pick<MarketingCampaignConfig, "albumArtUrl" | "releaseDate" | "releaseTitle">>
+    updates: Partial<
+      Pick<
+        MarketingCampaignConfig,
+        "albumArtUrl" | "releaseDate" | "releaseTitle" | "showProgressBar" | "startDate"
+      >
+    >
   ) {
     const campaign = campaigns.find((candidate) => candidate.id === campaignId);
 
@@ -4885,7 +5110,13 @@ export default function Home() {
       return;
     }
 
-    const payload: { albumArtUrl?: string; releaseDate?: string; title?: string } = {};
+    const payload: {
+      albumArtUrl?: string;
+      releaseDate?: string;
+      showProgressBar?: boolean;
+      startDate?: string;
+      title?: string;
+    } = {};
 
     if (updates.releaseDate) {
       const releaseDate = formatInputDateForDatabase(updates.releaseDate);
@@ -4899,8 +5130,20 @@ export default function Home() {
       payload.title = updates.releaseTitle;
     }
 
+    if (updates.startDate) {
+      const startDate = formatInputDateForDatabase(updates.startDate);
+
+      if (startDate) {
+        payload.startDate = startDate;
+      }
+    }
+
     if (updates.albumArtUrl !== undefined) {
       payload.albumArtUrl = updates.albumArtUrl;
+    }
+
+    if (updates.showProgressBar !== undefined) {
+      payload.showProgressBar = updates.showProgressBar;
     }
 
     if (Object.keys(payload).length === 0) {
@@ -4948,27 +5191,41 @@ export default function Home() {
     }
   }
 
-  async function addCampaign(releaseTitle?: string) {
+  async function addCampaign(input: NewMarketingCampaignInput) {
+    const linkedProductionSong =
+      input.campaignKind === "song"
+        ? productionSongDrafts.find((song) => song.id === input.productionSongId)
+        : null;
+    if (input.campaignKind === "song" && !linkedProductionSong) return;
+
     const campaignReleaseTitle =
-      releaseTitle?.trim() ||
-      productionSongDrafts[0]?.title ||
-      `New Campaign ${campaigns.length + 1}`;
-    const linkedProductionSong = productionSongDrafts.find(
-      (song) => song.title === campaignReleaseTitle
-    );
+      input.campaignKind === "general"
+        ? input.title.trim()
+        : linkedProductionSong?.title ?? `New Campaign ${campaigns.length + 1}`;
     const releaseDateInput =
-      linkedProductionSong?.releaseDate ?? newMarketingCampaign.releaseDate;
+      input.campaignKind === "general"
+        ? input.endDate
+        : linkedProductionSong?.releaseDate ?? newMarketingCampaign.releaseDate;
     const releaseDate =
       parseCampaignDate(releaseDateInput) ??
       new Date(Date.UTC(2026, 6, 10));
+    const startDateInput =
+      input.campaignKind === "general"
+        ? input.startDate
+        : formatDateKeyForInput(addUtcDays(releaseDate, -4).toISOString().slice(0, 10));
     const localCampaign: MarketingCampaignConfig = {
       ...newMarketingCampaign,
       id: `campaign-${campaigns.length + 1}-${Date.now()}`,
+      campaignKind: input.campaignKind,
       releaseTitle: campaignReleaseTitle,
       releaseDate: releaseDateInput,
+      startDate: startDateInput,
       productionSongDbId: linkedProductionSong?.dbId,
       budgetLines: [],
-      campaignDays: buildCampaignDays(releaseDateInput)
+      campaignDays:
+        input.campaignKind === "general"
+          ? buildGeneralCampaignDays(startDateInput, releaseDateInput)
+          : buildCampaignDays(releaseDateInput)
     };
 
     setCampaigns((currentCampaigns) =>
@@ -4981,9 +5238,11 @@ export default function Home() {
       const response = await fetch("/api/marketing/campaigns", {
         body: JSON.stringify({
           albumArtUrl: localCampaign.albumArtUrl,
+          campaignKind: localCampaign.campaignKind,
           releaseDate: releaseDate.toISOString().slice(0, 10),
           productionSongDbId: linkedProductionSong?.dbId,
           slug,
+          startDate: formatInputDateForDatabase(startDateInput),
           title: localCampaign.releaseTitle
         }),
         credentials: "same-origin",
@@ -5036,7 +5295,7 @@ export default function Home() {
       )
     );
 
-    if (campaign) {
+    if (campaign && (campaign.campaignKind ?? "song") === "song") {
       const campaignSlug = createStableId(campaign.releaseTitle);
       setProductionSongDrafts((currentSongs) =>
         currentSongs.map((song) =>
@@ -5050,24 +5309,48 @@ export default function Home() {
     void saveMarketingCampaignHeader(campaignId, { releaseDate });
   }
 
-  function updateCampaignTitle(campaignId: string, releaseTitle: string) {
+  function updateGeneralCampaignSettings(
+    campaignId: string,
+    updates: { albumArtUrl: string; releaseTitle: string; startDate: string },
+    campaignDays: CampaignDay[]
+  ) {
+    setCampaigns((currentCampaigns) =>
+      sortCampaignsByReleaseDate(
+        currentCampaigns.map((campaign) =>
+          campaign.id === campaignId
+            ? { ...campaign, ...updates, campaignDays }
+            : campaign
+        )
+      )
+    );
+    void saveMarketingCampaignHeader(campaignId, updates);
+
+    const campaign = campaigns.find((candidate) => candidate.id === campaignId);
+    if (campaign?.dbId) {
+      void saveMarketingCampaignDays({ ...campaign, ...updates }, campaignDays);
+    }
+  }
+
+  function updateCampaignProgressVisibility(
+    campaignId: string,
+    showProgressBar: boolean
+  ) {
     setCampaigns((currentCampaigns) =>
       currentCampaigns.map((campaign) =>
         campaign.id === campaignId
-          ? {
-              ...campaign,
-              releaseTitle
-            }
+          ? { ...campaign, showProgressBar }
           : campaign
       )
     );
-    void saveMarketingCampaignHeader(campaignId, { releaseTitle });
+    void saveMarketingCampaignHeader(campaignId, { showProgressBar });
   }
 
   function updateCampaignBudgetLines(
     campaignId: string,
     budgetLines: ProductionBudgetLine[]
   ) {
+    const campaign = campaigns.find((candidate) => candidate.id === campaignId);
+
     setCampaigns((currentCampaigns) =>
       currentCampaigns.map((campaign) =>
         campaign.id === campaignId
@@ -5078,6 +5361,37 @@ export default function Home() {
           : campaign
       )
     );
+
+    if (!campaign?.dbId) return;
+
+    const existingTimer = marketingBudgetSaveTimers.current[campaign.dbId];
+    if (existingTimer) window.clearTimeout(existingTimer);
+
+    marketingBudgetSaveTimers.current[campaign.dbId] = window.setTimeout(async () => {
+      try {
+        const response = await fetch("/api/marketing/campaign-budget-lines", {
+          body: JSON.stringify({
+            campaignId: campaign.dbId,
+            lines: normalizeProductionBudgetLines(budgetLines)
+          }),
+          credentials: "same-origin",
+          headers: {
+            "Content-Type": "application/json",
+            "x-love-strings-marketing": "write"
+          },
+          method: "POST"
+        });
+
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new Error(
+            body.error ?? `Campaign budget save failed with status ${response.status}.`
+          );
+        }
+      } catch (error) {
+        console.warn("Unable to save marketing campaign budget lines.", error);
+      }
+    }, 500);
   }
 
   async function refreshPlatformStats() {
@@ -5242,9 +5556,7 @@ export default function Home() {
       const campaign = campaigns.find((candidate) => candidate.id === campaignId);
 
       if (campaign) {
-        const previousDays =
-          campaign.campaignDays ??
-          buildCampaignDays(campaign.releaseDate, campaign.daySeeds);
+        const previousDays = getCampaignDays(campaign);
         getChangedDailyProgressItems(
           getCampaignDailyProgressItems(campaign, previousDays),
           getCampaignDailyProgressItems(campaign, campaignDays)
@@ -5353,8 +5665,9 @@ export default function Home() {
       setCampaigns((currentCampaigns) =>
         sortCampaignsByReleaseDate(
           currentCampaigns.map((campaign) =>
-            (nextSong.dbId && campaign.productionSongDbId === nextSong.dbId) ||
-            createStableId(campaign.releaseTitle) === songSlug
+            (campaign.campaignKind ?? "song") === "song" &&
+            ((nextSong.dbId && campaign.productionSongDbId === nextSong.dbId) ||
+              createStableId(campaign.releaseTitle) === songSlug)
               ? {
                   ...campaign,
                   campaignDays: alignCampaignDaysToReleaseDate(
@@ -5387,10 +5700,12 @@ export default function Home() {
   }
 
   function addBudgetEntry() {
+    const entryId = `budget-entry-${Date.now()}`;
+
     setBudgetEntryDrafts((currentEntries) =>
       sortBudgetEntriesByDate([
         {
-          id: `budget-entry-${Date.now()}`,
+          id: entryId,
           amount: 0,
           bucket: "events",
           date: formatDateForInput(getTodayUtcDate()),
@@ -5400,6 +5715,8 @@ export default function Home() {
         ...currentEntries
       ])
     );
+
+    return entryId;
   }
 
   function updateBudgetEntry(entryId: string, updates: Partial<BudgetEntry>) {
@@ -5595,10 +5912,14 @@ export default function Home() {
 
   useEffect(() => {
     const saveTimers = productionSaveTimers.current;
+    const campaignBudgetTimers = marketingBudgetSaveTimers.current;
     const focusSaveTimers = otherTaskSaveTimers.current;
 
     return () => {
       Object.values(saveTimers).forEach((timer) => window.clearTimeout(timer));
+      Object.values(campaignBudgetTimers).forEach((timer) =>
+        window.clearTimeout(timer)
+      );
       Object.values(focusSaveTimers).forEach((timer) => window.clearTimeout(timer));
       if (eventSaveTimer.current) {
         window.clearTimeout(eventSaveTimer.current);
@@ -6237,9 +6558,18 @@ export default function Home() {
               id,
               slug,
               title,
+              campaign_kind,
               release_date,
+              start_date,
               production_song_id,
               album_art_url,
+              show_progress_bar,
+              marketing_campaign_budget_lines (
+                id,
+                description,
+                amount,
+                position
+              ),
               marketing_campaign_days (
                 id,
                 day_number,
@@ -6455,8 +6785,9 @@ export default function Home() {
     const songSlug = createStableId(song.title);
     const campaign = campaigns.find(
       (candidate) =>
-        (song.dbId && candidate.productionSongDbId === song.dbId) ||
-        createStableId(candidate.releaseTitle) === songSlug
+        (candidate.campaignKind ?? "song") === "song" &&
+        ((song.dbId && candidate.productionSongDbId === song.dbId) ||
+          createStableId(candidate.releaseTitle) === songSlug)
     );
 
     if (!campaign) {
@@ -6465,6 +6796,59 @@ export default function Home() {
 
     setActiveSection("Marketing");
     setMarketingFocusTarget({ campaignId: campaign.id, token: Date.now() });
+  }
+
+  function openBudgetEntrySource(entry: BudgetEntry) {
+    if (entry.sourceMarketingCampaignId) {
+      setActiveSection("Marketing");
+      setMarketingFocusTarget({
+        campaignId: entry.sourceMarketingCampaignId,
+        token: Date.now()
+      });
+      return;
+    }
+
+    if (entry.sourceEventEntryId) {
+      setActiveSection("Events");
+      setEventFocusTarget({ entryId: entry.sourceEventEntryId, token: Date.now() });
+      return;
+    }
+
+    if (!entry.sourceProductionItemId) {
+      return;
+    }
+
+    for (const song of productionSongDrafts) {
+      for (const step of song.steps) {
+        const stepSourceId = `${song.id}-${step.id}`;
+
+        if (entry.sourceProductionItemId === stepSourceId) {
+          setActiveSection("Production");
+          setProductionFocusTarget({
+            elementId: getProductionStepElementId(song.id, step.id),
+            songId: song.id,
+            token: Date.now()
+          });
+          return;
+        }
+
+        const task = step.extraTasks.find(
+          (candidate) =>
+            entry.sourceProductionItemId ===
+            `${stepSourceId}-${candidate.id}`
+        );
+
+        if (task) {
+          setActiveSection("Production");
+          setProductionFocusTarget({
+            elementId: getProductionTaskElementId(song.id, step.id, task.id),
+            songId: song.id,
+            token: Date.now()
+          });
+          return;
+        }
+      }
+    }
   }
 
   async function createRoadmapPhase() {
@@ -6565,7 +6949,8 @@ export default function Home() {
               setMarketingFocusTarget({ campaignId, elementId, token: Date.now() })
             }
             onReleaseDateSave={updateCampaignReleaseDate}
-            onTitleSave={updateCampaignTitle}
+            onGeneralCampaignSettingsSave={updateGeneralCampaignSettings}
+            onProgressVisibilityChange={updateCampaignProgressVisibility}
             recentProductionSongId={productionFocusTarget?.songId}
             productionSongs={productionSongDrafts}
           />
@@ -6607,11 +6992,13 @@ export default function Home() {
             onAddEntry={addBudgetEntry}
             onDeleteEntry={deleteBudgetEntry}
             onEntryChange={updateBudgetEntry}
+            onOpenEntrySource={openBudgetEntrySource}
           />
         ) : null}
         {activeSection === "Events" ? (
           <EventsView
             entries={eventEntryDrafts}
+            focusTarget={eventFocusTarget}
             isLoaded={hasLoadedEventSupabaseSnapshot}
             locations={locationAddressBook}
             onAddEntry={addEventEntry}
@@ -6696,6 +7083,7 @@ function ScrollAssistButton() {
 
 function EventsView({
   entries,
+  focusTarget,
   isLoaded,
   locations,
   onAddEntry,
@@ -6706,6 +7094,7 @@ function EventsView({
   onLocationChange
 }: {
   entries: EventEntry[];
+  focusTarget: { entryId: string; token: number } | null;
   isLoaded: boolean;
   locations: LocationAddressBookEntry[];
   onAddEntry: () => void;
@@ -6721,6 +7110,20 @@ function EventsView({
   const nextEvent = getNextUpcomingEvent(entries);
   const nextEventDate = nextEvent ? parseFlexibleBudgetDate(nextEvent.date) : null;
   const nextEventDaysLeft = nextEventDate ? getDaysUntilDate(nextEventDate) : null;
+  const eventElementRefs = useRef<Record<string, HTMLElement | null>>({});
+
+  useEffect(() => {
+    if (!focusTarget) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      eventElementRefs.current[focusTarget.entryId]?.scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+      });
+    }, 80);
+  }, [focusTarget]);
 
   return (
     <>
@@ -6740,19 +7143,17 @@ function EventsView({
           </div>
           {!isLoaded ? (
             <p className="event-card-loading">Loading events...</p>
-          ) : (
+          ) : nextEventDate ? (
             <>
-              <strong>
-                {nextEventDate
-                  ? formatCampaignDate(nextEventDate)
-                  : "No upcoming events planned yet"}
-              </strong>
+              <strong>{formatCampaignDate(nextEventDate)}</strong>
               <p>
                 {nextEvent && nextEventDaysLeft !== null
                   ? `${nextEvent.locationName || "Location TBD"} - ${formatEventDaysLeft(nextEventDaysLeft)}`
-                  : "No upcoming events planned yet"}
+                  : null}
               </p>
             </>
+          ) : (
+            <p className="event-summary-empty">No upcoming events planned yet</p>
           )}
         </article>
         <article className="metric-card event-summary-card">
@@ -6789,10 +7190,16 @@ function EventsView({
           {entries.map((entry) => (
             <EventCard
               entry={entry}
+              focusToken={
+                focusTarget?.entryId === entry.id ? focusTarget.token : undefined
+              }
               key={entry.id}
               locations={locations}
               onDelete={onDeleteEntry}
               onEntryChange={onEntryChange}
+              refCallback={(element) => {
+                eventElementRefs.current[entry.id] = element;
+              }}
             />
           ))}
         </div>
@@ -6998,14 +7405,18 @@ function LocationAddressBookCard({
 
 function EventCard({
   entry,
+  focusToken,
   locations,
   onDelete,
-  onEntryChange
+  onEntryChange,
+  refCallback
 }: {
   entry: EventEntry;
+  focusToken?: number;
   locations: LocationAddressBookEntry[];
   onDelete: (entryId: string) => void;
   onEntryChange: (entryId: string, updates: Partial<EventEntry>) => void;
+  refCallback: (element: HTMLElement | null) => void;
 }) {
   const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
   const [isEventOpen, setIsEventOpen] = useState(false);
@@ -7021,6 +7432,14 @@ function EventCard({
             description: ""
           }
         ] satisfies ProductionBudgetLine[]);
+
+  useEffect(() => {
+    if (!focusToken) {
+      return;
+    }
+
+    window.setTimeout(() => setIsEventOpen(true), 0);
+  }, [focusToken]);
 
   function selectLocation(locationId: string) {
     const location = locations.find((candidate) => candidate.id === locationId);
@@ -7081,7 +7500,7 @@ function EventCard({
   }
 
   return (
-    <article className="event-card">
+    <article className="event-card" ref={refCallback}>
       <div className="event-card-header">
         <div className="event-card-main">
           {entry.posterUrl ? (
@@ -7096,7 +7515,6 @@ function EventCard({
               <CalendarDays size={18} aria-hidden />
             </span>
           )}
-          <strong className="event-date-display">{entry.date}</strong>
           <div className="event-title-block">
             <EventMaybeLink label={entry.name} url={entry.nameUrl} />
             <span>
@@ -7115,6 +7533,7 @@ function EventCard({
             </span>
           </div>
         </div>
+        <strong className="event-date-display">{entry.date}</strong>
         <button
           aria-controls={`${entry.id}-event-details`}
           aria-expanded={isEventOpen}
@@ -7224,13 +7643,15 @@ function EventCard({
         <div className="event-budget-section">
           <strong>Budget</strong>
           <div className="event-budget-lines">
-            {eventBudgetLines.map((line) => (
+            {eventBudgetLines.map((line, index) => (
               <EventBudgetLineRow
+                defaultSign={index === 0 ? "positive" : "negative"}
                 key={line.id}
                 line={line}
                 onDelete={deleteEventBudgetLine}
                 onUpdate={updateEventBudgetLine}
                 showBucket
+                showSignToggle
               />
             ))}
           </div>
@@ -7269,15 +7690,23 @@ function EventCard({
 }
 
 function EventBudgetLineRow({
+  compactLabels = false,
+  defaultSign = "negative",
   line,
   onDelete,
   onUpdate,
-  showBucket = false
+  showActions = true,
+  showBucket = false,
+  showSignToggle = false
 }: {
+  compactLabels?: boolean;
+  defaultSign?: "negative" | "positive";
   line: ProductionBudgetLine;
   onDelete: (lineId: string) => void;
   onUpdate: (lineId: string, updates: Partial<ProductionBudgetLine>) => void;
+  showActions?: boolean;
   showBucket?: boolean;
+  showSignToggle?: boolean;
 }) {
   const [isActionsOpen, setIsActionsOpen] = useState(false);
   const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
@@ -7305,7 +7734,9 @@ function EventBudgetLineRow({
         </label>
       ) : null}
       <label>
-        Budget reason
+        <span className={compactLabels ? "marketing-budget-field-label" : undefined}>
+          Budget reason
+        </span>
         <input
           onChange={(event) =>
             onUpdate(line.id, {
@@ -7317,13 +7748,23 @@ function EventBudgetLineRow({
         />
       </label>
       <label>
-        Amount
-        <ProductionBudgetAmountInput
-          amount={line.amount}
-          onChange={(amount) => onUpdate(line.id, { amount })}
-        />
+        <span className={compactLabels ? "marketing-budget-field-label" : undefined}>
+          Amount
+        </span>
+        {showSignToggle ? (
+          <SignedBudgetAmountInput
+            amount={line.amount}
+            defaultSign={defaultSign}
+            onChange={(amount) => onUpdate(line.id, { amount })}
+          />
+        ) : (
+          <ProductionBudgetAmountInput
+            amount={line.amount}
+            onChange={(amount) => onUpdate(line.id, { amount })}
+          />
+        )}
       </label>
-      <div className="event-budget-actions-cell">
+      {showActions ? <div className="event-budget-actions-cell">
         <button
           aria-expanded={isActionsOpen}
           aria-label={`${isActionsOpen ? "Hide" : "Show"} event budget line actions`}
@@ -7354,7 +7795,7 @@ function EventBudgetLineRow({
             </button>
           </div>
         ) : null}
-      </div>
+      </div> : null}
     </div>
   );
 }
@@ -7378,12 +7819,14 @@ function BudgetView({
   entries,
   onAddEntry,
   onDeleteEntry,
-  onEntryChange
+  onEntryChange,
+  onOpenEntrySource
 }: {
   entries: BudgetEntry[];
-  onAddEntry: () => void;
+  onAddEntry: () => string;
   onDeleteEntry: (entryId: string) => void;
   onEntryChange: (entryId: string, updates: Partial<BudgetEntry>) => void;
+  onOpenEntrySource: (entry: BudgetEntry) => void;
 }) {
   const summary = getBudgetSummary(entries);
   const cashflowPoints = useMemo(() => getBudgetCashflowPoints(entries), [entries]);
@@ -7393,6 +7836,9 @@ function BudgetView({
   );
   const [isHistoricalLedgerOpen, setIsHistoricalLedgerOpen] = useState(false);
   const [isMoreAnalyticsOpen, setIsMoreAnalyticsOpen] = useState(false);
+  const [pendingEntryFocusId, setPendingEntryFocusId] = useState<string | null>(
+    null
+  );
   const [ledgerSort, setLedgerSort] = useState<{
     direction: SortDirection;
     key: BudgetLedgerSortKey;
@@ -7425,6 +7871,27 @@ function BudgetView({
       }
     );
   }, [sortedEntries]);
+
+  useEffect(() => {
+    if (!isHistoricalLedgerOpen || !pendingEntryFocusId) {
+      return;
+    }
+
+    const focusTimer = window.setTimeout(() => {
+      const entryElement = document.getElementById(
+        getBudgetEntryElementId(pendingEntryFocusId)
+      );
+
+      if (!entryElement) {
+        return;
+      }
+
+      entryElement.scrollIntoView({ behavior: "smooth", block: "start" });
+      setPendingEntryFocusId(null);
+    }, 80);
+
+    return () => window.clearTimeout(focusTimer);
+  }, [entries, isHistoricalLedgerOpen, pendingEntryFocusId]);
 
   function updateLedgerSort(nextKey: BudgetLedgerSortKey) {
     setLedgerSort((currentSort) => {
@@ -7552,7 +8019,15 @@ function BudgetView({
             <p className="eyebrow">Ledger</p>
             <h2>Budget lines</h2>
           </div>
-          <button className="add-campaign-button" onClick={onAddEntry} type="button">
+          <button
+            className="add-campaign-button"
+            onClick={() => {
+              const entryId = onAddEntry();
+              setIsHistoricalLedgerOpen(true);
+              setPendingEntryFocusId(entryId);
+            }}
+            type="button"
+          >
             <Plus size={16} aria-hidden />
             Add budget line
           </button>
@@ -7569,6 +8044,7 @@ function BudgetView({
             emptyMessage="No upcoming budget lines."
             onDeleteEntry={onDeleteEntry}
             onEntryChange={onEntryChange}
+            onOpenEntrySource={onOpenEntrySource}
             onSort={updateLedgerSort}
           />
         </div>
@@ -7598,6 +8074,7 @@ function BudgetView({
               emptyMessage="No historical budget lines."
               onDeleteEntry={onDeleteEntry}
               onEntryChange={onEntryChange}
+              onOpenEntrySource={onOpenEntrySource}
               onSort={updateLedgerSort}
             />
           </div>
@@ -7740,14 +8217,24 @@ function BudgetIncomeSpendChart({
           <div className="budget-bar-group" key={month.key}>
             <div className="budget-bar">
               <b
-                className="budget-income-bar"
+                className={`budget-income-bar${month.income <= 0 ? " is-zero" : ""}`}
                 title={`Income ${formatCurrency(month.income)}`}
-                style={{ height: `${Math.max(8, (month.income / maxMonthlyValue) * 100)}%` }}
+                style={{
+                  height:
+                    month.income <= 0
+                      ? "0"
+                      : `${Math.max(8, (month.income / maxMonthlyValue) * 100)}%`
+                }}
               />
               <b
-                className="budget-spend-bar"
+                className={`budget-spend-bar${month.spend <= 0 ? " is-zero" : ""}`}
                 title={`Spend ${formatCurrency(month.spend)}`}
-                style={{ height: `${Math.max(8, (month.spend / maxMonthlyValue) * 100)}%` }}
+                style={{
+                  height:
+                    month.spend <= 0
+                      ? "0"
+                      : `${Math.max(8, (month.spend / maxMonthlyValue) * 100)}%`
+                }}
               />
             </div>
             <small>{month.label}</small>
@@ -7764,6 +8251,7 @@ function BudgetLedgerTable({
   entries,
   onDeleteEntry,
   onEntryChange,
+  onOpenEntrySource,
   onSort
 }: {
   activeSort: {
@@ -7774,6 +8262,7 @@ function BudgetLedgerTable({
   entries: BudgetEntry[];
   onDeleteEntry: (entryId: string) => void;
   onEntryChange: (entryId: string, updates: Partial<BudgetEntry>) => void;
+  onOpenEntrySource: (entry: BudgetEntry) => void;
   onSort: (sortKey: BudgetLedgerSortKey) => void;
 }) {
   return (
@@ -7822,6 +8311,7 @@ function BudgetLedgerTable({
                 key={entry.id}
                 onDelete={onDeleteEntry}
                 onEntryChange={onEntryChange}
+                onOpenSource={onOpenEntrySource}
               />
             ))
           ) : (
@@ -7884,21 +8374,31 @@ function SortableBudgetHeader({
   );
 }
 
+function getBudgetEntryElementId(entryId: string) {
+  return `budget-ledger-entry-${entryId}`;
+}
+
 function BudgetEntryRow({
   entry,
   onDelete,
-  onEntryChange
+  onEntryChange,
+  onOpenSource
 }: {
   entry: BudgetEntry;
   onDelete: (entryId: string) => void;
   onEntryChange: (entryId: string, updates: Partial<BudgetEntry>) => void;
+  onOpenSource: (entry: BudgetEntry) => void;
 }) {
   const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
   const [isActionsOpen, setIsActionsOpen] = useState(false);
+  const [isSourceLinkOpen, setIsSourceLinkOpen] = useState(false);
   const [amountInput, setAmountInput] = useState(String(getBudgetSignedAmount(entry)));
+  const recurringActionRef = useRef<HTMLDivElement | null>(null);
   const descriptionInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const sourceActionRef = useRef<HTMLDivElement | null>(null);
   const signedAmount = getBudgetSignedAmount(entry);
   const paymentType = getBudgetPaymentType(entry);
+  const isRecurringEntry = paymentType === "recurring";
   const isAutoRecurringEntry = Boolean(entry.generated && entry.sourceRecurringEntryId);
   const generatedSourceLabel = getBudgetGeneratedSourceLabel(entry);
   const canUseLedgerActions = canDeleteBudgetEntryFromLedger(entry);
@@ -7915,8 +8415,62 @@ function BudgetEntryRow({
     input.style.height = `${Math.max(input.scrollHeight, minHeight || 0)}px`;
   }, [entry.description]);
 
+  useEffect(() => {
+    if (!isSourceLinkOpen) {
+      return;
+    }
+
+    function closeSourceLink(event: PointerEvent) {
+      const target = event.target;
+
+      if (
+        target instanceof Node &&
+        sourceActionRef.current?.contains(target)
+      ) {
+        return;
+      }
+
+      setIsSourceLinkOpen(false);
+    }
+
+    document.addEventListener("pointerdown", closeSourceLink);
+    return () => document.removeEventListener("pointerdown", closeSourceLink);
+  }, [isSourceLinkOpen]);
+
+  useEffect(() => {
+    if (!isRecurringEntry || !isActionsOpen) {
+      return;
+    }
+
+    function closeRecurringDelete(event: PointerEvent) {
+      const target = event.target;
+
+      if (
+        target instanceof Node &&
+        recurringActionRef.current?.contains(target)
+      ) {
+        return;
+      }
+
+      setIsActionsOpen(false);
+    }
+
+    document.addEventListener("pointerdown", closeRecurringDelete);
+    return () => document.removeEventListener("pointerdown", closeRecurringDelete);
+  }, [isActionsOpen, isRecurringEntry]);
+
   return (
-    <tr className={entry.generated ? "budget-generated-row" : undefined}>
+    <>
+    <tr
+      className={
+        entry.generated
+          ? "budget-generated-row"
+          : isRecurringEntry
+            ? "budget-recurring-parent-row"
+            : undefined
+      }
+      id={getBudgetEntryElementId(entry.id)}
+    >
       <td className="budget-date-cell" data-label="Date">
         <input
           aria-label={`${entry.description} date`}
@@ -8019,39 +8573,40 @@ function BudgetEntryRow({
             <option value="one-off">One off</option>
             <option value="recurring">Recurring</option>
           </select>
-          {paymentType === "recurring" && !isAutoRecurringEntry ? (
-            <div className="budget-recurring-options">
-              <select
-                aria-label={`${entry.description} recurring cadence`}
-                disabled={entry.generated}
-                onChange={(event) =>
-                  onEntryChange(entry.id, {
-                    recurringCadence: event.target.value as BudgetRecurringCadence
-                  })
-                }
-                value={entry.recurringCadence ?? "monthly"}
-              >
-                <option value="monthly">Monthly</option>
-                <option value="yearly">Yearly</option>
-              </select>
-              <input
-                aria-label={`${entry.description} payment plan end date`}
-                disabled={entry.generated}
-                inputMode="numeric"
-                onChange={(event) =>
-                  onEntryChange(entry.id, {
-                    paymentPlanEndDate: event.target.value
-                  })
-                }
-                placeholder="End date"
-                value={entry.paymentPlanEndDate ?? ""}
-              />
-            </div>
-          ) : null}
         </div>
       </td>
       <td className="budget-actions-column" data-label="Actions">
-        {canUseLedgerActions ? (
+        {isRecurringEntry ? (
+          <div className="budget-actions-cell" ref={recurringActionRef}>
+            <button
+              aria-label={
+                isActionsOpen
+                  ? `Delete ${entry.description}`
+                  : `Show delete action for ${entry.description}`
+              }
+              className={
+                isActionsOpen
+                  ? "budget-row-action-button budget-row-delete-button"
+                  : "budget-row-action-button"
+              }
+              onClick={() => {
+                if (isActionsOpen) {
+                  onDelete(entry.id);
+                  return;
+                }
+
+                setIsActionsOpen(true);
+              }}
+              type="button"
+            >
+              {isActionsOpen ? (
+                <Trash2 size={15} aria-hidden />
+              ) : (
+                <Pencil size={15} aria-hidden />
+              )}
+            </button>
+          </div>
+        ) : canUseLedgerActions ? (
           <div className="budget-actions-cell">
             <button
               aria-expanded={isActionsOpen}
@@ -8091,13 +8646,69 @@ function BudgetEntryRow({
               </div>
             ) : null}
           </div>
+        ) : generatedSourceLabel === "Recurring" ? (
+          <span className="budget-source-lock">Edit in Recurring</span>
         ) : (
-          <span className="budget-source-lock">
-            Edit in {generatedSourceLabel ?? "source"}
-          </span>
+          <div className="budget-source-action" ref={sourceActionRef}>
+            {isSourceLinkOpen ? (
+              <button
+                className="budget-source-link"
+                onClick={() => onOpenSource(entry)}
+                type="button"
+              >
+                {generatedSourceLabel === "Production"
+                  ? "Edit in Prod."
+                  : generatedSourceLabel === "Marketing"
+                    ? "Edit in Mrkt."
+                    : "Edit in Events"}
+              </button>
+            ) : (
+              <button
+                aria-label={`Show source link for ${entry.description}`}
+                className="budget-row-action-button"
+                onClick={() => setIsSourceLinkOpen(true)}
+                type="button"
+              >
+                <Pencil size={15} aria-hidden />
+              </button>
+            )}
+          </div>
         )}
       </td>
     </tr>
+    {isRecurringEntry && !isAutoRecurringEntry ? (
+      <tr className="budget-recurring-detail-row">
+        <td className="budget-date-cell">
+          <input
+            aria-label={`${entry.description} payment plan end date`}
+            inputMode="numeric"
+            onChange={(event) =>
+              onEntryChange(entry.id, {
+                paymentPlanEndDate: event.target.value
+              })
+            }
+            placeholder="End date"
+            value={entry.paymentPlanEndDate ?? ""}
+          />
+        </td>
+        <td className="budget-bucket-column">
+          <select
+            aria-label={`${entry.description} recurring cadence`}
+            onChange={(event) =>
+              onEntryChange(entry.id, {
+                recurringCadence: event.target.value as BudgetRecurringCadence
+              })
+            }
+            value={entry.recurringCadence ?? "monthly"}
+          >
+            <option value="monthly">Monthly</option>
+            <option value="yearly">Yearly</option>
+          </select>
+        </td>
+        <td aria-hidden colSpan={4} />
+      </tr>
+    ) : null}
+    </>
   );
 }
 
@@ -8207,19 +8818,17 @@ function ProductionSongBoard({
   const [albumArtUrl, setAlbumArtUrl] = useState(song.albumArtUrl);
   const [isAlbumArtEditorOpen, setIsAlbumArtEditorOpen] = useState(false);
   const [isFocusHighlighted, setIsFocusHighlighted] = useState(false);
+  const [isReleaseDateEditing, setIsReleaseDateEditing] = useState(false);
   const [isSongOpen, setIsSongOpen] = useState(false);
   const [isSongTitleEditorOpen, setIsSongTitleEditorOpen] = useState(false);
   const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
   const releaseDate = parseCampaignDate(appliedDeadlineInput);
+  const releaseDateDisplay = releaseDate ? formatCampaignDate(releaseDate) : null;
   const productionDeadlineDate = releaseDate ? addUtcDays(releaseDate, -14) : null;
-  const productionDeadlineDisplay = productionDeadlineDate
-    ? formatCampaignDate(productionDeadlineDate)
-    : null;
   const daysToProductionDeadline = productionDeadlineDate
     ? getDaysToRelease(productionDeadlineDate)
     : null;
   const nextTasks = getNextProductionTasks(song.steps).slice(0, 3);
-  const hasPendingDeadline = deadlineInput !== appliedDeadlineInput;
   const canUpdateDeadline = Boolean(parseCampaignDate(deadlineInput));
   const canSaveSongTitle = songTitleInput.trim().length > 0;
 
@@ -8230,6 +8839,7 @@ function ProductionSongBoard({
       setDeadlineInput(song.releaseDate);
       setAppliedDeadlineInput(song.releaseDate);
       setAlbumArtUrl(song.albumArtUrl);
+      setIsReleaseDateEditing(false);
     }, 0);
   }, [song.albumArtUrl, song.releaseDate, song.title]);
 
@@ -8265,6 +8875,29 @@ function ProductionSongBoard({
     };
   }, [focusToken]);
 
+  useEffect(() => {
+    if (!isReleaseDateEditing) {
+      return;
+    }
+
+    function cancelReleaseDateEdit(event: PointerEvent) {
+      const target = event.target;
+
+      if (
+        target instanceof Element &&
+        target.closest(".production-release-date-editor")
+      ) {
+        return;
+      }
+
+      setDeadlineInput(appliedDeadlineInput);
+      setIsReleaseDateEditing(false);
+    }
+
+    window.addEventListener("pointerdown", cancelReleaseDateEdit);
+    return () => window.removeEventListener("pointerdown", cancelReleaseDateEdit);
+  }, [appliedDeadlineInput, isReleaseDateEditing]);
+
   function saveSongTitle() {
     if (!canSaveSongTitle) {
       return;
@@ -8284,10 +8917,16 @@ function ProductionSongBoard({
     }
 
     setAppliedDeadlineInput(deadlineInput);
+    setIsReleaseDateEditing(false);
     onFocus(song.id);
     onChange(song.id, {
       releaseDate: deadlineInput
     });
+  }
+
+  function beginDeadlineEdit() {
+    setDeadlineInput(appliedDeadlineInput);
+    setIsReleaseDateEditing(true);
   }
 
   function updateSteps(updater: (currentSteps: ProductionStep[]) => ProductionStep[]) {
@@ -8405,12 +9044,7 @@ function ProductionSongBoard({
     >
       <div className="campaign-board-header production-board-header">
         <div className="album-art-control">
-          <button
-            aria-label="Add production artwork URL"
-            className="album-art-placeholder"
-            onClick={() => setIsAlbumArtEditorOpen((current) => !current)}
-            type="button"
-          >
+          <div className="album-art-placeholder album-art-placeholder-readonly">
             {albumArtUrl ? (
               <span
                 aria-label={`${songTitle} artwork preview`}
@@ -8424,96 +9058,21 @@ function ProductionSongBoard({
                 <span>Artwork</span>
               </>
             )}
-            <span className="album-art-url-action">
-              <Plus size={13} aria-hidden />
-              URL
-            </span>
-          </button>
+          </div>
         </div>
         <div className="campaign-title-block">
           <div className="campaign-title-row">
-            {isSongTitleEditorOpen ? (
-              <>
-                <input
-                  aria-label="Song name"
-                  onChange={(event) => setSongTitleInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      saveSongTitle();
-                    }
-                  }}
-                  value={songTitleInput}
-                />
-                <button
-                  aria-label="Save song name"
-                  disabled={!canSaveSongTitle}
-                  onClick={saveSongTitle}
-                  type="button"
-                >
-                  <Save size={16} aria-hidden />
-                </button>
-              </>
-            ) : (
-              <>
-                <h2>{songTitle}</h2>
-                <button
-                  aria-label="Edit song name"
-                  onClick={() => {
-                    setSongTitleInput(songTitle);
-                    setIsSongTitleEditorOpen(true);
-                  }}
-                  type="button"
-                >
-                  <Pencil size={15} aria-hidden />
-                </button>
-              </>
-            )}
+            <h2>{songTitle}</h2>
           </div>
-          <label className="roadmap-phase-select">
-            <span>Roadmap phase</span>
-            <select
-              aria-label={`${songTitle} roadmap phase`}
-              onChange={(event) =>
-                onChange(song.id, {
-                  roadmapPhaseId: event.target.value || null
-                })
-              }
-              value={song.roadmapPhaseId ?? ""}
-            >
-              <option value="">Unassigned</option>
-              {phaseOptions.map((phase) => (
-                <option key={phase.id} value={phase.id}>
-                  {phase.label}
-                </option>
-              ))}
-            </select>
-          </label>
           <HeaderTaskList tasks={nextTasks} />
         </div>
-        <label className="release-date-field">
-          <span>Release date</span>
-          <div className="release-date-input-row">
-            <input
-              aria-label="Release date in dd/mm/yyyy format"
-              inputMode="numeric"
-              onChange={(event) => setDeadlineInput(event.target.value)}
-              placeholder="dd/mm/yyyy"
-              value={deadlineInput}
-            />
-            <button
-              aria-label="Update release date"
-              disabled={!hasPendingDeadline || !canUpdateDeadline}
-              onClick={applyDeadlineUpdate}
-              type="button"
-            >
-              <Save size={16} aria-hidden />
-            </button>
-          </div>
-          <strong className="release-date-summary">
-            <span>{formatProductionDeadlineCountdown(daysToProductionDeadline)}</span>
-            {productionDeadlineDisplay ? <span>{productionDeadlineDisplay}</span> : null}
-          </strong>
-        </label>
+        <div className="production-mobile-progress">
+          <ProductionProgressStrip steps={song.steps} />
+        </div>
+        <strong className="production-release-summary">
+          {releaseDateDisplay ? <span>{releaseDateDisplay}</span> : null}
+          <span>{formatProductionDeadlineCountdown(daysToProductionDeadline)}</span>
+        </strong>
         <button
           aria-expanded={isSongOpen}
           aria-label={isSongOpen ? "Hide production details" : "Show production details"}
@@ -8523,32 +9082,165 @@ function ProductionSongBoard({
         >
           <ChevronDown size={20} aria-hidden />
         </button>
-        {isAlbumArtEditorOpen ? (
-          <label className="album-art-url-field">
-            <span>Artwork URL</span>
-            <input
-              onChange={(event) => setAlbumArtUrl(event.target.value.trim())}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  onChange(song.id, { albumArtUrl });
-                  setIsAlbumArtEditorOpen(false);
-                }
-              }}
-              placeholder="https://example.com/cover.jpg"
-              type="url"
-              value={albumArtUrl}
-            />
-          </label>
-        ) : null}
       </div>
 
-      <ProductionProgressStrip steps={song.steps} />
+      <div className="production-desktop-progress">
+        <ProductionProgressStrip steps={song.steps} />
+      </div>
 
       <div
         className="campaign-details"
         hidden={!isSongOpen}
         id={`${song.id}-production-details`}
       >
+        <details className="campaign-danger-zone">
+          <summary>Song options</summary>
+          <div>
+            <label className="song-title-options-editor">
+              <span className="song-option-field-heading">Song name</span>
+              <div className="release-date-input-row">
+                <input
+                  aria-label="Song name"
+                  disabled={!isSongTitleEditorOpen}
+                  onChange={(event) => setSongTitleInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      saveSongTitle();
+                    }
+                  }}
+                  value={songTitleInput}
+                />
+                <button
+                  aria-label={isSongTitleEditorOpen ? "Save song name" : "Edit song name"}
+                  disabled={isSongTitleEditorOpen && !canSaveSongTitle}
+                  onClick={() => {
+                    if (isSongTitleEditorOpen) {
+                      saveSongTitle();
+                      return;
+                    }
+
+                    setSongTitleInput(songTitle);
+                    setIsSongTitleEditorOpen(true);
+                  }}
+                  type="button"
+                >
+                  {isSongTitleEditorOpen ? (
+                    <Save size={16} aria-hidden />
+                  ) : (
+                    <Pencil size={15} aria-hidden />
+                  )}
+                </button>
+              </div>
+            </label>
+            <label className="song-artwork-options-editor">
+              <span className="song-option-field-heading">Artwork URL</span>
+              <div className="release-date-input-row">
+                <input
+                  disabled={!isAlbumArtEditorOpen}
+                  onChange={(event) => setAlbumArtUrl(event.target.value.trim())}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      onChange(song.id, { albumArtUrl });
+                      setIsAlbumArtEditorOpen(false);
+                    }
+                  }}
+                  placeholder="https://example.com/cover.jpg"
+                  type="url"
+                  value={albumArtUrl}
+                />
+                <button
+                  aria-label={isAlbumArtEditorOpen ? "Save artwork URL" : "Edit artwork URL"}
+                  onClick={() => {
+                    if (isAlbumArtEditorOpen) {
+                      onChange(song.id, { albumArtUrl });
+                      setIsAlbumArtEditorOpen(false);
+                      return;
+                    }
+
+                    setAlbumArtUrl(song.albumArtUrl);
+                    setIsAlbumArtEditorOpen(true);
+                  }}
+                  type="button"
+                >
+                  {isAlbumArtEditorOpen ? (
+                    <Save size={16} aria-hidden />
+                  ) : (
+                    <Pencil size={15} aria-hidden />
+                  )}
+                </button>
+              </div>
+            </label>
+            <div className="song-release-options-field production-release-date-editor">
+              <span className="song-option-field-heading">Release date</span>
+              <div className="release-date-input-row">
+                <input
+                  aria-label="Release date in dd/mm/yyyy format"
+                  disabled={!isReleaseDateEditing}
+                  inputMode="numeric"
+                  onChange={(event) => setDeadlineInput(event.target.value)}
+                  placeholder="dd/mm/yyyy"
+                  value={deadlineInput}
+                />
+                <button
+                  aria-label={isReleaseDateEditing ? "Save release date" : "Edit release date"}
+                  disabled={isReleaseDateEditing && !canUpdateDeadline}
+                  onClick={isReleaseDateEditing ? applyDeadlineUpdate : beginDeadlineEdit}
+                  type="button"
+                >
+                  {isReleaseDateEditing ? (
+                    <Save size={16} aria-hidden />
+                  ) : (
+                    <Pencil size={15} aria-hidden />
+                  )}
+                </button>
+              </div>
+              {isReleaseDateEditing ? (
+                <span className="release-date-change-warning">
+                  Changing release date will recalculate Production deadlines and
+                  update Marketing and Roadmap planning!
+                </span>
+              ) : null}
+            </div>
+            <label className="roadmap-phase-select">
+              <span className="song-option-field-heading">Roadmap phase</span>
+              <select
+                aria-label={`${songTitle} roadmap phase`}
+                onChange={(event) =>
+                  onChange(song.id, {
+                    roadmapPhaseId: event.target.value || null
+                  })
+                }
+                value={song.roadmapPhaseId ?? ""}
+              >
+                <option value="">Unassigned</option>
+                {phaseOptions.map((phase) => (
+                  <option key={phase.id} value={phase.id}>
+                    {phase.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <input
+                checked={isDeleteConfirmed}
+                onChange={(event) =>
+                  setIsDeleteConfirmed(event.target.checked)
+                }
+                type="checkbox"
+              />
+              Enable delete for this song
+            </label>
+            <button
+              className="delete-campaign-button"
+              disabled={!isDeleteConfirmed}
+              onClick={() => onDelete(song.id)}
+              type="button"
+            >
+              <Trash2 size={15} aria-hidden />
+              Delete song
+            </button>
+          </div>
+        </details>
         <div className="campaign-table-wrap">
           <table className="campaign-table production-table">
             <thead>
@@ -8583,30 +9275,6 @@ function ProductionSongBoard({
             Add production step
           </button>
         </div>
-        <details className="campaign-danger-zone">
-          <summary>Song options</summary>
-          <div>
-            <label>
-              <input
-                checked={isDeleteConfirmed}
-                onChange={(event) =>
-                  setIsDeleteConfirmed(event.target.checked)
-                }
-                type="checkbox"
-              />
-              Enable delete for this song
-            </label>
-            <button
-              className="delete-campaign-button"
-              disabled={!isDeleteConfirmed}
-              onClick={() => onDelete(song.id)}
-              type="button"
-            >
-              <Trash2 size={15} aria-hidden />
-              Delete song
-            </button>
-          </div>
-        </details>
       </div>
     </section>
   );
@@ -8851,42 +9519,132 @@ function ProductionBudgetLineEditor({
 
 function ProductionBudgetAmountInput({
   amount,
-  onChange
+  forcedSign,
+  onChange,
+  placeholder = "-20 or 100",
+  toneAmount = amount
 }: {
   amount: number;
+  forcedSign?: "negative" | "positive";
   onChange: (amount: number) => void;
+  placeholder?: string;
+  toneAmount?: number;
 }) {
   const [amountInput, setAmountInput] = useState(
-    amount === 0 ? "" : formatEditableAmount(amount)
+    formatAmountInputForSign(amount, forcedSign)
   );
-  const [isFocused, setIsFocused] = useState(false);
 
   return (
     <input
       aria-label="Production budget amount"
-      className={getTransactionAmountToneClass(amount)}
+      className={getTransactionAmountToneClass(toneAmount)}
       inputMode="decimal"
       onBlur={() => {
         const parsedAmount = parseEditableAmount(amountInput);
-        setIsFocused(false);
-        setAmountInput(parsedAmount ? formatEditableAmount(parsedAmount) : "");
+        setAmountInput(
+          parsedAmount === null
+            ? formatAmountInputForSign(0, forcedSign)
+            : formatAmountInputForSign(parsedAmount, forcedSign)
+        );
       }}
       onChange={(event) => {
-        const nextAmountInput = event.target.value;
+        const nextAmountInput = applyForcedAmountSign(
+          event.target.value,
+          forcedSign
+        );
         const parsedAmount = parseEditableAmount(nextAmountInput);
 
         setAmountInput(nextAmountInput);
 
         if (parsedAmount === null) {
+          if (nextAmountInput.trim() === "-") {
+            onChange(0);
+          }
           return;
         }
 
         onChange(parsedAmount);
       }}
-      onFocus={() => setIsFocused(true)}
-      placeholder="-20 or 100"
+      placeholder={placeholder}
       value={amountInput}
     />
+  );
+}
+
+function formatAmountInputForSign(
+  amount: number,
+  forcedSign?: "negative" | "positive"
+) {
+  if (amount === 0) {
+    return forcedSign === "negative" ? "-" : "";
+  }
+
+  const normalizedAmount =
+    forcedSign === "negative"
+      ? -Math.abs(amount)
+      : forcedSign === "positive"
+        ? Math.abs(amount)
+        : amount;
+
+  return formatEditableAmount(normalizedAmount);
+}
+
+function applyForcedAmountSign(
+  value: string,
+  forcedSign?: "negative" | "positive"
+) {
+  if (!forcedSign) return value;
+
+  const unsignedValue = value.replace(/^[+-]/, "");
+  return forcedSign === "negative" ? `-${unsignedValue}` : unsignedValue;
+}
+
+function SignedBudgetAmountInput({
+  amount,
+  defaultSign,
+  onChange
+}: {
+  amount: number;
+  defaultSign: "negative" | "positive";
+  onChange: (amount: number) => void;
+}) {
+  const [isZeroNegative, setIsZeroNegative] = useState(
+    defaultSign === "negative"
+  );
+  const isNegative = amount === 0 ? isZeroNegative : amount < 0;
+
+  const signedAmount = isNegative ? -Math.abs(amount) : Math.abs(amount);
+
+  function toggleSign() {
+    const nextIsNegative = !isNegative;
+
+    if (amount === 0) {
+      setIsZeroNegative(nextIsNegative);
+      return;
+    }
+
+    onChange(nextIsNegative ? -Math.abs(amount) : Math.abs(amount));
+  }
+
+  return (
+    <div className="signed-budget-amount-control">
+      <button
+        aria-label={isNegative ? "Change amount to income" : "Change amount to expense"}
+        className={`signed-budget-toggle ${isNegative ? "is-expense" : "is-income"}`}
+        onClick={toggleSign}
+        type="button"
+      >
+        {isNegative ? "−" : "+"}
+      </button>
+      <ProductionBudgetAmountInput
+        amount={signedAmount}
+        forcedSign={isNegative ? "negative" : "positive"}
+        key={isNegative ? "expense" : "income"}
+        onChange={onChange}
+        placeholder={isNegative ? "-20" : "100"}
+        toneAmount={signedAmount}
+      />
+    </div>
   );
 }
 
@@ -8919,8 +9677,9 @@ function ProductionBudgetLineRow({
       </label>
       <label>
         <span>Amount</span>
-        <ProductionBudgetAmountInput
+        <SignedBudgetAmountInput
           amount={line.amount}
+          defaultSign="negative"
           onChange={(amount) => onUpdate(line.id, { amount })}
         />
       </label>
@@ -8978,14 +9737,15 @@ function MarketingView({
   onCampaignDaysChange,
   onDeleteCampaign,
   onFocusCampaign,
+  onGeneralCampaignSettingsSave,
+  onProgressVisibilityChange,
   onReleaseDateSave,
-  onTitleSave,
   recentProductionSongId,
   productionSongs
 }: {
   campaigns: MarketingCampaignConfig[];
   focusTarget: { campaignId: string; elementId?: string; token: number } | null;
-  onAddCampaign: (releaseTitle?: string) => void;
+  onAddCampaign: (input: NewMarketingCampaignInput) => void;
   onCampaignBudgetLinesChange: (
     campaignId: string,
     budgetLines: ProductionBudgetLine[]
@@ -8993,8 +9753,13 @@ function MarketingView({
   onCampaignDaysChange: (campaignId: string, campaignDays: CampaignDay[]) => void;
   onDeleteCampaign: (campaignId: string) => void;
   onFocusCampaign: (campaignId: string, elementId?: string) => void;
+  onGeneralCampaignSettingsSave: (
+    campaignId: string,
+    updates: { albumArtUrl: string; releaseTitle: string; startDate: string },
+    campaignDays: CampaignDay[]
+  ) => void;
+  onProgressVisibilityChange: (campaignId: string, showProgressBar: boolean) => void;
   onReleaseDateSave: (campaignId: string, releaseDate: string) => void;
-  onTitleSave: (campaignId: string, releaseTitle: string) => void;
   recentProductionSongId?: string;
   productionSongs: ProductionSongConfig[];
 }) {
@@ -9002,8 +9767,21 @@ function MarketingView({
   const [selectedProductionSongId, setSelectedProductionSongId] = useState(
     productionSongs[0]?.id ?? ""
   );
+  const [campaignSource, setCampaignSource] = useState<"general" | "song">("song");
+  const [generalCampaignTitle, setGeneralCampaignTitle] = useState("");
+  const [generalCampaignStartDate, setGeneralCampaignStartDate] = useState(() =>
+    formatDateKeyForInput(getViennaDateKey())
+  );
+  const [generalCampaignEndDate, setGeneralCampaignEndDate] = useState(() => {
+    const today = parseCampaignDateKey(getViennaDateKey()) ?? getTodayUtcDate();
+    return formatDateKeyForInput(addUtcDays(today, 13).toISOString().slice(0, 10));
+  });
   const recentProductionSong = productionSongs.find(
     (song) => song.id === recentProductionSongId
+  );
+  const orderedCampaigns = useMemo(
+    () => orderMarketingModuleCampaigns(campaigns),
+    [campaigns]
   );
   const orderedProductionSongs = useMemo(
     () =>
@@ -9083,7 +9861,7 @@ function MarketingView({
       </header>
 
       <div className="campaign-list">
-        {campaigns.map((campaign) => (
+        {orderedCampaigns.map((campaign) => (
           <MarketingCampaignBoard
             campaign={campaign}
             focusToken={
@@ -9094,8 +9872,9 @@ function MarketingView({
             onDaysChange={onCampaignDaysChange}
             onDelete={onDeleteCampaign}
             onFocus={onFocusCampaign}
+            onGeneralCampaignSettingsSave={onGeneralCampaignSettingsSave}
+            onProgressVisibilityChange={onProgressVisibilityChange}
             onReleaseDateSave={onReleaseDateSave}
-            onTitleSave={onTitleSave}
             productionSongs={productionSongs}
             refCallback={(element) => {
               campaignElementRefs.current[campaign.id] = element;
@@ -9105,24 +9884,89 @@ function MarketingView({
 
         <div className="add-campaign-control">
           <select
-            aria-label="Choose production song for new campaign"
-            disabled={productionSongs.length === 0}
-            onChange={(event) => setSelectedProductionSongId(event.target.value)}
-            value={selectedProductionSong?.id ?? ""}
+            aria-label="Choose campaign type or production song"
+            onChange={(event) => {
+              if (event.target.value === "general") {
+                setCampaignSource("general");
+                return;
+              }
+
+              setCampaignSource("song");
+              setSelectedProductionSongId(event.target.value);
+            }}
+            value={campaignSource === "general" ? "general" : selectedProductionSong?.id ?? ""}
           >
-            {orderedProductionSongs.length > 0 ? (
-              orderedProductionSongs.map((song) => (
-                <option key={song.id} value={song.id}>
-                  {song.title}
-                </option>
-              ))
-            ) : (
-              <option value="">No production songs yet</option>
-            )}
+            <optgroup label="Song campaigns">
+              {orderedProductionSongs.length > 0 ? (
+                orderedProductionSongs.map((song) => (
+                  <option key={song.id} value={song.id}>
+                    {song.title}
+                  </option>
+                ))
+              ) : (
+                <option disabled value="">No production songs yet</option>
+              )}
+            </optgroup>
+            <optgroup label="General marketing">
+              <option value="general">General content campaign</option>
+            </optgroup>
           </select>
+          {campaignSource === "general" ? (
+            <div className="general-campaign-create-fields">
+              <input
+                aria-label="General campaign name"
+                onChange={(event) => setGeneralCampaignTitle(event.target.value)}
+                placeholder="Campaign name"
+                value={generalCampaignTitle}
+              />
+              <input
+                aria-label="General campaign start date"
+                inputMode="numeric"
+                onChange={(event) => setGeneralCampaignStartDate(event.target.value)}
+                placeholder="Start dd/mm/yyyy"
+                value={generalCampaignStartDate}
+              />
+              <input
+                aria-label="General campaign end date"
+                inputMode="numeric"
+                onChange={(event) => setGeneralCampaignEndDate(event.target.value)}
+                placeholder="End dd/mm/yyyy"
+                value={generalCampaignEndDate}
+              />
+            </div>
+          ) : null}
           <button
             className="add-campaign-button"
-            onClick={() => onAddCampaign(selectedProductionSong?.title)}
+            disabled={
+              campaignSource === "general"
+                ? !generalCampaignTitle.trim() ||
+                  !parseCampaignDate(generalCampaignStartDate) ||
+                  !parseCampaignDate(generalCampaignEndDate) ||
+                  generalCampaignStartDate.length !== 10 ||
+                  generalCampaignEndDate.length !== 10 ||
+                  (parseCampaignDate(generalCampaignStartDate)?.getTime() ?? 0) >
+                    (parseCampaignDate(generalCampaignEndDate)?.getTime() ?? 0)
+                : !selectedProductionSong
+            }
+            onClick={() => {
+              if (campaignSource === "general") {
+                onAddCampaign({
+                  campaignKind: "general",
+                  endDate: generalCampaignEndDate,
+                  startDate: generalCampaignStartDate,
+                  title: generalCampaignTitle
+                });
+                setGeneralCampaignTitle("");
+                return;
+              }
+
+              if (selectedProductionSong) {
+                onAddCampaign({
+                  campaignKind: "song",
+                  productionSongId: selectedProductionSong.id
+                });
+              }
+            }}
             type="button"
           >
             <Plus size={16} aria-hidden />
@@ -9141,8 +9985,9 @@ function MarketingCampaignBoard({
   onDaysChange,
   onDelete,
   onFocus,
+  onGeneralCampaignSettingsSave,
+  onProgressVisibilityChange,
   onReleaseDateSave,
-  onTitleSave,
   productionSongs,
   refCallback
 }: {
@@ -9155,8 +10000,13 @@ function MarketingCampaignBoard({
   onDaysChange: (campaignId: string, campaignDays: CampaignDay[]) => void;
   onDelete: (campaignId: string) => void;
   onFocus: (campaignId: string, elementId?: string) => void;
+  onGeneralCampaignSettingsSave: (
+    campaignId: string,
+    updates: { albumArtUrl: string; releaseTitle: string; startDate: string },
+    campaignDays: CampaignDay[]
+  ) => void;
+  onProgressVisibilityChange: (campaignId: string, showProgressBar: boolean) => void;
   onReleaseDateSave: (campaignId: string, releaseDate: string) => void;
-  onTitleSave: (campaignId: string, releaseTitle: string) => void;
   productionSongs: ProductionSongConfig[];
   refCallback: (element: HTMLElement | null) => void;
 }) {
@@ -9166,45 +10016,54 @@ function MarketingCampaignBoard({
   const [appliedReleaseDateInput, setAppliedReleaseDateInput] = useState(
     campaign.releaseDate
   );
-  const [campaignTitle, setCampaignTitle] = useState(campaign.releaseTitle);
-  const [campaignTitleInput, setCampaignTitleInput] = useState(
-    campaign.releaseTitle
-  );
-  const [isCampaignTitleEditorOpen, setIsCampaignTitleEditorOpen] =
-    useState(false);
   const [isCampaignOpen, setIsCampaignOpen] = useState(false);
   const [isFocusHighlighted, setIsFocusHighlighted] = useState(false);
   const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
+  const [isBudgetDeleteArmed, setIsBudgetDeleteArmed] = useState(false);
+  const [armedCampaignDayNumber, setArmedCampaignDayNumber] = useState<
+    number | null
+  >(null);
+  const [isReleaseDateEditing, setIsReleaseDateEditing] = useState(false);
+  const [isGeneralSettingsEditing, setIsGeneralSettingsEditing] = useState(false);
+  const [generalAlbumArtUrlInput, setGeneralAlbumArtUrlInput] = useState(
+    campaign.albumArtUrl
+  );
+  const [appliedGeneralAlbumArtUrlInput, setAppliedGeneralAlbumArtUrlInput] = useState(
+    campaign.albumArtUrl
+  );
+  const [generalTitleInput, setGeneralTitleInput] = useState(campaign.releaseTitle);
+  const [appliedGeneralTitleInput, setAppliedGeneralTitleInput] = useState(
+    campaign.releaseTitle
+  );
+  const [generalStartDateInput, setGeneralStartDateInput] = useState(
+    campaign.startDate ?? campaign.releaseDate
+  );
+  const [appliedGeneralStartDateInput, setAppliedGeneralStartDateInput] = useState(
+    campaign.startDate ?? campaign.releaseDate
+  );
   const [campaignDays, setCampaignDays] = useState(() =>
-    campaign.campaignDays ?? buildCampaignDays(campaign.releaseDate, campaign.daySeeds)
+    getCampaignDays(campaign)
   );
-  const albumArtUrl = getProductionAlbumArtForRelease(
-    campaignTitle,
-    productionSongs
-  );
-  const linkedProductionSong = getProductionSongForRelease(
-    campaignTitle,
-    productionSongs
-  );
-  const displayedCampaignTitle = linkedProductionSong?.title ?? campaignTitle;
-  const campaignTitleOptions = productionSongs.some(
-    (song) => song.title === displayedCampaignTitle
-  )
-    ? productionSongs
-    : [
-        ...productionSongs,
-        {
-          albumArtUrl: "",
-          deadline: "",
-          id: "current-marketing-title",
-          releaseDate: campaign.releaseDate,
-          roadmapPhaseId: null,
-          steps: [],
-          title: displayedCampaignTitle
-        }
-      ];
+  const isGeneralCampaign = (campaign.campaignKind ?? "song") === "general";
+  const linkedProductionSong =
+    isGeneralCampaign
+      ? null
+      : productionSongs.find(
+          (song) =>
+            campaign.productionSongDbId && song.dbId === campaign.productionSongDbId
+        ) ?? getProductionSongForRelease(campaign.releaseTitle, productionSongs);
+  const albumArtUrl = isGeneralCampaign
+    ? appliedGeneralAlbumArtUrlInput
+    : linkedProductionSong?.albumArtUrl ?? "";
+  const displayedCampaignTitle = isGeneralCampaign
+    ? appliedGeneralTitleInput
+    : linkedProductionSong?.title ?? campaign.releaseTitle;
   const releaseDate = parseCampaignDate(appliedReleaseDateInput);
   const releaseDateDisplay = releaseDate ? formatCampaignDate(releaseDate) : null;
+  const campaignStartDate = parseCampaignDate(appliedGeneralStartDateInput);
+  const campaignStartDateDisplay = campaignStartDate
+    ? formatCampaignDate(campaignStartDate)
+    : null;
   const daysToRelease = releaseDate ? getDaysToRelease(releaseDate) : null;
   const nextCampaignTasks = getNextCampaignTasks(campaignDays).slice(0, 3);
   const campaignBudgetLines =
@@ -9217,9 +10076,17 @@ function MarketingCampaignBoard({
             id: `${campaign.id}-marketing-budget-line-1`
           }
         ];
-  const hasPendingReleaseDate = releaseDateInput !== appliedReleaseDateInput;
   const canUpdateReleaseDate = Boolean(parseCampaignDate(releaseDateInput));
-  const canSaveCampaignTitle = campaignTitleInput.trim().length > 0;
+  const canSaveGeneralSettings = Boolean(
+    generalTitleInput.trim() &&
+      parseCampaignDate(generalStartDateInput) &&
+      parseCampaignDate(releaseDateInput) &&
+      parseCampaignDate(generalStartDateInput)!.getTime() <=
+        (parseCampaignDate(releaseDateInput)?.getTime() ?? 0)
+  );
+  const dateEditorLabel = "Release date";
+  const dateChangeWarning =
+    "Changing release date will also recalculate Production deadlines and update Roadmap planning!";
 
   useEffect(() => {
     if (!campaign.campaignDays) {
@@ -9233,10 +10100,26 @@ function MarketingCampaignBoard({
     window.setTimeout(() => {
       setReleaseDateInput(campaign.releaseDate);
       setAppliedReleaseDateInput(campaign.releaseDate);
-      setCampaignTitle(campaign.releaseTitle);
-      setCampaignTitleInput(campaign.releaseTitle);
+      setIsReleaseDateEditing(false);
     }, 0);
-  }, [campaign.releaseDate, campaign.releaseTitle]);
+  }, [campaign.releaseDate]);
+
+  useEffect(() => {
+    window.setTimeout(() => {
+      setGeneralTitleInput(campaign.releaseTitle);
+      setAppliedGeneralTitleInput(campaign.releaseTitle);
+      setGeneralAlbumArtUrlInput(campaign.albumArtUrl);
+      setAppliedGeneralAlbumArtUrlInput(campaign.albumArtUrl);
+      setGeneralStartDateInput(campaign.startDate ?? campaign.releaseDate);
+      setAppliedGeneralStartDateInput(campaign.startDate ?? campaign.releaseDate);
+      setIsGeneralSettingsEditing(false);
+    }, 0);
+  }, [
+    campaign.albumArtUrl,
+    campaign.releaseDate,
+    campaign.releaseTitle,
+    campaign.startDate
+  ]);
 
   useEffect(() => {
     if (!focusToken) {
@@ -9257,6 +10140,103 @@ function MarketingCampaignBoard({
       window.clearTimeout(highlightTimer);
     };
   }, [focusToken]);
+
+  useEffect(() => {
+    if (!isBudgetDeleteArmed) {
+      return;
+    }
+
+    function cancelBudgetDelete(event: PointerEvent) {
+      const target = event.target;
+
+      if (
+        target instanceof Element &&
+        target.closest(".marketing-budget-delete-button")
+      ) {
+        return;
+      }
+
+      setIsBudgetDeleteArmed(false);
+    }
+
+    window.addEventListener("pointerdown", cancelBudgetDelete);
+    return () => window.removeEventListener("pointerdown", cancelBudgetDelete);
+  }, [isBudgetDeleteArmed]);
+
+  useEffect(() => {
+    if (armedCampaignDayNumber === null) {
+      return;
+    }
+
+    function cancelCampaignDayDelete(event: PointerEvent) {
+      const target = event.target;
+
+      if (
+        target instanceof Element &&
+        target.closest(".marketing-campaign-day-delete-button")
+      ) {
+        return;
+      }
+
+      setArmedCampaignDayNumber(null);
+    }
+
+    window.addEventListener("pointerdown", cancelCampaignDayDelete);
+    return () => window.removeEventListener("pointerdown", cancelCampaignDayDelete);
+  }, [armedCampaignDayNumber]);
+
+  useEffect(() => {
+    if (!isReleaseDateEditing) {
+      return;
+    }
+
+    function cancelReleaseDateEdit(event: PointerEvent) {
+      const target = event.target;
+
+      if (
+        target instanceof Element &&
+        target.closest(".marketing-release-date-editor")
+      ) {
+        return;
+      }
+
+      setReleaseDateInput(appliedReleaseDateInput);
+      setIsReleaseDateEditing(false);
+    }
+
+    window.addEventListener("pointerdown", cancelReleaseDateEdit);
+    return () => window.removeEventListener("pointerdown", cancelReleaseDateEdit);
+  }, [appliedReleaseDateInput, isReleaseDateEditing]);
+
+  useEffect(() => {
+    if (!isGeneralSettingsEditing) return;
+
+    function cancelGeneralSettingsEdit(event: PointerEvent) {
+      const target = event.target;
+
+      if (
+        target instanceof Element &&
+        target.closest(".general-campaign-options")
+      ) {
+        return;
+      }
+
+      setGeneralTitleInput(appliedGeneralTitleInput);
+      setGeneralAlbumArtUrlInput(appliedGeneralAlbumArtUrlInput);
+      setGeneralStartDateInput(appliedGeneralStartDateInput);
+      setReleaseDateInput(appliedReleaseDateInput);
+      setIsGeneralSettingsEditing(false);
+    }
+
+    window.addEventListener("pointerdown", cancelGeneralSettingsEdit);
+    return () => window.removeEventListener("pointerdown", cancelGeneralSettingsEdit);
+  }, [
+    appliedGeneralAlbumArtUrlInput,
+    appliedGeneralStartDateInput,
+    appliedGeneralTitleInput,
+    appliedReleaseDateInput,
+    isGeneralSettingsEditing
+  ]);
 
   function updateCampaignDaysState(
     updater: (currentDays: CampaignDay[]) => CampaignDay[]
@@ -9284,6 +10264,7 @@ function MarketingCampaignBoard({
   }
 
   function addCampaignBudgetLine() {
+    setIsBudgetDeleteArmed(false);
     onBudgetLinesChange(campaign.id, [
       ...normalizeProductionBudgetLines(campaignBudgetLines),
       {
@@ -9311,6 +10292,22 @@ function MarketingCampaignBoard({
             }
           ]
     );
+  }
+
+  function deleteLastCampaignBudgetLine() {
+    if (campaignBudgetLines.length <= 1) {
+      return;
+    }
+
+    if (!isBudgetDeleteArmed) {
+      setIsBudgetDeleteArmed(true);
+      return;
+    }
+
+    deleteCampaignBudgetLine(
+      campaignBudgetLines[campaignBudgetLines.length - 1].id
+    );
+    setIsBudgetDeleteArmed(false);
   }
 
   function scrollToCurrentCampaignDay() {
@@ -9344,16 +10341,6 @@ function MarketingCampaignBoard({
     });
   }
 
-  function saveCampaignTitle() {
-    if (!canSaveCampaignTitle) {
-      return;
-    }
-
-    setCampaignTitle(campaignTitleInput.trim());
-    onTitleSave(campaign.id, campaignTitleInput.trim());
-    setIsCampaignTitleEditorOpen(false);
-  }
-
   function applyReleaseDateUpdate() {
     const nextReleaseDate = parseCampaignDate(releaseDateInput);
 
@@ -9364,7 +10351,58 @@ function MarketingCampaignBoard({
     setAppliedReleaseDateInput(releaseDateInput);
     onFocus(campaign.id);
     onReleaseDateSave(campaign.id, releaseDateInput);
-    shiftCampaignDates(nextReleaseDate);
+    if (isGeneralCampaign) {
+      updateCampaignDaysState((currentDays) =>
+        buildGeneralCampaignDays(
+          appliedGeneralStartDateInput,
+          releaseDateInput,
+          currentDays
+        )
+      );
+    } else {
+      shiftCampaignDates(nextReleaseDate);
+    }
+    setIsReleaseDateEditing(false);
+  }
+
+  function applyGeneralSettingsUpdate() {
+    if (!canSaveGeneralSettings) return;
+
+    const nextTitle = generalTitleInput.trim();
+    const hasDateRangeChanged =
+      generalStartDateInput !== appliedGeneralStartDateInput ||
+      releaseDateInput !== appliedReleaseDateInput;
+    const nextDays = hasDateRangeChanged
+      ? buildGeneralCampaignDays(
+          generalStartDateInput,
+          releaseDateInput,
+          campaignDays
+        )
+      : campaignDays;
+
+    setAppliedGeneralTitleInput(nextTitle);
+    setAppliedGeneralAlbumArtUrlInput(generalAlbumArtUrlInput.trim());
+    setAppliedGeneralStartDateInput(generalStartDateInput);
+    setAppliedReleaseDateInput(releaseDateInput);
+    setCampaignDays(nextDays);
+    if (releaseDateInput !== appliedReleaseDateInput) {
+      onReleaseDateSave(campaign.id, releaseDateInput);
+    }
+    onGeneralCampaignSettingsSave(
+      campaign.id,
+      {
+        albumArtUrl: generalAlbumArtUrlInput.trim(),
+        releaseTitle: nextTitle,
+        startDate: generalStartDateInput
+      },
+      nextDays
+    );
+    setIsGeneralSettingsEditing(false);
+  }
+
+  function beginReleaseDateEdit() {
+    setReleaseDateInput(appliedReleaseDateInput);
+    setIsReleaseDateEditing(true);
   }
 
   function shiftCampaignDates(nextReleaseDate: Date) {
@@ -9487,11 +10525,79 @@ function MarketingCampaignBoard({
   function deleteCampaignDay(dayNumber: number) {
     onFocus(campaign.id, getMarketingCampaignDayElementId(campaign.id, dayNumber));
     updateCampaignDaysState((currentDays) =>
-      currentDays.filter(
-        (day) => day.isDefaultDay || day.dayNumber !== dayNumber
+      currentDays.filter((day) =>
+        isGeneralCampaign
+          ? day.dayNumber !== dayNumber
+          : day.isDefaultDay || day.dayNumber !== dayNumber
       )
     );
   }
+
+  function requestCampaignDayDelete(dayNumber: number) {
+    if (armedCampaignDayNumber !== dayNumber) {
+      setArmedCampaignDayNumber(dayNumber);
+      return;
+    }
+
+    setArmedCampaignDayNumber(null);
+    deleteCampaignDay(dayNumber);
+  }
+
+  function resetGeneralCampaignOptions() {
+    setGeneralTitleInput(appliedGeneralTitleInput);
+    setGeneralAlbumArtUrlInput(appliedGeneralAlbumArtUrlInput);
+    setGeneralStartDateInput(appliedGeneralStartDateInput);
+    setReleaseDateInput(appliedReleaseDateInput);
+    setIsGeneralSettingsEditing(false);
+    setIsBudgetDeleteArmed(false);
+    setArmedCampaignDayNumber(null);
+    setIsDeleteConfirmed(false);
+  }
+
+  const campaignBudgetSection = (
+    <div className="event-budget-section marketing-budget-section">
+      <strong>Budget</strong>
+      <div className="event-budget-lines">
+        {campaignBudgetLines.map((line) => (
+          <EventBudgetLineRow
+            compactLabels
+            key={line.id}
+            line={line}
+            onDelete={deleteCampaignBudgetLine}
+            onUpdate={updateCampaignBudgetLine}
+            showActions={false}
+            showSignToggle
+          />
+        ))}
+      </div>
+      <div
+        className={`marketing-budget-toolbar${
+          campaignBudgetLines.length > 1 ? " has-delete" : ""
+        }`}
+      >
+        {campaignBudgetLines.length > 1 ? (
+          <button
+            className={`marketing-budget-delete-button${
+              isBudgetDeleteArmed ? " is-armed" : ""
+            }`}
+            onClick={deleteLastCampaignBudgetLine}
+            type="button"
+          >
+            <Trash2 size={16} aria-hidden />
+            {isBudgetDeleteArmed ? "Delete?" : "Delete line"}
+          </button>
+        ) : null}
+        <button
+          className="add-campaign-task-button production-budget-add-button"
+          onClick={addCampaignBudgetLine}
+          type="button"
+        >
+          <Plus size={16} aria-hidden />
+          Add new line
+        </button>
+      </div>
+    </div>
+  );
 
   return (
       <section
@@ -9514,83 +10620,51 @@ function MarketingCampaignBoard({
                 />
               ) : (
                 <>
-                  <Music2 size={26} aria-hidden />
-                  <span>Album art pending</span>
+                  {isGeneralCampaign ? (
+                    <Megaphone size={26} aria-hidden />
+                  ) : (
+                    <Music2 size={26} aria-hidden />
+                  )}
+                  <span>{isGeneralCampaign ? "General campaign" : "Album art pending"}</span>
                 </>
               )}
             </div>
           </div>
           <div className="campaign-title-block">
             <div className="campaign-title-row">
-              {isCampaignTitleEditorOpen ? (
-                <>
-                  <select
-                    aria-label="Campaign sprint name"
-                    disabled={productionSongs.length === 0}
-                    onChange={(event) => setCampaignTitleInput(event.target.value)}
-                    value={campaignTitleInput}
-                  >
-                    {campaignTitleOptions.length > 0 ? (
-                      campaignTitleOptions.map((song) => (
-                        <option key={song.id} value={song.title}>
-                          {song.title}
-                        </option>
-                      ))
-                    ) : (
-                      <option value={campaignTitle}>{campaignTitle}</option>
-                    )}
-                  </select>
-                  <button
-                    aria-label="Save campaign sprint name"
-                    disabled={!canSaveCampaignTitle}
-                    onClick={saveCampaignTitle}
-                    type="button"
-                  >
-                    <Save size={16} aria-hidden />
-                  </button>
-                </>
-              ) : (
-                <>
-                  <h2>{displayedCampaignTitle}</h2>
-                  <button
-                    aria-label="Edit campaign sprint name"
-                    onClick={() => {
-                      setCampaignTitleInput(displayedCampaignTitle);
-                      setIsCampaignTitleEditorOpen(true);
-                    }}
-                    type="button"
-                  >
-                    <Pencil size={15} aria-hidden />
-                  </button>
-                </>
-              )}
+              <h2>{displayedCampaignTitle}</h2>
             </div>
             <HeaderTaskList tasks={nextCampaignTasks} />
           </div>
-          <label className="release-date-field">
-            <span>Release date</span>
-            <div className="release-date-input-row">
-              <input
-                aria-label="Release date in dd/mm/yyyy format"
-                inputMode="numeric"
-                onChange={(event) => updateReleaseDateInput(event.target.value)}
-                placeholder="dd/mm/yyyy"
-                value={releaseDateInput}
+          {campaign.showProgressBar !== false ? (
+            <div className="marketing-mobile-progress">
+              <CampaignProgressStrip
+                completion={calculateCampaignCompletion(campaignDays)}
+                days={campaignDays}
               />
-              <button
-                aria-label="Update release date"
-                disabled={!hasPendingReleaseDate || !canUpdateReleaseDate}
-                onClick={applyReleaseDateUpdate}
-                type="button"
-              >
-                <Save size={16} aria-hidden />
-              </button>
             </div>
-            <strong className="release-date-summary">
-              <span>{formatDaysToRelease(daysToRelease)}</span>
+          ) : null}
+          {isGeneralCampaign ? (
+            <strong className="general-campaign-date-summary">
+              {campaignStartDateDisplay ? <span>{campaignStartDateDisplay}</span> : null}
               {releaseDateDisplay ? <span>{releaseDateDisplay}</span> : null}
             </strong>
-          </label>
+          ) : (
+            <strong className="marketing-release-summary">
+              {releaseDateDisplay ? <span>{releaseDateDisplay}</span> : null}
+              <span>
+                {daysToRelease === null || daysToRelease === 0 ? (
+                  formatDaysToRelease(daysToRelease)
+                ) : (
+                  <>
+                    {Math.abs(daysToRelease)} days
+                    <br />
+                    {daysToRelease > 0 ? "before release" : "after release"}
+                  </>
+                )}
+              </span>
+            </strong>
+          )}
           <button
             aria-expanded={isCampaignOpen}
             aria-label={isCampaignOpen ? "Hide campaign details" : "Show campaign details"}
@@ -9602,37 +10676,180 @@ function MarketingCampaignBoard({
           </button>
         </div>
 
-        <CampaignProgressStrip
-          completion={calculateCampaignCompletion(campaignDays)}
-          days={campaignDays}
-        />
+        {campaign.showProgressBar !== false ? (
+          <div className="marketing-desktop-progress">
+            <CampaignProgressStrip
+              completion={calculateCampaignCompletion(campaignDays)}
+              days={campaignDays}
+            />
+          </div>
+        ) : null}
 
         <div
           className="campaign-details"
           hidden={!isCampaignOpen}
           id={`${campaign.id}-details`}
         >
-          <div className="event-budget-section marketing-budget-section">
-            <strong>Budget</strong>
-            <div className="event-budget-lines">
-              {campaignBudgetLines.map((line) => (
-                <EventBudgetLineRow
-                  key={line.id}
-                  line={line}
-                  onDelete={deleteCampaignBudgetLine}
-                  onUpdate={updateCampaignBudgetLine}
-                />
-              ))}
-            </div>
-            <button
-              className="add-campaign-task-button production-budget-add-button"
-              onClick={addCampaignBudgetLine}
-              type="button"
+          {isGeneralCampaign ? (
+            <details
+              className="campaign-danger-zone general-campaign-options"
+              onToggle={(event) => {
+                if (!event.currentTarget.open) {
+                  resetGeneralCampaignOptions();
+                }
+              }}
             >
-              <Plus size={16} aria-hidden />
-              Add new budget line
-            </button>
-          </div>
+              <summary>Campaign options</summary>
+              <section className="general-campaign-options-content">
+                <div className="general-campaign-settings-fields">
+                  <input
+                    aria-label="General campaign name"
+                    disabled={!isGeneralSettingsEditing}
+                    onChange={(event) => setGeneralTitleInput(event.target.value)}
+                    value={generalTitleInput}
+                  />
+                  <input
+                    aria-label="General campaign album art URL"
+                    disabled={!isGeneralSettingsEditing}
+                    inputMode="url"
+                    onChange={(event) => setGeneralAlbumArtUrlInput(event.target.value)}
+                    placeholder="Album art image URL"
+                    value={generalAlbumArtUrlInput}
+                  />
+                  <input
+                    aria-label="General campaign start date"
+                    disabled={!isGeneralSettingsEditing}
+                    inputMode="numeric"
+                    onChange={(event) => setGeneralStartDateInput(event.target.value)}
+                    placeholder="dd/mm/yyyy"
+                    value={generalStartDateInput}
+                  />
+                  <input
+                    aria-label="General campaign end date"
+                    disabled={!isGeneralSettingsEditing}
+                    inputMode="numeric"
+                    onChange={(event) => setReleaseDateInput(event.target.value)}
+                    placeholder="dd/mm/yyyy"
+                    value={releaseDateInput}
+                  />
+                  <button
+                    aria-label={
+                      isGeneralSettingsEditing
+                        ? "Save general campaign settings"
+                        : "Edit general campaign settings"
+                    }
+                    disabled={isGeneralSettingsEditing && !canSaveGeneralSettings}
+                    onClick={
+                      isGeneralSettingsEditing
+                        ? applyGeneralSettingsUpdate
+                        : () => setIsGeneralSettingsEditing(true)
+                    }
+                    type="button"
+                  >
+                    {isGeneralSettingsEditing ? (
+                      <Save size={16} aria-hidden />
+                    ) : (
+                      <Pencil size={16} aria-hidden />
+                    )}
+                  </button>
+                </div>
+                {isGeneralSettingsEditing ? (
+                  <span className="release-date-change-warning">
+                    Changing the date range will update the scheduled marketing days.
+                  </span>
+                ) : null}
+                <label className="general-campaign-progress-option">
+                  <input
+                    checked={campaign.showProgressBar !== false}
+                    onChange={(event) =>
+                      onProgressVisibilityChange(campaign.id, event.target.checked)
+                    }
+                    type="checkbox"
+                  />
+                  Show progress bar
+                </label>
+                {campaignBudgetSection}
+                <div className="campaign-delete-controls">
+                  <label>
+                    <input
+                      checked={isDeleteConfirmed}
+                      onChange={(event) =>
+                        setIsDeleteConfirmed(event.target.checked)
+                      }
+                      type="checkbox"
+                    />
+                    Enable delete for this campaign
+                  </label>
+                  <button
+                    className="delete-campaign-button"
+                    disabled={!isDeleteConfirmed}
+                    onClick={() => onDelete(campaign.id)}
+                    type="button"
+                  >
+                    <Trash2 size={15} aria-hidden />
+                    Delete campaign
+                  </button>
+                </div>
+              </section>
+            </details>
+          ) : null}
+          {!isGeneralCampaign ? (
+            <details className="campaign-danger-zone">
+              <summary>Campaign options</summary>
+              <div>
+                <label className="release-date-field marketing-release-date-editor">
+                  <span>{dateEditorLabel}</span>
+                  <div className="release-date-input-row">
+                    <input
+                      aria-label="Release date in dd/mm/yyyy format"
+                      disabled={!isReleaseDateEditing}
+                      inputMode="numeric"
+                      onChange={(event) => updateReleaseDateInput(event.target.value)}
+                      placeholder="dd/mm/yyyy"
+                      value={releaseDateInput}
+                    />
+                    <button
+                      aria-label={isReleaseDateEditing ? "Save release date" : "Edit release date"}
+                      disabled={isReleaseDateEditing && !canUpdateReleaseDate}
+                      onClick={isReleaseDateEditing ? applyReleaseDateUpdate : beginReleaseDateEdit}
+                      type="button"
+                    >
+                      {isReleaseDateEditing ? (
+                        <Save size={16} aria-hidden />
+                      ) : (
+                        <Pencil size={16} aria-hidden />
+                      )}
+                    </button>
+                  </div>
+                  {isReleaseDateEditing ? (
+                    <span className="release-date-change-warning">
+                      {dateChangeWarning}
+                    </span>
+                  ) : null}
+                </label>
+                <label>
+                  <input
+                    checked={isDeleteConfirmed}
+                    onChange={(event) =>
+                      setIsDeleteConfirmed(event.target.checked)
+                    }
+                    type="checkbox"
+                  />
+                  Enable delete for this campaign
+                </label>
+                <button
+                  className="delete-campaign-button"
+                  disabled={!isDeleteConfirmed}
+                  onClick={() => onDelete(campaign.id)}
+                  type="button"
+                >
+                  <Trash2 size={15} aria-hidden />
+                  Delete campaign
+                </button>
+              </div>
+            </details>
+          ) : null}
+          {!isGeneralCampaign ? campaignBudgetSection : null}
           <div className="campaign-table-wrap">
             <table className="campaign-table">
               <thead>
@@ -9650,15 +10867,21 @@ function MarketingCampaignBoard({
                     <td>
                       <strong>{day.date}</strong>
                       <span>{formatReleaseOffset(day.releaseOffset)}</span>
-                      {!day.isDefaultDay ? (
+                      {isGeneralCampaign || !day.isDefaultDay ? (
                         <button
                           aria-label={`Delete campaign day ${day.dayNumber}`}
-                          className="delete-campaign-day-button"
-                          onClick={() => deleteCampaignDay(day.dayNumber)}
+                          className={`delete-campaign-day-button marketing-campaign-day-delete-button${
+                            armedCampaignDayNumber === day.dayNumber
+                              ? " is-armed"
+                              : ""
+                          }`}
+                          onClick={() => requestCampaignDayDelete(day.dayNumber)}
                           type="button"
                         >
                           <Trash2 size={14} aria-hidden />
-                          Delete day
+                          {armedCampaignDayNumber === day.dayNumber
+                            ? "Delete?"
+                            : "Delete day"}
                         </button>
                       ) : null}
                     </td>
@@ -9675,40 +10898,18 @@ function MarketingCampaignBoard({
               </tbody>
             </table>
           </div>
-          <div className="campaign-day-actions">
-            <button
-              className="add-campaign-day-button"
-              onClick={addCampaignDay}
-              type="button"
-            >
-              <Plus size={16} aria-hidden />
-              Add campaign day
-            </button>
-          </div>
-          <details className="campaign-danger-zone">
-            <summary>Campaign options</summary>
-            <div>
-              <label>
-                <input
-                  checked={isDeleteConfirmed}
-                  onChange={(event) =>
-                    setIsDeleteConfirmed(event.target.checked)
-                  }
-                  type="checkbox"
-                />
-                Enable delete for this campaign
-              </label>
+          {!isGeneralCampaign ? (
+            <div className="campaign-day-actions">
               <button
-                className="delete-campaign-button"
-                disabled={!isDeleteConfirmed}
-                onClick={() => onDelete(campaign.id)}
+                className="add-campaign-day-button"
+                onClick={addCampaignDay}
                 type="button"
               >
-                <Trash2 size={15} aria-hidden />
-                Delete campaign
+                <Plus size={16} aria-hidden />
+                Add campaign day
               </button>
             </div>
-          </details>
+          ) : null}
         </div>
       </section>
   );
@@ -9860,6 +11061,7 @@ function MarketingCampaignTaskCell({
             key={task.id}
             onChange={onExtraTaskChange}
             onDelete={onExtraTaskDelete}
+            requiresDeleteConfirmation
             task={task}
           />
         ))}
@@ -9883,6 +11085,7 @@ function ExtraCampaignTaskRow({
   elementId,
   onChange,
   onDelete,
+  requiresDeleteConfirmation = false,
   task
 }: {
   budgetIdPrefix?: string;
@@ -9894,8 +11097,41 @@ function ExtraCampaignTaskRow({
     updates: Partial<Pick<ExtraCampaignTask, "budgetLines" | "status" | "title">>
   ) => void;
   onDelete: (dayNumber: number, taskId: string) => void;
+  requiresDeleteConfirmation?: boolean;
   task: ExtraCampaignTask;
 }) {
+  const [isDeleteArmed, setIsDeleteArmed] = useState(false);
+  const deleteButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!isDeleteArmed) {
+      return;
+    }
+
+    function cancelExtraTaskDelete(event: PointerEvent) {
+      const target = event.target;
+
+      if (target instanceof Node && deleteButtonRef.current?.contains(target)) {
+        return;
+      }
+
+      setIsDeleteArmed(false);
+    }
+
+    window.addEventListener("pointerdown", cancelExtraTaskDelete);
+    return () => window.removeEventListener("pointerdown", cancelExtraTaskDelete);
+  }, [isDeleteArmed]);
+
+  function handleDelete() {
+    if (requiresDeleteConfirmation && !isDeleteArmed) {
+      setIsDeleteArmed(true);
+      return;
+    }
+
+    setIsDeleteArmed(false);
+    onDelete(dayNumber, task.id);
+  }
+
   return (
     <div className="extra-campaign-task" id={elementId}>
       <label className="extra-campaign-task-name">
@@ -9927,9 +11163,14 @@ function ExtraCampaignTaskRow({
         ))}
       </select>
       <button
-        aria-label={`Delete ${task.title}`}
-        className="delete-campaign-task-button"
-        onClick={() => onDelete(dayNumber, task.id)}
+        aria-label={
+          isDeleteArmed ? `Confirm delete ${task.title}` : `Delete ${task.title}`
+        }
+        className={`delete-campaign-task-button${
+          requiresDeleteConfirmation ? " extra-task-delete-button" : ""
+        }${isDeleteArmed ? " is-armed" : ""}`}
+        onClick={handleDelete}
+        ref={deleteButtonRef}
         type="button"
       >
         <Trash2 size={16} aria-hidden />
@@ -10116,7 +11357,8 @@ function DashboardView({
     campaignPreview,
     productionPreviewSongs,
     otherTasks,
-    appleMusicUpdateTask ? [appleMusicUpdateTask] : []
+    appleMusicUpdateTask ? [appleMusicUpdateTask] : [],
+    campaigns
   );
   const phaseOne = roadmapPhasesData[0] ?? roadmapPhases[0];
 
@@ -10235,7 +11477,10 @@ function DashboardView({
 
           return updateDate ? (
             <span className={getPlatformUpdateMetaClass(platform.slug, updateDate)}>
-              Last update: {formatDateWithDots(updateDate)}
+              Last update: {formatPlatformUpdateTimestamp(
+                updateDate,
+                getPlatformLastSnapshotImportedAt(platformMetricRows, platform.slug)
+              )}
             </span>
           ) : null;
         }}
@@ -11358,15 +12603,24 @@ function PlatformsView({
         renderCardHeaderMeta={(platform) =>
           platform.slug === "instagram" && instagramLastUpdate ? (
             <span className="platform-card-header-meta">
-              Last update: {formatDateWithDots(instagramLastUpdate)}
+              Last update: {formatPlatformUpdateTimestamp(
+                instagramLastUpdate,
+                getPlatformLastSnapshotImportedAt(platformMetricRows, "instagram")
+              )}
             </span>
           ) : platform.slug === "youtube" && youtubeLastUpdate ? (
             <span className="platform-card-header-meta">
-              Last update: {formatDateWithDots(youtubeLastUpdate)}
+              Last update: {formatPlatformUpdateTimestamp(
+                youtubeLastUpdate,
+                getPlatformLastSnapshotImportedAt(platformMetricRows, "youtube")
+              )}
             </span>
           ) : platform.slug === "youtube-music" && youtubeMusicLastUpdate ? (
             <span className="platform-card-header-meta">
-              Last update: {formatDateWithDots(youtubeMusicLastUpdate)}
+              Last update: {formatPlatformUpdateTimestamp(
+                youtubeMusicLastUpdate,
+                getPlatformLastSnapshotImportedAt(platformMetricRows, "youtube-music")
+              )}
             </span>
           ) : platform.slug === "apple-music" ? (
             <div className="platform-card-header-meta apple-import-actions">
@@ -11377,7 +12631,13 @@ function PlatformsView({
                     appleMusicLastUpdate
                   )}
                 >
-                  Last update: {formatDateWithDots(appleMusicLastUpdate)}
+                  Last update: {formatPlatformUpdateTimestamp(
+                    appleMusicLastUpdate,
+                    getPlatformLastSnapshotImportedAt(
+                      platformMetricRows,
+                      "apple-music"
+                    )
+                  )}
                 </span>
               ) : null}
               <AppleMusicCsvImportControl
@@ -11610,6 +12870,23 @@ function getPlatformLastSnapshotDate(rows: MetricRow[], platformSlug: string) {
     .filter((row) => getSingle(row.platforms)?.slug === platformSlug)
     .map((row) => row.snapshot_date)
     .sort((firstDate, secondDate) => secondDate.localeCompare(firstDate))[0];
+}
+
+function getPlatformLastSnapshotImportedAt(
+  rows: MetricRow[],
+  platformSlug: string
+) {
+  return [...rows]
+    .filter((row) => getSingle(row.platforms)?.slug === platformSlug)
+    .sort((firstRow, secondRow) => {
+      const snapshotDateDifference = secondRow.snapshot_date.localeCompare(
+        firstRow.snapshot_date
+      );
+
+      return snapshotDateDifference !== 0
+        ? snapshotDateDifference
+        : Date.parse(secondRow.imported_at) - Date.parse(firstRow.imported_at);
+    })[0]?.imported_at;
 }
 
 function getAppleMusicLastUpdateDate(
@@ -12233,6 +13510,29 @@ function formatDateWithDots(date: string) {
   return `${day}.${month}.${year}`;
 }
 
+function formatPlatformUpdateTimestamp(date: string, importedAt?: string) {
+  const formattedDate = formatDateWithDots(date);
+
+  if (!importedAt) {
+    return formattedDate;
+  }
+
+  const timestamp = new Date(importedAt);
+
+  if (Number.isNaN(timestamp.getTime())) {
+    return formattedDate;
+  }
+
+  const formattedTime = timestamp.toLocaleTimeString("de-AT", {
+    hour: "2-digit",
+    hour12: false,
+    minute: "2-digit",
+    timeZone: "Europe/Vienna"
+  });
+
+  return `${formattedDate} ${formattedTime}`;
+}
+
 function compareMetricRows(first: MetricRow, second: MetricRow) {
   const snapshotDiff =
     Date.parse(second.snapshot_date) - Date.parse(first.snapshot_date);
@@ -12504,10 +13804,10 @@ function formatProductionDeadlineCountdown(days: number | null) {
   }
 
   if (days > 0) {
-    return `Production deadline in ${days} days`;
+    return `${days} days before Production deadline`;
   }
 
-  return `Production deadline ${Math.abs(days)} days ago`;
+  return `${Math.abs(days)} days after Production deadline`;
 }
 
 function shiftProductionStepDeadlines(
@@ -13033,25 +14333,46 @@ function RoadmapView({
 
 function RoadmapMonthStrip({ months }: { months: RoadmapMonth[] }) {
   const currentMonthKey = getViennaDateKey().slice(0, 7);
+  const phaseMonthGroups = months.reduce<Array<{
+    months: RoadmapMonth[];
+    phase: number;
+  }>>((groups, month) => {
+    const currentGroup = groups[groups.length - 1];
+
+    if (currentGroup?.phase === month.phase) {
+      currentGroup.months.push(month);
+      return groups;
+    }
+
+    groups.push({ months: [month], phase: month.phase });
+    return groups;
+  }, []);
 
   return (
     <div className="roadmap-month-strip">
-      {months.map((month) => {
-        const status = getRoadmapMonthStatus(month);
+      {phaseMonthGroups.map((group) => (
+        <div
+          className="roadmap-month-phase-row"
+          key={`roadmap-month-phase-${group.phase}`}
+        >
+          {group.months.map((month) => {
+            const status = getRoadmapMonthStatus(month);
 
-        return (
-          <div
-            aria-label={`${month.label}: ${month.released} of ${month.planned} planned releases`}
-            className={`roadmap-month-box roadmap-box-${status} roadmap-month-phase-${month.phase}${
-              month.id === currentMonthKey ? " roadmap-month-current" : ""
-            }`}
-            key={month.id}
-            title={`${month.label}: ${month.released}/${month.planned}`}
-          >
-            <span>{month.label}</span>
-          </div>
-        );
-      })}
+            return (
+              <div
+                aria-label={`${month.label}: ${month.released} of ${month.planned} planned releases`}
+                className={`roadmap-month-box roadmap-box-${status} roadmap-month-phase-${month.phase}${
+                  month.id === currentMonthKey ? " roadmap-month-current" : ""
+                }`}
+                key={month.id}
+                title={`${month.label}: ${month.released}/${month.planned}`}
+              >
+                <span>{month.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }
@@ -13202,8 +14523,9 @@ function getRoadmapMarketingCampaign(
   const songSlug = createStableId(song.title);
   return campaigns.find(
     (campaign) =>
-      (song.dbId && campaign.productionSongDbId === song.dbId) ||
-      createStableId(campaign.releaseTitle) === songSlug
+      (campaign.campaignKind ?? "song") === "song" &&
+      ((song.dbId && campaign.productionSongDbId === song.dbId) ||
+        createStableId(campaign.releaseTitle) === songSlug)
   ) ?? null;
 }
 

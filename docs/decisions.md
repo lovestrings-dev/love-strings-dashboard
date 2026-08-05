@@ -674,3 +674,44 @@ Decision:
 Reason:
 
 - The beta-by-beta story remains consistent: one meaningful functional module becomes real, accompanied by smaller improvements discovered through daily use.
+
+## 2026-08-05 - General Marketing Campaigns
+
+Decision:
+
+- Allow Marketing campaigns that are not linked to a Production song.
+- Give general campaigns their own title, start/end dates, artwork, optional progress strip, and removable individual days.
+- Keep song campaigns governed by Production song names and shared release dates.
+- Prioritize a song-campaign task when song and general campaign work compete for the single Marketing position in Focus Queue.
+
+Reason:
+
+- Yuliia also plans social content that promotes the band, an event, or an idea rather than one release.
+- Creating a fake Production song for this work would weaken Production as the song catalogue and make release planning less trustworthy.
+- The separate campaign kind preserves the strict release workflow while allowing the real Marketing process to be more flexible.
+
+## 2026-08-05 - Financial Source Ownership
+
+Decision:
+
+- Persist campaign budget lines in Supabase and edit generated Budget records at their Marketing, Production, or Events origin.
+- Keep source links behind the ledger pencil action to preserve the compact row layout.
+- Treat recurring records with no payment-plan end date as active until cancelled; render only occurrences inside the existing ledger forecast window.
+- Use the same positive/negative amount control pattern across modules, with defaults chosen by context.
+
+Reason:
+
+- Mobile and desktop must not maintain separate financial facts.
+- Editing derived ledger rows independently would create hidden disagreement with the source module and unreliable analytics.
+- An open-ended subscription is a normal recurring-payment state, not missing data.
+
+## 2026-08-05 - Beta 1.10 Release Boundary
+
+Decision:
+
+- Release the fully functional Roadmap, flexible general campaigns, shared campaign budgets, and the accumulated mobile/daily-work refinements as Beta 1.10.
+- Keep the current Vercel cron configuration as the only deployable scheduler file; the older local duplicate is excluded.
+
+Reason:
+
+- This release turns recent planning prototypes into connected workflows while preserving the project pattern of one major functional advance plus daily-use backlog fixes.

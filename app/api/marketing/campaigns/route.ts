@@ -12,15 +12,24 @@ export async function POST(request: NextRequest) {
   try {
     const payload = (await request.json()) as {
       albumArtUrl?: string;
+      campaignKind?: "general" | "song";
       releaseDate?: string;
       productionSongDbId?: string;
       slug?: string;
+      startDate?: string;
       title?: string;
     };
     const title = normalizeText(payload.title, 200);
     const slug = normalizeText(payload.slug, 240);
+    const campaignKind = payload.campaignKind === "general" ? "general" : "song";
 
-    if (!title || !slug || !isIsoDate(payload.releaseDate)) {
+    if (
+      !title ||
+      !slug ||
+      !isIsoDate(payload.releaseDate) ||
+      !isIsoDate(payload.startDate) ||
+      payload.startDate > payload.releaseDate
+    ) {
       return NextResponse.json({ error: "Campaign data is invalid." }, { status: 400 });
     }
 
@@ -29,26 +38,30 @@ export async function POST(request: NextRequest) {
       .from("marketing_campaigns")
       .insert({
         album_art_url: normalizeText(payload.albumArtUrl, 2000),
+        campaign_kind: campaignKind,
         release_date: payload.releaseDate,
-        production_song_id: isUuid(payload.productionSongDbId)
+        production_song_id: campaignKind === "song" && isUuid(payload.productionSongDbId)
           ? payload.productionSongDbId
           : null,
         slug,
         source: "app",
+        start_date: payload.startDate,
         status: "planned",
         title
       })
-      .select("id, slug, production_song_id")
+      .select("id, slug, campaign_kind, production_song_id")
       .single();
 
     if (error) throw error;
 
-    const { error: productionSyncError } = await supabase
-      .from("production_songs")
-      .update({ release_date: payload.releaseDate })
-      .eq("id", data.production_song_id ?? "00000000-0000-0000-0000-000000000000");
+    if (data.campaign_kind === "song" && data.production_song_id) {
+      const { error: productionSyncError } = await supabase
+        .from("production_songs")
+        .update({ release_date: payload.releaseDate })
+        .eq("id", data.production_song_id);
 
-    if (productionSyncError) throw productionSyncError;
+      if (productionSyncError) throw productionSyncError;
+    }
     return NextResponse.json({ campaign: data, status: "ok" });
   } catch (error) {
     return errorResponse(error, "Marketing campaign creation failed.");
@@ -63,22 +76,43 @@ export async function PATCH(request: NextRequest) {
   try {
     const payload = (await request.json()) as {
       campaignId?: string;
-      updates?: { albumArtUrl?: string; releaseDate?: string; title?: string };
+      updates?: {
+        albumArtUrl?: string;
+        releaseDate?: string;
+        showProgressBar?: boolean;
+        startDate?: string;
+        title?: string;
+      };
     };
 
     if (!isUuid(payload.campaignId) || !payload.updates) {
       return NextResponse.json({ error: "Campaign update is invalid." }, { status: 400 });
     }
 
-    const updates: Record<string, string> = {};
+    const updates: Record<string, boolean | string> = {};
     if (payload.updates.albumArtUrl !== undefined) {
       updates.album_art_url = normalizeText(payload.updates.albumArtUrl, 2000);
+    }
+    if (payload.updates.showProgressBar !== undefined) {
+      if (typeof payload.updates.showProgressBar !== "boolean") {
+        return NextResponse.json(
+          { error: "Progress visibility is invalid." },
+          { status: 400 }
+        );
+      }
+      updates.show_progress_bar = payload.updates.showProgressBar;
     }
     if (payload.updates.releaseDate !== undefined) {
       if (!isIsoDate(payload.updates.releaseDate)) {
         return NextResponse.json({ error: "Release date is invalid." }, { status: 400 });
       }
       updates.release_date = payload.updates.releaseDate;
+    }
+    if (payload.updates.startDate !== undefined) {
+      if (!isIsoDate(payload.updates.startDate)) {
+        return NextResponse.json({ error: "Campaign start date is invalid." }, { status: 400 });
+      }
+      updates.start_date = payload.updates.startDate;
     }
     if (payload.updates.title !== undefined) {
       const title = normalizeText(payload.updates.title, 200);
@@ -97,16 +131,20 @@ export async function PATCH(request: NextRequest) {
       .from("marketing_campaigns")
       .update(updates)
       .eq("id", payload.campaignId)
-      .select("slug, production_song_id")
+      .select("slug, campaign_kind, production_song_id")
       .single();
 
     if (error) throw error;
 
-    if (updates.release_date) {
+    if (
+      updates.release_date &&
+      campaign.campaign_kind === "song" &&
+      campaign.production_song_id
+    ) {
       const { error: productionSyncError } = await supabase
         .from("production_songs")
         .update({ release_date: updates.release_date })
-        .eq("id", campaign.production_song_id ?? "00000000-0000-0000-0000-000000000000");
+        .eq("id", campaign.production_song_id);
 
       if (productionSyncError) throw productionSyncError;
     }
