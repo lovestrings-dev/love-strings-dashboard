@@ -26,6 +26,7 @@ import {
   Video
 } from "lucide-react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
+import { AccountControl } from "./account-control";
 
 type Section = (typeof sections)[number];
 type MarketingStatus = "not-started" | "in-progress" | "done" | "irrelevant";
@@ -576,7 +577,7 @@ const defaultQrCodeLinks: QrCodeLink[] = [
   }))
 ];
 
-const appVersionLabel = "Beta 1.10";
+const appVersionLabel = "Beta 1.11";
 
 const sections = [
   "Dashboard",
@@ -845,13 +846,19 @@ const defaultProductionStepTemplates = [
   { label: "Guitars", offset: -30 },
   { label: "Bass", offset: -27 },
   { label: "Vocals", offset: -23 },
-  { label: "Edit", offset: -18 },
   { label: "Mix", offset: -13 },
   { label: "Master", offset: -8 },
   { label: "License", offset: -5 },
   { label: "Cover Art", offset: -3 },
   { label: "Distributor", offset: 0 }
 ];
+const deletableProductionStepLabels = new Set([
+  "drums",
+  "guitars",
+  "bass",
+  "vocals",
+  "license"
+]);
 const productionWorkbookSeeds: ProductionWorkbookSeed[] = [
   {
     bpm: 160,
@@ -1900,7 +1907,9 @@ function normalizeProductionSongsWithBudgetDefaults(
       releaseDate,
       roadmapPhaseId: song.roadmapPhaseId ?? null,
       steps: ensureProductionReleaseStep(
-        song.steps.map((step) => ({
+        song.steps
+          .filter((step) => step.label.trim().toLowerCase() !== "edit")
+          .map((step) => ({
           ...step,
           budgetLines:
             step.budgetLines !== undefined
@@ -1910,7 +1919,7 @@ function normalizeProductionSongsWithBudgetDefaults(
             ...task,
             budgetLines: task.budgetLines ?? []
           }))
-        })),
+          })),
         releaseDate
       )
     };
@@ -6922,6 +6931,7 @@ export default function Home() {
             </button>
           ))}
         </nav>
+        <AccountControl />
       </aside>
 
       <section className="workspace">
@@ -8971,8 +8981,18 @@ function ProductionSongBoard({
   }
 
   function deleteProductionStep(stepId: string) {
+    const targetStep = song.steps.find((step) => step.id === stepId);
+
+    if (
+      !targetStep ||
+      (targetStep.isDefaultStep &&
+        !deletableProductionStepLabels.has(targetStep.label.trim().toLowerCase()))
+    ) {
+      return;
+    }
+
     updateSteps((currentSteps) =>
-      currentSteps.filter((step) => step.isDefaultStep || step.id !== stepId)
+      currentSteps.filter((step) => step.id !== stepId)
     );
   }
 
@@ -9243,12 +9263,6 @@ function ProductionSongBoard({
         </details>
         <div className="campaign-table-wrap">
           <table className="campaign-table production-table">
-            <thead>
-              <tr>
-                <th scope="col">Deadline</th>
-                <th scope="col">Production tasks</th>
-              </tr>
-            </thead>
             <tbody>
               {song.steps.map((step) => (
                 <ProductionStepRow
@@ -9344,78 +9358,109 @@ function ProductionStepRow({
   step: ProductionStep;
 }) {
   const isReleaseStep = step.id === "release";
+  const canDeleteStep =
+    !step.isDefaultStep ||
+    deletableProductionStepLabels.has(step.label.trim().toLowerCase());
+  const [isDeleteArmed, setIsDeleteArmed] = useState(false);
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!isDeleteArmed) {
+      return;
+    }
+
+    function cancelDelete(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        deleteButtonRef.current?.contains(event.target)
+      ) {
+        return;
+      }
+
+      setIsDeleteArmed(false);
+    }
+
+    window.addEventListener("pointerdown", cancelDelete);
+    return () => window.removeEventListener("pointerdown", cancelDelete);
+  }, [isDeleteArmed]);
+
+  function handleDeleteStep() {
+    if (!isDeleteArmed) {
+      setIsDeleteArmed(true);
+      return;
+    }
+
+    onDeleteStep(step.id);
+  }
 
   return (
     <tr id={getProductionStepElementId(songId, step.id)}>
-      <td>
-        <label className="production-step-date-field">
-          <span>{formatCampaignDateKey(formatInputDateForDatabase(step.deadline) ?? "")}</span>
-          <input
-            aria-label={`${step.label} deadline`}
-            disabled={isReleaseStep}
-            inputMode="numeric"
-            onChange={(event) =>
-              onStepChange(step.id, { deadline: event.target.value })
-            }
-            placeholder="dd/mm/yyyy"
-            value={step.deadline}
-          />
-        </label>
-        {!step.isDefaultStep ? (
-          <button
-            aria-label={`Delete ${step.label}`}
-            className="delete-campaign-day-button"
-            onClick={() => onDeleteStep(step.id)}
-            type="button"
-          >
-            <Trash2 size={14} aria-hidden />
-            Delete step
-          </button>
-        ) : null}
-      </td>
-      <td>
+      <td className="production-step-content-cell" colSpan={2}>
         <div className="campaign-cell">
-          <div className="production-step-task-row">
-            <label className="clip-name-field">
-              <span>Production step</span>
-              <input
-                aria-label={`${step.label} production step name`}
-                disabled={step.isDefaultStep}
+          <div className="production-step-details-section">
+            <div className="production-step-task-row">
+              <label className="clip-name-field">
+                <span>Production step</span>
+                <input
+                  aria-label={`${step.label} production step name`}
+                  disabled={step.isDefaultStep}
+                  onChange={(event) =>
+                    onStepChange(step.id, { label: event.target.value })
+                  }
+                  value={step.label}
+                />
+              </label>
+              <select
+                aria-label={`${step.label} status`}
+                disabled={isReleaseStep}
                 onChange={(event) =>
-                  onStepChange(step.id, { label: event.target.value })
+                  onStepChange(step.id, {
+                    status: event.target.value as MarketingStatus
+                  })
                 }
-                value={step.label}
+                value={step.status}
+              >
+                {marketingStatusOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {statusLabels[option]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <label className="clip-name-field production-step-notes-field">
+              <strong>Notes</strong>
+              <input
+                aria-label={`${step.label} notes`}
+                onChange={(event) =>
+                  onStepChange(step.id, { notes: event.target.value })
+                }
+                value={step.notes}
               />
             </label>
-            <select
-              aria-label={`${step.label} status`}
-              disabled={isReleaseStep}
-              onChange={(event) =>
-                onStepChange(step.id, {
-                  status: event.target.value as MarketingStatus
-                })
-              }
-              value={step.status}
-            >
-              {marketingStatusOptions.map((option) => (
-                <option key={option} value={option}>
-                  {statusLabels[option]}
-                </option>
-              ))}
-            </select>
           </div>
-          <label className="clip-name-field">
-            <span>Notes</span>
-            <input
-              aria-label={`${step.label} notes`}
-              onChange={(event) =>
-                onStepChange(step.id, { notes: event.target.value })
-              }
-              value={step.notes}
-            />
-          </label>
+          <div className="production-step-deadline-section">
+            <strong>Deadline</strong>
+            <label className="production-step-date-field">
+              <span>
+                {formatCampaignDateKey(
+                  formatInputDateForDatabase(step.deadline) ?? ""
+                )}
+              </span>
+              <input
+                aria-label={`${step.label} deadline`}
+                disabled={isReleaseStep}
+                inputMode="numeric"
+                onChange={(event) =>
+                  onStepChange(step.id, { deadline: event.target.value })
+                }
+                placeholder="dd/mm/yyyy"
+                value={step.deadline}
+              />
+            </label>
+          </div>
           <ProductionBudgetLineEditor
             budgetLines={step.budgetLines ?? []}
+            compact
             idPrefix={`${step.id}-budget`}
             onChange={(budgetLines) => onStepChange(step.id, { budgetLines })}
           />
@@ -9432,15 +9477,39 @@ function ProductionStepRow({
               task={task}
             />
           ))}
-          <button
-            aria-label={`Add new subtask for ${step.label}`}
-            className="add-campaign-task-button"
-            onClick={() => onAddTask(step.id)}
-            type="button"
+          <div
+            className={`production-step-actions${
+              canDeleteStep ? " has-delete" : ""
+            }`}
           >
-            <Plus size={16} aria-hidden />
-            Add new Subtask
-          </button>
+            {canDeleteStep ? (
+              <button
+                aria-label={
+                  isDeleteArmed
+                    ? `Confirm delete ${step.label}`
+                    : `Delete ${step.label}`
+                }
+                className={`marketing-budget-delete-button production-step-delete-button${
+                  isDeleteArmed ? " is-armed" : ""
+                }`}
+                onClick={handleDeleteStep}
+                ref={deleteButtonRef}
+                type="button"
+              >
+                <Trash2 size={16} aria-hidden />
+                {isDeleteArmed ? "Delete?" : "Delete step"}
+              </button>
+            ) : null}
+            <button
+              aria-label={`Add subtask for ${step.label}`}
+              className="add-campaign-task-button"
+              onClick={() => onAddTask(step.id)}
+              type="button"
+            >
+              <Plus size={16} aria-hidden />
+              Add Subtask
+            </button>
+          </div>
         </div>
       </td>
     </tr>
@@ -9449,13 +9518,17 @@ function ProductionStepRow({
 
 function ProductionBudgetLineEditor({
   budgetLines,
+  compact = false,
   idPrefix,
   onChange
 }: {
   budgetLines: ProductionBudgetLine[];
+  compact?: boolean;
   idPrefix: string;
   onChange: (budgetLines: ProductionBudgetLine[]) => void;
 }) {
+  const [isDeleteArmed, setIsDeleteArmed] = useState(false);
+  const deleteButtonRef = useRef<HTMLButtonElement | null>(null);
   const visibleBudgetLines =
     budgetLines.length > 0
       ? budgetLines
@@ -9468,6 +9541,25 @@ function ProductionBudgetLineEditor({
           }
         ] satisfies ProductionBudgetLine[]);
 
+  useEffect(() => {
+    if (!isDeleteArmed) {
+      return;
+    }
+
+    function cancelBudgetDelete(event: PointerEvent) {
+      const target = event.target;
+
+      if (target instanceof Node && deleteButtonRef.current?.contains(target)) {
+        return;
+      }
+
+      setIsDeleteArmed(false);
+    }
+
+    window.addEventListener("pointerdown", cancelBudgetDelete);
+    return () => window.removeEventListener("pointerdown", cancelBudgetDelete);
+  }, [isDeleteArmed]);
+
   function updateBudgetLine(
     lineId: string,
     updates: Partial<ProductionBudgetLine>
@@ -9479,6 +9571,7 @@ function ProductionBudgetLineEditor({
   }
 
   function addBudgetLine() {
+    setIsDeleteArmed(false);
     onChange([
       ...normalizeProductionBudgetLines(visibleBudgetLines),
       {
@@ -9492,6 +9585,71 @@ function ProductionBudgetLineEditor({
 
   function deleteBudgetLine(lineId: string) {
     onChange(budgetLines.filter((line) => line.id !== lineId));
+  }
+
+  function deleteLastBudgetLine() {
+    if (budgetLines.length <= 1) {
+      return;
+    }
+
+    if (!isDeleteArmed) {
+      setIsDeleteArmed(true);
+      return;
+    }
+
+    deleteBudgetLine(budgetLines[budgetLines.length - 1].id);
+    setIsDeleteArmed(false);
+  }
+
+  if (compact) {
+    return (
+      <details className="event-budget-section marketing-budget-section production-step-budget-section">
+        <summary>Budget</summary>
+        <div className="production-step-budget-content">
+          <div className="event-budget-lines">
+            {visibleBudgetLines.map((line) => (
+              <EventBudgetLineRow
+                compactLabels
+                defaultSign="negative"
+                key={line.id}
+                line={line}
+                onDelete={deleteBudgetLine}
+                onUpdate={updateBudgetLine}
+                showActions={false}
+                showSignToggle
+              />
+            ))}
+          </div>
+          <div
+            className={`marketing-budget-toolbar${
+              budgetLines.length > 1 ? " has-delete" : ""
+            }`}
+          >
+            {budgetLines.length > 1 ? (
+              <button
+                className={`marketing-budget-delete-button${
+                  isDeleteArmed ? " is-armed" : ""
+                }`}
+                onClick={deleteLastBudgetLine}
+                ref={deleteButtonRef}
+                type="button"
+              >
+                <Trash2 size={16} aria-hidden />
+                {isDeleteArmed ? "Delete?" : "Delete line"}
+              </button>
+            ) : null}
+            <button
+              className="add-campaign-task-button production-budget-add-button"
+              onClick={addBudgetLine}
+              type="button"
+            >
+              <Plus size={16} aria-hidden />
+              Add new line
+            </button>
+          </div>
+        </div>
+      </details>
+    );
   }
 
   return (
@@ -10641,6 +10799,7 @@ function MarketingCampaignBoard({
               <CampaignProgressStrip
                 completion={calculateCampaignCompletion(campaignDays)}
                 days={campaignDays}
+                showReleaseDay={!isGeneralCampaign}
               />
             </div>
           ) : null}
@@ -10681,6 +10840,7 @@ function MarketingCampaignBoard({
             <CampaignProgressStrip
               completion={calculateCampaignCompletion(campaignDays)}
               days={campaignDays}
+              showReleaseDay={!isGeneralCampaign}
             />
           </div>
         ) : null}
@@ -10934,10 +11094,12 @@ function HeaderTaskList({
 
 function CampaignProgressStrip({
   completion,
-  days
+  days,
+  showReleaseDay = true
 }: {
   completion: number;
   days: CampaignDay[];
+  showReleaseDay?: boolean;
 }) {
   const activeDayNumber = getActiveCampaignDayNumber(days);
 
@@ -10947,18 +11109,24 @@ function CampaignProgressStrip({
       <div className="campaign-progress-boxes">
         {days.map((day) => {
           const status = getCampaignDayStatus(day);
+          const isActiveDay = activeDayNumber === day.dayNumber;
+          const isReleaseDay = showReleaseDay && day.releaseOffset === 0;
+          const dayLabel = `Day ${day.dayNumber}: ${
+            campaignDayStatusLabels[status]
+          }${isReleaseDay ? ", release day" : ""}`;
           return (
             <span
-              aria-label={`Day ${day.dayNumber}: ${campaignDayStatusLabels[status]}`}
+              aria-label={dayLabel}
               className={[
                 "campaign-progress-box",
                 `campaign-progress-box-${status}`,
-                activeDayNumber === day.dayNumber ? "campaign-progress-box-active" : ""
+                isReleaseDay ? "campaign-progress-box-release" : "",
+                isActiveDay ? "campaign-progress-box-active" : ""
               ]
                 .filter(Boolean)
                 .join(" ")}
               key={day.dayNumber}
-              title={`Day ${day.dayNumber}: ${campaignDayStatusLabels[status]}`}
+              title={dayLabel}
             />
           );
         })}
@@ -11178,6 +11346,7 @@ function ExtraCampaignTaskRow({
       {budgetIdPrefix ? (
         <ProductionBudgetLineEditor
           budgetLines={task.budgetLines ?? []}
+          compact={dayNumber === 0}
           idPrefix={budgetIdPrefix}
           onChange={(budgetLines) =>
             onChange(dayNumber, task.id, { budgetLines })
@@ -11477,7 +11646,7 @@ function DashboardView({
 
           return updateDate ? (
             <span className={getPlatformUpdateMetaClass(platform.slug, updateDate)}>
-              Last update: {formatPlatformUpdateTimestamp(
+              {formatDashboardPlatformUpdateTimestamp(
                 updateDate,
                 getPlatformLastSnapshotImportedAt(platformMetricRows, platform.slug)
               )}
@@ -11634,7 +11803,11 @@ function DashboardCampaignCard({
       </div>
 
       {showTasks ? (
-        <CampaignProgressStrip completion={campaignCompletion} days={days} />
+        <CampaignProgressStrip
+          completion={campaignCompletion}
+          days={days}
+          showReleaseDay={campaign.campaignKind !== "general"}
+        />
       ) : null}
       {showTasks ? <HeaderTaskList tasks={visibleTasks} /> : null}
       {showTasks && unfinishedTasks.length > 3 ? (
@@ -13533,6 +13706,40 @@ function formatPlatformUpdateTimestamp(date: string, importedAt?: string) {
   return `${formattedDate} ${formattedTime}`;
 }
 
+function formatDashboardPlatformUpdateTimestamp(date: string, importedAt?: string) {
+  const dateParts = date.includes("/")
+    ? date.split("/").reverse()
+    : date.split("-");
+  const [year, month, day] = dateParts.map(Number);
+  const timestampDate = new Date(Date.UTC(year, month - 1, day));
+  const formattedDate = Number.isNaN(timestampDate.getTime())
+    ? date
+    : timestampDate.toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        timeZone: "UTC"
+      });
+
+  if (!importedAt) {
+    return formattedDate;
+  }
+
+  const importedTimestamp = new Date(importedAt);
+
+  if (Number.isNaN(importedTimestamp.getTime())) {
+    return formattedDate;
+  }
+
+  const formattedTime = importedTimestamp.toLocaleTimeString("de-AT", {
+    hour: "2-digit",
+    hour12: false,
+    minute: "2-digit",
+    timeZone: "Europe/Vienna"
+  });
+
+  return `${formattedDate} : ${formattedTime}`;
+}
+
 function compareMetricRows(first: MetricRow, second: MetricRow) {
   const snapshotDiff =
     Date.parse(second.snapshot_date) - Date.parse(first.snapshot_date);
@@ -13927,6 +14134,35 @@ function isUnfinishedRelevantStatus(status: MarketingStatus) {
   return status !== "done" && isRelevantMarketingStatus(status);
 }
 
+function getMarketingStatusPoints(status: MarketingStatus) {
+  if (status === "done") {
+    return 2;
+  }
+
+  if (status === "in-progress") {
+    return 1;
+  }
+
+  return 0;
+}
+
+function getCampaignDayProgress(day: CampaignDay) {
+  const relevantStatuses = [
+    ...Object.values(day.statuses),
+    ...day.extraTasks.map((task) => task.status)
+  ].filter(isRelevantMarketingStatus);
+  const possiblePoints = Math.min(6, relevantStatuses.length * 2);
+  const achievedPoints = Math.min(
+    possiblePoints,
+    relevantStatuses.reduce(
+      (total, status) => total + getMarketingStatusPoints(status),
+      0
+    )
+  );
+
+  return { achievedPoints, possiblePoints };
+}
+
 function hasReleaseDayDefaultTasks(day: CampaignDay) {
   return (
     day.releaseOffset === 0 &&
@@ -13939,19 +14175,23 @@ function hasReleaseDayDefaultTasks(day: CampaignDay) {
 }
 
 function calculateCampaignCompletion(days: CampaignDay[]) {
-  const statuses = days
-    .flatMap((day) => [
-      ...Object.values(day.statuses),
-      ...day.extraTasks.map((task) => task.status)
-    ])
-    .filter(isRelevantMarketingStatus);
-  const doneCount = statuses.filter((status) => status === "done").length;
+  const campaignPoints = days.reduce(
+    (totals, day) => {
+      const dayProgress = getCampaignDayProgress(day);
 
-  if (statuses.length === 0) {
+      return {
+        achieved: totals.achieved + dayProgress.achievedPoints,
+        possible: totals.possible + dayProgress.possiblePoints
+      };
+    },
+    { achieved: 0, possible: 0 }
+  );
+
+  if (campaignPoints.possible === 0) {
     return 100;
   }
 
-  return Math.round((doneCount / statuses.length) * 100);
+  return Math.round((campaignPoints.achieved / campaignPoints.possible) * 100);
 }
 
 function getNextCampaignTasks(days: CampaignDay[]): CampaignTaskItem[] {
@@ -14019,21 +14259,17 @@ function getNextCampaignTasks(days: CampaignDay[]): CampaignTaskItem[] {
 }
 
 function getCampaignDayStatus(day: CampaignDay): CampaignDayProgressStatus {
-  const statuses = [
-    ...Object.values(day.statuses),
-    ...day.extraTasks.map((task) => task.status)
-  ].filter(isRelevantMarketingStatus);
-  const doneCount = statuses.filter((status) => status === "done").length;
+  const { achievedPoints, possiblePoints } = getCampaignDayProgress(day);
 
-  if (statuses.length === 0) {
+  if (possiblePoints === 0) {
     return "complete";
   }
 
-  if (doneCount === statuses.length) {
+  if (achievedPoints === possiblePoints) {
     return "complete";
   }
 
-  if (doneCount === 0) {
+  if (achievedPoints === 0) {
     return "empty";
   }
 

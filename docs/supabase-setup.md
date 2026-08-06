@@ -18,22 +18,20 @@ Recommended settings:
 3. Merge database migrations into `main` when they are ready to apply to production.
 4. In Supabase, check the database schema after deployment.
 5. Keep Row Level Security enabled on all project tables.
-6. Add user-facing RLS policies when Supabase Auth is enabled.
+6. Keep public signup disabled under Authentication settings.
 7. Store frontend environment values outside Git:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 
 ## Deployment Protection
 
-The app has temporary Basic Auth protection through `proxy.ts`.
+The app uses individual Supabase Auth email/password sessions through `proxy.ts`.
+Keep public signup disabled and create or invite collaborators through
+Authentication > Users. Each invited user is enrolled in the shared Love
+Strings workspace and receives an individual dashboard preference record.
 
-Set these server-side environment variables in Vercel before sharing the app:
-
-- `APP_BASIC_AUTH_USER`
-- `APP_BASIC_AUTH_PASSWORD`
-
-If either value is missing, the local/deployed app stays open. This is useful for local development, but production should have both values set before sharing the link.
-   - `SUPABASE_SERVICE_ROLE_KEY`
+The server also requires `SUPABASE_SERVICE_ROLE_KEY` for protected application
+writes and scheduled collectors. Never expose this value to browser code.
 
 ## First Data Model
 

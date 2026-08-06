@@ -848,3 +848,45 @@ Core story:
 Short hook:
 
 - "The feature worked on desktop. Then I tried to enter an expense on an iPhone."
+
+### Story Beat: Reward The Planning, Not Only The Posting
+
+Core story:
+
+- Yuliia started planning the future Shallow campaign and marked several tasks `In progress`, but the campaign bar did not move because the original percentage counted only completed tasks.
+- That felt wrong: planning a campaign is real work and the interface should acknowledge momentum when it happens, not weeks later when the post goes live.
+- We changed Marketing progress to a points model: Not started = 0, In progress = 1, Done = 2, and Irrelevant is excluded.
+- Every campaign day has a maximum of six points. If a standard platform task is irrelevant, the day's possible total falls; a relevant extra task can restore that capacity, but additional work cannot inflate one day beyond six.
+- Yuliia tested one more future task as `In progress`: the day immediately turned yellow and the campaign percentage increased.
+
+Short hooks:
+
+- "Why should an app wait until the post is published before it rewards the work?"
+- "She was already building the campaign, but the progress bar said zero."
+- "The yellow box means the plan has started moving."
+
+Human-build detail:
+
+- The correction came from watching the app during real campaign planning, not from a theoretical scoring exercise.
+- Focus Queue rewards daily execution; Marketing progress now separately reflects the campaign's own preparation and completion.
+- This strengthens the recurring `beat yourself` theme without confusing the two systems: one measures today's effort, the other measures campaign momentum.
+
+### Reel: One Band, Two Logins
+
+Core story:
+
+- Dmitrii and Yuliia had been sharing one password because the first priority was making the workflow useful.
+- As daily use grew, shared access became the wrong foundation: the band data should stay shared, but identity and interface preferences should belong to each person.
+- Beta 1.11 replaces the shared browser password with invitation-only individual accounts inside one Love Strings workspace.
+- Dmitrii tested the migration first so Yuliia would not receive an unexpected invitation while unavailable; only after the production build is ready will her account be invited.
+- The same structure prepares the app for personal Dashboard card visibility, ordering, and dark mode without duplicating songs, campaigns, events, or money records.
+
+Short hooks:
+
+- "We needed two accounts, but not two versions of the band."
+- "The data stays shared. The experience becomes personal."
+
+Human-build detail:
+
+- The first invitation exposed a real callback problem: the email reached the correct password screen, but the session token was not consumed.
+- We added support for Supabase's invitation link formats, sent one fresh setup email, and tested password creation, sign-out, sign-in, refresh, and shared-data access end to end.

@@ -1,10 +1,11 @@
+import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const appUser = process.env.APP_BASIC_AUTH_USER;
-const appPassword = process.env.APP_BASIC_AUTH_PASSWORD;
 const cronSecret = process.env.CRON_SECRET;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-export function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   if (
     isAuthorizedCronRefreshRequest(request) ||
     isAuthorizedVercelCronRefreshRequest(request)
@@ -12,30 +13,45 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  if (!appUser || !appPassword) {
+  if (isPublicPath(request.nextUrl.pathname)) {
     return NextResponse.next();
   }
 
-  const authorization = request.headers.get("authorization");
-
-  if (authorization) {
-    const [scheme, credentials] = authorization.split(" ");
-
-    if (scheme === "Basic" && credentials) {
-      const [username, password] = atob(credentials).split(":");
-
-      if (username === appUser && password === appPassword) {
-        return NextResponse.next();
-      }
-    }
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return new NextResponse("Authentication is not configured.", { status: 503 });
   }
 
-  return new NextResponse("Authentication required.", {
-    headers: {
-      "WWW-Authenticate": 'Basic realm="Love Strings Dashboard"'
-    },
-    status: 401
+  let response = NextResponse.next({ request });
+  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll: () => request.cookies.getAll(),
+      setAll: (cookies) => {
+        cookies.forEach(({ name, value }) => request.cookies.set(name, value));
+        response = NextResponse.next({ request });
+        cookies.forEach(({ name, options, value }) =>
+          response.cookies.set(name, value, options)
+        );
+      }
+    }
   });
+
+  const {
+    data: { user }
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = "/login";
+    loginUrl.search = "";
+    loginUrl.searchParams.set("next", `${request.nextUrl.pathname}${request.nextUrl.search}`);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  return response;
+}
+
+function isPublicPath(pathname: string) {
+  return pathname === "/login" || pathname === "/set-password";
 }
 
 function isAuthorizedCronRefreshRequest(request: NextRequest) {
@@ -60,5 +76,5 @@ function isAuthorizedVercelCronRefreshRequest(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"]
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|love-strings-logo.jpeg).*)"]
 };

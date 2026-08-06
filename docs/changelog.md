@@ -396,3 +396,25 @@ Release checks:
 - User-tested general campaign creation, options, progress visibility, day/task deletion, and Focus Queue priority.
 - User-tested recurring yearly generation without an end date and linked release-date behavior.
 - TypeScript, lint, migration status, and production build are checked during final release preparation.
+
+## Beta 1.11 (Release Candidate)
+
+Headline: **Individual accounts arrive without splitting the shared Love Strings workspace.**
+
+- Replaced the shared browser Basic Auth prompt with individual Supabase email/password accounts.
+- Added invitation password setup, sign-in, sign-out, protected app routes, and authenticated Supabase reads.
+- Added shared workspace membership plus personal dashboard-preference records as the foundation for future per-user card visibility, ordering, and dark mode.
+- Kept all operational Marketing, Production, Events, Budget, Roadmap, Focus, and platform data shared between invited members.
+- Changed Marketing campaign progress to reward `In progress` planning while excluding irrelevant work from the possible score.
+- Refined Production steps with compact sections, collapsible budgets, optional instrument/license steps, and safer two-stage deletion.
+
+Database changes:
+
+- `202608060001_remove_edit_production_step.sql`
+- `202608060002_add_multi_user_auth.sql`
+
+Release checks:
+
+- Dmitrii completed invitation onboarding, password setup, sign-out, sign-in, refresh, and shared-data access locally.
+- Yuliia remains uninvited until the authenticated production build is deployed.
+- TypeScript, lint, and production build are checked during final release preparation.

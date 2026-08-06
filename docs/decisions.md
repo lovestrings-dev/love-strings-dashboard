@@ -715,3 +715,30 @@ Decision:
 Reason:
 
 - This release turns recent planning prototypes into connected workflows while preserving the project pattern of one major functional advance plus daily-use backlog fixes.
+
+## 2026-08-06 - Individual Accounts, Shared Workspace
+
+Decision:
+
+- Replace shared Basic Auth credentials with invitation-only Supabase Auth accounts.
+- Enrol every invited user into one shared Love Strings workspace while keeping personal dashboard preferences in user-scoped records.
+- Require authenticated workspace membership for direct browser reads and keep public self-registration disabled.
+- Deploy the authenticated app before inviting Yuliia; onboard Dmitrii locally first to validate the complete flow.
+
+Reason:
+
+- Dmitrii and Yuliia need separate credentials and future personal Dashboard layouts without creating separate copies of operational band data.
+- Invitation-only access keeps the internal app private while allowing membership to grow deliberately.
+- Personal preferences and shared project records need distinct ownership boundaries from the beginning.
+
+## 2026-08-06 - Beta 1.11 Release Boundary
+
+Decision:
+
+- Make multi-user authentication the Beta 1.11 headline.
+- Include the verified Marketing progress scoring and recent Production-step usability refinements in the same release.
+
+Reason:
+
+- The database access policy has already moved to authenticated workspace members, so the matching application build should be deployed promptly.
+- This preserves the established beta rhythm: one functional foundation plus daily-use refinements.
