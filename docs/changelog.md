@@ -418,3 +418,25 @@ Release checks:
 - Dmitrii completed invitation onboarding, password setup, sign-out, sign-in, refresh, and shared-data access locally.
 - Yuliia remains uninvited until the authenticated production build is deployed.
 - TypeScript, lint, and production build are checked during final release preparation.
+
+## Beta 1.12 (Release Candidate)
+
+Headline: **Individual accounts begin to feel individual.**
+
+- Added a compact avatar-triggered account menu with User settings, General Settings, About Dashboard, and Sign out.
+- Added an in-app User settings canvas that remembers and returns to the module from which it was opened.
+- Added editable per-user display names plus read-only email and workspace-role fields.
+- Added private Supabase avatar storage with user-owned upload/delete policies, browser-side square resizing, immediate header updates, and replacement cleanup.
+- Added the personal `Hi, [Name]` greeting to the app header and moved sign-out into the account menu.
+- Prepared Yuliia's invited member profile with her display name and private avatar before first login.
+
+Database changes:
+
+- `202608060003_add_profile_avatars.sql`
+
+Release checks:
+
+- Supabase avatar migration applied successfully to the shared project.
+- Yuliia's invitation, profile, avatar record, and workspace membership were read back successfully.
+- User settings return navigation was checked from Dashboard and Production.
+- TypeScript, lint, and production build are checked during final release preparation.

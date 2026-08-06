@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUpRight,
   ArrowUp,
+  ArrowLeft,
   CalendarDays,
   Camera,
   ChevronDown,
@@ -577,7 +578,7 @@ const defaultQrCodeLinks: QrCodeLink[] = [
   }))
 ];
 
-const appVersionLabel = "Beta 1.11";
+const appVersionLabel = "Beta 1.12";
 
 const sections = [
   "Dashboard",
@@ -4895,6 +4896,7 @@ export default function Home() {
   const hasRequestedOtherTaskSupabaseLoad = useRef(false);
   const hasRequestedQrCodeSupabaseLoad = useRef(false);
   const [activeSection, setActiveSection] = useState<Section>("Dashboard");
+  const [isUserSettingsOpen, setIsUserSettingsOpen] = useState(false);
   const [dailyFocusProgress, setDailyFocusProgress] = useState<
     DailyFocusProgressItem[]
   >([]);
@@ -6903,19 +6905,22 @@ export default function Home() {
   return (
     <main className="dashboard-shell">
       <aside className="sidebar" aria-label="Primary">
-        <div className="brand-mark">
-          <Image
-            alt=""
-            aria-hidden
-            className="brand-logo"
-            height={44}
-            src="/love-strings-logo.jpeg"
-            width={44}
-          />
-          <div>
-            <strong>Love Strings</strong>
-            <span>Sprint Dashboard</span>
-            <span className="app-version-label">{appVersionLabel}</span>
+        <div className="brand-header">
+          <AccountControl onOpenUserSettings={() => setIsUserSettingsOpen(true)} />
+          <div className="brand-mark">
+            <div>
+              <strong>Love Strings</strong>
+              <span>Sprint Dashboard</span>
+              <span className="app-version-label">{appVersionLabel}</span>
+            </div>
+            <Image
+              alt=""
+              aria-hidden
+              className="brand-logo"
+              height={44}
+              src="/love-strings-logo.jpeg"
+              width={44}
+            />
           </div>
         </div>
 
@@ -6924,18 +6929,26 @@ export default function Home() {
             <button
               aria-current={activeSection === section ? "page" : undefined}
               key={section}
-              onClick={() => setActiveSection(section)}
+              onClick={() => {
+                setActiveSection(section);
+                setIsUserSettingsOpen(false);
+              }}
               type="button"
             >
               {section}
             </button>
           ))}
         </nav>
-        <AccountControl />
       </aside>
 
       <section className="workspace">
-        {activeSection === "Roadmap" ? (
+        {isUserSettingsOpen ? (
+          <UserSettingsView
+            activeSection={activeSection}
+            onBack={() => setIsUserSettingsOpen(false)}
+          />
+        ) : null}
+        {!isUserSettingsOpen && activeSection === "Roadmap" ? (
           <RoadmapView
             campaigns={campaigns}
             onCreatePhase={createRoadmapPhase}
@@ -6947,7 +6960,7 @@ export default function Home() {
             songs={productionSongDrafts}
           />
         ) : null}
-        {activeSection === "Marketing" ? (
+        {!isUserSettingsOpen && activeSection === "Marketing" ? (
           <MarketingView
             campaigns={campaigns}
             focusTarget={marketingFocusTarget}
@@ -6965,7 +6978,7 @@ export default function Home() {
             productionSongs={productionSongDrafts}
           />
         ) : null}
-        {activeSection === "Platforms" ? (
+        {!isUserSettingsOpen && activeSection === "Platforms" ? (
           <PlatformsView
             appleMusicImportStatus={appleMusicImportStatus}
             onAddQrCode={addQrCodeLink}
@@ -6979,7 +6992,7 @@ export default function Home() {
             refreshStatus={refreshStatus}
           />
         ) : null}
-        {activeSection === "Production" ? (
+        {!isUserSettingsOpen && activeSection === "Production" ? (
           <ProductionView
             focusTarget={productionFocusTarget}
             onAddSong={addProductionSong}
@@ -6996,7 +7009,7 @@ export default function Home() {
             songs={productionSongDrafts}
           />
         ) : null}
-        {activeSection === "Budget" ? (
+        {!isUserSettingsOpen && activeSection === "Budget" ? (
           <BudgetView
             entries={budgetEntriesWithForecast}
             onAddEntry={addBudgetEntry}
@@ -7005,7 +7018,7 @@ export default function Home() {
             onOpenEntrySource={openBudgetEntrySource}
           />
         ) : null}
-        {activeSection === "Events" ? (
+        {!isUserSettingsOpen && activeSection === "Events" ? (
           <EventsView
             entries={eventEntryDrafts}
             focusTarget={eventFocusTarget}
@@ -7019,7 +7032,8 @@ export default function Home() {
             onLocationChange={updateLocationAddressBookEntry}
           />
         ) : null}
-        {activeSection !== "Roadmap" &&
+        {!isUserSettingsOpen &&
+        activeSection !== "Roadmap" &&
         activeSection !== "Platforms" &&
         activeSection !== "Marketing" &&
         activeSection !== "Production" &&
@@ -7053,6 +7067,382 @@ export default function Home() {
       </section>
       <ScrollAssistButton />
     </main>
+  );
+}
+
+async function createAvatarImageBlob(file: File) {
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+    throw new Error("Choose a JPEG, PNG, or WebP image.");
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+
+  try {
+    const image = document.createElement("img");
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("This image could not be opened."));
+      image.src = objectUrl;
+    });
+
+    const size = 512;
+    const canvas = document.createElement("canvas");
+    canvas.height = size;
+    canvas.width = size;
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("Avatar preparation is unavailable in this browser.");
+    }
+
+    const sourceSize = Math.min(image.naturalWidth, image.naturalHeight);
+    const sourceX = (image.naturalWidth - sourceSize) / 2;
+    const sourceY = (image.naturalHeight - sourceSize) / 2;
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, size, size);
+    context.drawImage(
+      image,
+      sourceX,
+      sourceY,
+      sourceSize,
+      sourceSize,
+      0,
+      0,
+      size,
+      size
+    );
+
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error("Avatar preparation failed."));
+          }
+        },
+        "image/jpeg",
+        0.86
+      );
+    });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+function UserSettingsView({
+  activeSection,
+  onBack
+}: {
+  activeSection: Section;
+  onBack: () => void;
+}) {
+  const [displayName, setDisplayName] = useState("");
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("");
+  const [userId, setUserId] = useState("");
+  const [avatarPath, setAvatarPath] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const [savedDisplayName, setSavedDisplayName] = useState("");
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [profileStatus, setProfileStatus] = useState<RefreshStatus>({
+    message: "",
+    state: "idle"
+  });
+  const [avatarStatus, setAvatarStatus] = useState<RefreshStatus>({
+    message: "",
+    state: "idle"
+  });
+
+  useEffect(() => {
+    const supabase = createBrowserSupabaseClient();
+
+    async function loadProfile() {
+      setProfileStatus({ message: "Loading profile...", state: "loading" });
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      const user = userData.user;
+
+      if (userError || !user) {
+        setProfileStatus({
+          message: userError?.message ?? "Unable to load this account.",
+          state: "error"
+        });
+        return;
+      }
+
+      const [profileResult, membershipResult] = await Promise.all([
+        supabase
+          .from("app_profiles")
+          .select("avatar_path, display_name")
+          .eq("id", user.id)
+          .maybeSingle(),
+        supabase
+          .from("app_workspace_members")
+          .select("role")
+          .eq("user_id", user.id)
+          .maybeSingle()
+      ]);
+
+      if (profileResult.error || membershipResult.error) {
+        setProfileStatus({
+          message:
+            profileResult.error?.message ??
+            membershipResult.error?.message ??
+            "Unable to load profile settings.",
+          state: "error"
+        });
+        return;
+      }
+
+      const fallbackName = user.email?.split("@")[0] ?? "Account";
+      const loadedDisplayName = profileResult.data?.display_name?.trim() || fallbackName;
+      setDisplayName(loadedDisplayName);
+      setSavedDisplayName(loadedDisplayName);
+      setEmail(user.email ?? "");
+      setRole(membershipResult.data?.role ?? "member");
+      setUserId(user.id);
+      const loadedAvatarPath = profileResult.data?.avatar_path ?? "";
+      setAvatarPath(loadedAvatarPath);
+      if (loadedAvatarPath) {
+        const { data: avatarData } = await supabase.storage
+          .from("avatars")
+          .createSignedUrl(loadedAvatarPath, 60 * 60);
+        setAvatarUrl(avatarData?.signedUrl ?? "");
+      }
+      setProfileStatus({ message: "", state: "idle" });
+    }
+
+    void loadProfile();
+  }, []);
+
+  async function saveProfile() {
+    const nextDisplayName = displayName.trim();
+
+    if (!nextDisplayName || !userId) {
+      setProfileStatus({
+        message: "Display name cannot be empty.",
+        state: "error"
+      });
+      return;
+    }
+
+    setProfileStatus({ message: "Saving...", state: "loading" });
+    const supabase = createBrowserSupabaseClient();
+    const { error: profileError } = await supabase
+      .from("app_profiles")
+      .update({ display_name: nextDisplayName })
+      .eq("id", userId);
+
+    if (profileError) {
+      setProfileStatus({ message: profileError.message, state: "error" });
+      return;
+    }
+
+    const { error: authError } = await supabase.auth.updateUser({
+      data: { display_name: nextDisplayName }
+    });
+
+    if (authError) {
+      setProfileStatus({ message: authError.message, state: "error" });
+      return;
+    }
+
+    setDisplayName(nextDisplayName);
+    setSavedDisplayName(nextDisplayName);
+    setProfileStatus({ message: "Profile saved.", state: "success" });
+    window.dispatchEvent(
+      new CustomEvent("love-strings-profile-updated", {
+        detail: { avatarUrl, displayName: nextDisplayName }
+      })
+    );
+  }
+
+  async function uploadAvatar(file: File) {
+    if (!userId) {
+      setAvatarStatus({ message: "Profile is still loading.", state: "error" });
+      return;
+    }
+
+    setAvatarStatus({ message: "Preparing avatar...", state: "loading" });
+
+    try {
+      const avatarBlob = await createAvatarImageBlob(file);
+      const supabase = createBrowserSupabaseClient();
+      const nextAvatarPath = `${userId}/avatar-${Date.now()}.jpg`;
+      const { error: uploadError } = await supabase.storage
+        .from("avatars")
+        .upload(nextAvatarPath, avatarBlob, {
+          cacheControl: "3600",
+          contentType: "image/jpeg",
+          upsert: false
+        });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      const { error: profileError } = await supabase
+        .from("app_profiles")
+        .update({ avatar_path: nextAvatarPath })
+        .eq("id", userId);
+
+      if (profileError) {
+        await supabase.storage.from("avatars").remove([nextAvatarPath]);
+        throw profileError;
+      }
+
+      const { data: signedAvatar, error: signedAvatarError } =
+        await supabase.storage
+          .from("avatars")
+          .createSignedUrl(nextAvatarPath, 60 * 60);
+
+      if (signedAvatarError || !signedAvatar?.signedUrl) {
+        throw signedAvatarError ?? new Error("Avatar preview could not be created.");
+      }
+
+      await supabase.auth.updateUser({
+        data: { avatar_path: nextAvatarPath }
+      });
+
+      if (avatarPath && avatarPath !== nextAvatarPath) {
+        await supabase.storage.from("avatars").remove([avatarPath]);
+      }
+
+      setAvatarPath(nextAvatarPath);
+      setAvatarUrl(signedAvatar.signedUrl);
+      setAvatarStatus({ message: "Avatar updated.", state: "success" });
+      window.dispatchEvent(
+        new CustomEvent("love-strings-profile-updated", {
+          detail: {
+            avatarUrl: signedAvatar.signedUrl,
+            displayName: savedDisplayName
+          }
+        })
+      );
+    } catch (error) {
+      setAvatarStatus({
+        message: error instanceof Error ? error.message : "Avatar upload failed.",
+        state: "error"
+      });
+    }
+  }
+
+  const isProfileLoading = profileStatus.state === "loading" && !userId;
+  const canSaveProfile =
+    Boolean(displayName.trim()) &&
+    displayName.trim() !== savedDisplayName &&
+    profileStatus.state !== "loading";
+
+  return (
+    <section className="user-settings-canvas" aria-labelledby="user-settings-title">
+      <header className="user-settings-header">
+        <div>
+          <p className="eyebrow">Individual account</p>
+          <h1 id="user-settings-title">User settings</h1>
+        </div>
+        <button className="user-settings-back" onClick={onBack} type="button">
+          <ArrowLeft aria-hidden size={18} />
+          <span>Back to {activeSection}</span>
+        </button>
+      </header>
+      <div className="user-settings-content">
+        <article className="user-profile-settings">
+          <div className="user-profile-heading">
+            <div className="user-profile-avatar-control">
+              <span
+                aria-hidden
+                className={`user-profile-avatar${avatarUrl ? " has-image" : ""}`}
+                style={
+                  avatarUrl
+                    ? { backgroundImage: `url(${JSON.stringify(avatarUrl)})` }
+                    : undefined
+                }
+              >
+                {avatarUrl
+                  ? null
+                  : (displayName || email || "A").slice(0, 1).toUpperCase()}
+              </span>
+              <input
+                accept="image/jpeg,image/png,image/webp"
+                aria-label="Choose avatar image"
+                className="user-avatar-file-input"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (file) {
+                    void uploadAvatar(file);
+                  }
+                }}
+                ref={avatarInputRef}
+                type="file"
+              />
+              <button
+                className="user-avatar-upload-button"
+                disabled={avatarStatus.state === "loading" || !userId}
+                onClick={() => avatarInputRef.current?.click()}
+                type="button"
+              >
+                <Upload aria-hidden size={15} />
+                <span>{avatarStatus.state === "loading" ? "Uploading..." : "Upload avatar"}</span>
+              </button>
+            </div>
+            <div>
+              <p className="eyebrow">Profile</p>
+              <h2>Account identity</h2>
+              {avatarStatus.message ? (
+                <p
+                  className={avatarStatus.state === "error" ? "settings-error" : "settings-status"}
+                  role={avatarStatus.state === "error" ? "alert" : "status"}
+                >
+                  {avatarStatus.message}
+                </p>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="user-profile-fields">
+            <label>
+              <span>Display name</span>
+              <input
+                autoComplete="name"
+                disabled={isProfileLoading}
+                onChange={(event) => setDisplayName(event.target.value)}
+                placeholder="Your display name"
+                value={displayName}
+              />
+            </label>
+            <label>
+              <span>Email</span>
+              <input disabled readOnly value={email} />
+            </label>
+            <label>
+              <span>Role</span>
+              <input
+                className="user-profile-role"
+                disabled
+                readOnly
+                value={role ? role.charAt(0).toUpperCase() + role.slice(1) : ""}
+              />
+            </label>
+          </div>
+
+          <div className="user-profile-actions">
+            <button disabled={!canSaveProfile} onClick={saveProfile} type="button">
+              <Save aria-hidden size={17} />
+              <span>Save profile</span>
+            </button>
+            {profileStatus.message ? (
+              <p
+                className={profileStatus.state === "error" ? "settings-error" : "settings-status"}
+                role={profileStatus.state === "error" ? "alert" : "status"}
+              >
+                {profileStatus.message}
+              </p>
+            ) : null}
+          </div>
+        </article>
+      </div>
+    </section>
   );
 }
 

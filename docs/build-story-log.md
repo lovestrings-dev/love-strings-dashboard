@@ -890,3 +890,22 @@ Human-build detail:
 
 - The first invitation exposed a real callback problem: the email reached the correct password screen, but the session token was not consumed.
 - We added support for Supabase's invitation link formats, sent one fresh setup email, and tested password creation, sign-out, sign-in, refresh, and shared-data access end to end.
+
+### Story Beat: The First Login Already Feels Personal
+
+Core story:
+
+- Individual credentials solved access, but the interface still needed to tell each person, immediately, that this was their own account inside the shared band workspace.
+- We added a personal greeting, profile settings, and private avatars while keeping songs, campaigns, events, budgets, and roadmap data shared.
+- Dmitrii quietly prepared Yuliia's name and singing photo before sending her invitation, so her first login would open with `Hi, Yuliia` and a familiar face already in place.
+- The avatar is one of the few image assets stored directly by the app: it is resized before upload, kept in private Supabase Storage, and served through a short-lived signed link.
+
+Short hooks:
+
+- "Two accounts, one band, and a small first-login surprise."
+- "The data is shared. The welcome is personal."
+- "Before she logged in, the app already knew how to say hello."
+
+Series connection:
+
+- Beta 1.11 established separate identity and shared ownership. Beta 1.12 makes that architecture visible and human, then prepares the way for personal Dashboard layouts and dark mode.

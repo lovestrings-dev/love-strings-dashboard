@@ -742,3 +742,29 @@ Reason:
 
 - The database access policy has already moved to authenticated workspace members, so the matching application build should be deployed promptly.
 - This preserves the established beta rhythm: one functional foundation plus daily-use refinements.
+
+## 2026-08-06 - Private Per-User Avatars
+
+Decision:
+
+- Keep avatar images in a dedicated private Supabase Storage bucket.
+- Store only the private object path in each user's profile and render it through a short-lived signed URL.
+- Restrict avatar writes and deletion to the authenticated user's own folder.
+- Resize uploads to a 512 x 512 JPEG in the browser and remove the replaced object after a successful update.
+
+Reason:
+
+- Avatars are small, identity-specific assets that should remain under project control instead of depending on an external image host.
+- A public bucket would expose personal images to anyone with the URL; private objects preserve the same user experience with a safer access boundary.
+
+## 2026-08-06 - Beta 1.12 Release Boundary
+
+Decision:
+
+- Make personal account identity the Beta 1.12 functional increment: profile canvas, display name, private avatar, greeting, and consolidated account menu.
+- Keep shared operational data unchanged while preparing the interface for later personal Dashboard preferences and dark mode.
+
+Reason:
+
+- Separate credentials are only the first half of multi-user support; each member should immediately recognize that they are using their own account.
+- The smallest useful settings foundation should ship before adding card ordering, visibility, and appearance preferences.

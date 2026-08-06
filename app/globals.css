@@ -46,7 +46,7 @@ button {
 
 .dashboard-shell {
   display: grid;
-  grid-template-columns: 256px minmax(0, 1fr);
+  grid-template-columns: 290px minmax(0, 1fr);
   min-height: 100vh;
   max-width: 100%;
   overflow-x: clip;
@@ -59,12 +59,22 @@ button {
   padding: 24px 18px;
 }
 
+.brand-header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 34px;
+  min-width: 0;
+}
+
 .brand-mark {
   display: flex;
   gap: 12px;
   align-items: center;
+  justify-content: flex-end;
   min-height: 44px;
-  margin-bottom: 34px;
+  min-width: 0;
 }
 
 .brand-logo {
@@ -123,24 +133,309 @@ button {
   color: #ffffff;
 }
 
-.account-sign-out {
+.account-control {
+  align-items: center;
+  display: grid;
+  flex: 0 0 auto;
+  gap: 6px;
+  grid-template-areas:
+    "identity"
+    "name";
+  grid-template-columns: minmax(30px, auto);
+  min-width: 0;
+  position: relative;
+}
+
+.account-identity {
+  display: contents;
+}
+
+.account-avatar {
+  align-items: center;
+  background: rgba(119, 214, 201, 0.14);
+  border: 1px solid rgba(119, 214, 201, 0.42);
+  border-radius: 50%;
+  color: #77d6c9;
+  display: flex;
+  flex: 0 0 30px;
+  font-size: 13px;
+  font-weight: 800;
+  grid-area: identity;
+  height: 30px;
+  justify-content: center;
+  padding: 0;
+  width: 30px;
+}
+
+.account-avatar.has-image,
+.user-profile-avatar.has-image {
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+.account-avatar:hover,
+.account-avatar[aria-expanded="true"] {
+  background: rgba(119, 214, 201, 0.24);
+  border-color: #77d6c9;
+}
+
+.account-name {
+  color: #f4f3ee;
+  font-size: 13px;
+  font-weight: 700;
+  grid-area: name;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-menu {
+  background: #202525;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28);
+  display: grid;
+  gap: 2px;
+  left: 0;
+  min-width: 210px;
+  padding: 6px;
+  position: absolute;
+  top: 38px;
+  z-index: 80;
+}
+
+.account-menu button {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 7px;
-  color: #a8ada8;
+  border-radius: 6px;
+  color: #f4f3ee;
   cursor: pointer;
   display: flex;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  gap: 10px;
+  min-height: 42px;
+  padding: 9px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.account-menu button:hover,
+.account-menu button:focus-visible {
+  background: rgba(255, 255, 255, 0.1);
+  outline: none;
+}
+
+.account-menu svg {
+  color: #77d6c9;
+  flex: 0 0 auto;
+}
+
+.account-menu .account-menu-sign-out {
+  border-radius: 0 0 6px 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  color: #f0b4b4;
+  margin-top: 4px;
+  padding-top: 11px;
+}
+
+.account-menu .account-menu-sign-out svg {
+  color: #e06b6b;
+}
+
+.user-settings-canvas {
+  min-height: calc(100vh - 48px);
+}
+
+.user-settings-header {
+  align-items: center;
+  display: flex;
+  gap: 20px;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.user-settings-header h1 {
+  margin: 4px 0 0;
+}
+
+.user-settings-back {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
   gap: 8px;
-  margin-top: 18px;
-  min-height: 38px;
+  min-height: 42px;
+  padding: 9px 14px;
+}
+
+.user-settings-back:hover {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.user-settings-content {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-height: min(620px, calc(100vh - 190px));
+  padding: 24px;
+}
+
+.user-profile-settings {
+  max-width: 760px;
+}
+
+.user-profile-heading {
+  align-items: start;
+  display: flex;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.user-profile-avatar-control {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+}
+
+.user-profile-heading h2 {
+  font-size: 22px;
+  margin: 3px 0 0;
+}
+
+.user-profile-avatar {
+  align-items: center;
+  background: var(--soft-green);
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  color: var(--accent-strong);
+  display: flex;
+  flex: 0 0 48px;
+  font-size: 18px;
+  font-weight: 900;
+  height: 48px;
+  justify-content: center;
+  width: 48px;
+}
+
+.user-avatar-file-input {
+  display: none;
+}
+
+.user-avatar-upload-button {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--accent-strong);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+  gap: 7px;
+  min-height: 40px;
+  padding: 8px 11px;
+}
+
+.user-avatar-upload-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.user-profile-fields {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.user-profile-fields label {
+  display: grid;
+  gap: 7px;
+}
+
+.user-profile-fields label > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.user-profile-fields input {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  min-height: 46px;
+  min-width: 0;
   padding: 10px 12px;
   width: 100%;
 }
 
-.account-sign-out:hover {
-  background: rgba(255, 255, 255, 0.1);
+.user-profile-fields input:disabled {
+  background: var(--background);
+  color: var(--muted);
+  opacity: 1;
+}
+
+.user-profile-fields label:first-child {
+  grid-column: 1 / -1;
+}
+
+.user-profile-actions {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  margin-top: 20px;
+}
+
+.user-profile-actions button {
+  align-items: center;
+  background: var(--accent-strong);
+  border: 1px solid var(--accent-strong);
+  border-radius: 8px;
   color: #ffffff;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 900;
+  gap: 8px;
+  min-height: 42px;
+  padding: 9px 14px;
+}
+
+.user-profile-actions button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.settings-status,
+.settings-error {
+  font-size: 13px;
+  font-weight: 800;
+  margin: 0;
+}
+
+.settings-status {
+  color: #2f7d61;
+}
+
+.settings-error {
+  color: #cc3d3d;
 }
 
 .login-page {
@@ -5057,10 +5352,19 @@ h2 {
     display: contents;
   }
 
-  .brand-mark {
+  .brand-header {
     background: var(--surface-strong);
     margin: 0;
+    min-width: 0;
     padding: 16px 16px 10px;
+  }
+
+  .brand-mark {
+    min-width: 0;
+  }
+
+  .account-control {
+    margin-right: 12px;
   }
 
   .nav-list {
@@ -5230,7 +5534,60 @@ h2 {
   }
 }
 
+@media (max-width: 350px) {
+  .account-name {
+    display: none;
+  }
+}
+
 @media (max-width: 620px) {
+  .user-settings-canvas {
+    min-height: calc(100vh - 24px);
+  }
+
+  .user-settings-header {
+    align-items: stretch;
+    display: grid;
+    gap: 14px;
+  }
+
+  .user-settings-back {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .user-settings-content {
+    min-height: calc(100vh - 250px);
+    padding: 18px;
+  }
+
+  .user-profile-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .user-profile-heading {
+    display: grid;
+  }
+
+  .user-profile-avatar-control {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .user-profile-fields label:first-child {
+    grid-column: auto;
+  }
+
+  .user-profile-actions {
+    align-items: stretch;
+    display: grid;
+  }
+
+  .user-profile-actions button {
+    justify-content: center;
+    width: 100%;
+  }
+
   html,
   body,
   .dashboard-shell,
