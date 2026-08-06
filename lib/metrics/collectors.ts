@@ -1,10 +1,17 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
+import {
+  decryptGoogleRefreshToken,
+  fetchGoogleJson,
+  refreshGoogleAccessToken
+} from "@/lib/google/oauth";
+import { loveStringsWorkspaceId } from "@/lib/server/workspace-owner";
+
 type CollectorStatus = "fulfilled" | "rejected" | "skipped";
 
 type MetricCollectorResult = {
   metrics?: Record<string, number | string | null>;
-  name: "instagram" | "spotify" | "youtube" | "youtube-music";
+  name: "google-analytics" | "instagram" | "spotify" | "youtube" | "youtube-music";
   reason?: string;
   status: CollectorStatus;
 };
@@ -50,6 +57,12 @@ type SpotifyArtist = {
   name: string;
   popularity?: number;
 };
+type GoogleAnalyticsReport = {
+  rows?: Array<{
+    dimensionValues?: Array<{ value?: string }>;
+    metricValues?: Array<{ value?: string }>;
+  }>;
+};
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -60,6 +73,7 @@ export async function refreshAllMetricCollectors() {
     name: MetricCollectorResult["name"];
     refresh: () => Promise<MetricCollectorResult>;
   }> = [
+    { name: "google-analytics", refresh: refreshGoogleAnalyticsMetrics },
     { name: "youtube", refresh: refreshYouTubeMetrics },
     { name: "instagram", refresh: refreshInstagramMetrics },
     { name: "youtube-music", refresh: refreshYouTubeMusicMetrics },
@@ -81,6 +95,124 @@ export async function refreshAllMetricCollectors() {
       };
     }),
     startedAt
+  };
+}
+
+async function refreshGoogleAnalyticsMetrics(): Promise<MetricCollectorResult> {
+  if (
+    !process.env.GOOGLE_OAUTH_CLIENT_ID ||
+    !process.env.GOOGLE_OAUTH_CLIENT_SECRET ||
+    !process.env.GOOGLE_TOKEN_ENCRYPTION_KEY
+  ) {
+    return {
+      name: "google-analytics",
+      reason: "Missing Google OAuth server configuration.",
+      status: "skipped"
+    };
+  }
+
+  const supabase = createServiceSupabaseClient();
+  const { data: connection, error } = await supabase
+    .from("app_google_connections")
+    .select(
+      "analytics_enabled, analytics_property_id, analytics_property_name, encrypted_refresh_token"
+    )
+    .eq("workspace_id", loveStringsWorkspaceId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!connection?.analytics_enabled || !connection.analytics_property_id) {
+    return {
+      name: "google-analytics",
+      reason: "Google Analytics is not connected.",
+      status: "skipped"
+    };
+  }
+
+  const accessToken = await refreshGoogleAccessToken(
+    decryptGoogleRefreshToken(connection.encrypted_refresh_token)
+  );
+  const reportUrl = `https://analyticsdata.googleapis.com/v1beta/properties/${connection.analytics_property_id}:runReport`;
+  const dateRanges = [{ endDate: "today", startDate: "29daysAgo" }];
+  const [totalsReport, trafficReport] = await Promise.all([
+    fetchGoogleJson<GoogleAnalyticsReport>(accessToken, reportUrl, {
+      body: JSON.stringify({
+        dateRanges,
+        metrics: [
+          { name: "activeUsers" },
+          { name: "sessions" },
+          { name: "screenPageViews" }
+        ]
+      }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST"
+    }),
+    fetchGoogleJson<GoogleAnalyticsReport>(accessToken, reportUrl, {
+      body: JSON.stringify({
+        dateRanges,
+        dimensions: [{ name: "sessionDefaultChannelGroup" }],
+        limit: "1",
+        metrics: [{ name: "sessions" }],
+        orderBys: [{ desc: true, metric: { metricName: "sessions" } }]
+      }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST"
+    })
+  ]);
+  const totals = totalsReport.rows?.[0]?.metricValues ?? [];
+  const activeUsers = Number(totals[0]?.value ?? 0);
+  const sessions = Number(totals[1]?.value ?? 0);
+  const pageViews = Number(totals[2]?.value ?? 0);
+  const topTrafficRow = trafficReport.rows?.[0];
+  const topTrafficSource = topTrafficRow?.dimensionValues?.[0]?.value ?? "No traffic yet";
+  const topTrafficSessions = Number(topTrafficRow?.metricValues?.[0]?.value ?? 0);
+  const propertyName = connection.analytics_property_name ?? "www.LoveStrings.at";
+
+  await upsertPlatformMetricSnapshots(
+    {
+      accountName: propertyName,
+      category: "website",
+      externalId: connection.analytics_property_id,
+      platformName: "Google Analytics",
+      platformSlug: "google-analytics",
+      url: `https://analytics.google.com/analytics/web/#/p${connection.analytics_property_id}/reports/intelligenthome`
+    },
+    [
+      {
+        metricName: "active_users_30d",
+        metricUnit: "users",
+        metricValue: activeUsers
+      },
+      {
+        metricName: "sessions_30d",
+        metricUnit: "sessions",
+        metricValue: sessions
+      },
+      {
+        metricName: "page_views_30d",
+        metricUnit: "views",
+        metricValue: pageViews
+      },
+      {
+        metricName: "top_traffic_source_sessions_30d",
+        metricUnit: "sessions",
+        metricValue: topTrafficSessions,
+        notes: topTrafficSource
+      }
+    ],
+    "google-analytics-data-api"
+  );
+
+  return {
+    metrics: {
+      activeUsers30d: activeUsers,
+      pageViews30d: pageViews,
+      sessions30d: sessions,
+      topTrafficSource,
+      topTrafficSourceSessions30d: topTrafficSessions
+    },
+    name: "google-analytics",
+    status: "fulfilled"
   };
 }
 

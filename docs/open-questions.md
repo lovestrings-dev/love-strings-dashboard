@@ -5,7 +5,7 @@
 - Spotify: parked until access is available. Need confirm whether Web API access is blocked by account tier or developer/app setup.
 - Deezer: investigate whether artist stats are available by API or only public catalog data.
 - Amazon Music: investigate whether artist analytics are available by API or only through Amazon Music for Artists/manual exports.
-- Website/Google statistics: investigate Google Analytics or Search Console API access and decide which widget belongs on Dashboard.
+- Search Console remains optional future research; Google Analytics is now connected and represented by a Platforms-only Website Analytics card.
 
 ## Dashboard Metrics
 

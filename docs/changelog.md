@@ -440,3 +440,36 @@ Release checks:
 - Yuliia's invitation, profile, avatar record, and workspace membership were read back successfully.
 - User settings return navigation was checked from Dashboard and Production.
 - TypeScript, lint, and production build are checked during final release preparation.
+
+## Beta 1.13 (Release Candidate)
+
+Headline: **The shared workspace gains real roles and shared identity controls.**
+
+- Added Owner, Member, and Viewer workspace roles.
+- Assigned Dmitrii as Owner and Yuliia as Member; future invited accounts default to Viewer.
+- Restricted General Settings and shared branding changes to Owners.
+- Added read-only Viewer mode for safe hands-on access to the shared Dashboard and modules.
+- Added About Dashboard and General Settings canvases, moved the beta label and legal terms into About, and added private shared-logo management.
+- Added an Owner-only invitation form to General Settings with email, role selection, and production-safe onboarding links.
+- Added the first Owner-only Google services hub: one Google account can independently connect YouTube and the `www.lovestrings.at` Google Analytics property.
+- Stored Google offline access as an encrypted, service-role-only Supabase record so OAuth credentials never reach browser clients.
+- Added automatic Google access-token refresh and the first live `www.LoveStrings.at` Analytics collector.
+- Added a Website Analytics card in Platforms with rolling 30-day active users, sessions, page views, top traffic source, daily Supabase snapshots, and evolution-graph history.
+- Completed the flexible general-campaign day controls with an `Add campaign day` action that appends the next date, extends the campaign end, preserves deleted gaps, and persists through the existing campaign-day save flow.
+
+Database changes:
+
+- `202608060004_add_workspace_branding.sql`
+- `202608060005_add_viewer_role_permissions.sql`
+- `202608060006_add_google_connections.sql`
+
+Release checks:
+
+- Shared branding migration and role migration applied successfully.
+- Supabase readback confirms `dimasounder@gmail.com` is Owner and `yuliiakostyts@gmail.com` is Member.
+- Owner account menu exposes General Settings locally.
+- Google connection migration applied; TypeScript and lint checks pass before OAuth consent testing.
+- Live Analytics refresh returned 22 active users, 39 sessions, 43 page views, and Direct as the top source; all values survived app reload from Supabase.
+- Confirmed Google Analytics uses the same daily cron, app-open fallback, and manual Platforms refresh path as the existing collectors.
+- Verified the general-campaign add-day control after the full day list at desktop and 390px mobile widths.
+- TypeScript, lint, and the Next.js 16.2.9 production build pass locally.

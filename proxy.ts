@@ -47,6 +47,32 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
+  const { data: membership, error: membershipError } = await supabase
+    .from("app_workspace_members")
+    .select("role")
+    .eq("workspace_id", "00000000-0000-0000-0000-000000000001")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (membershipError || !membership) {
+    if (request.nextUrl.pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "Workspace access denied." }, { status: 403 });
+    }
+
+    return new NextResponse("Workspace access denied.", { status: 403 });
+  }
+
+  if (
+    membership.role === "viewer" &&
+    request.nextUrl.pathname.startsWith("/api/") &&
+    !["GET", "HEAD", "OPTIONS"].includes(request.method)
+  ) {
+    return NextResponse.json(
+      { error: "Viewer accounts have read-only access." },
+      { status: 403 }
+    );
+  }
+
   return response;
 }
 

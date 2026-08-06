@@ -6,14 +6,21 @@ import { useEffect, useRef, useState } from "react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 export function AccountControl({
+  onOpenAboutDashboard,
+  onOpenGeneralSettings,
   onOpenUserSettings
 }: {
+  onOpenAboutDashboard: () => void;
+  onOpenGeneralSettings: () => void;
   onOpenUserSettings: () => void;
 }) {
   const router = useRouter();
   const [displayName, setDisplayName] = useState("Account");
   const [email, setEmail] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
+  const [workspaceRole, setWorkspaceRole] = useState<
+    "member" | "owner" | "viewer" | null
+  >(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const accountControlRef = useRef<HTMLDivElement>(null);
@@ -29,11 +36,26 @@ export function AccountControl({
         return;
       }
 
-      const { data: profile } = await supabase
-        .from("app_profiles")
-        .select("avatar_path, display_name")
-        .eq("id", user.id)
-        .maybeSingle();
+      const [profileResult, membershipResult] = await Promise.all([
+        supabase
+          .from("app_profiles")
+          .select("avatar_path, display_name")
+          .eq("id", user.id)
+          .maybeSingle(),
+        supabase
+          .from("app_workspace_members")
+          .select("role")
+          .eq("workspace_id", "00000000-0000-0000-0000-000000000001")
+          .eq("user_id", user.id)
+          .maybeSingle()
+      ]);
+      const profile = profileResult.data;
+      const loadedRole = membershipResult.data?.role;
+      setWorkspaceRole(
+        loadedRole === "owner" || loadedRole === "member" || loadedRole === "viewer"
+          ? loadedRole
+          : null
+      );
       const profileName = profile?.display_name;
       const metadataName = user.user_metadata.display_name;
       const fallbackName = user.email?.split("@")[0] ?? "Account";
@@ -156,11 +178,27 @@ export function AccountControl({
             <UserRound aria-hidden size={17} />
             <span>User settings</span>
           </button>
-          <button role="menuitem" type="button">
-            <Settings aria-hidden size={17} />
-            <span>General Settings</span>
-          </button>
-          <button role="menuitem" type="button">
+          {workspaceRole === "owner" ? (
+            <button
+              onClick={() => {
+                setIsMenuOpen(false);
+                onOpenGeneralSettings();
+              }}
+              role="menuitem"
+              type="button"
+            >
+              <Settings aria-hidden size={17} />
+              <span>General Settings</span>
+            </button>
+          ) : null}
+          <button
+            onClick={() => {
+              setIsMenuOpen(false);
+              onOpenAboutDashboard();
+            }}
+            role="menuitem"
+            type="button"
+          >
             <Info aria-hidden size={17} />
             <span>About Dashboard</span>
           </button>

@@ -909,3 +909,22 @@ Short hooks:
 Series connection:
 
 - Beta 1.11 established separate identity and shared ownership. Beta 1.12 makes that architecture visible and human, then prepares the way for personal Dashboard layouts and dark mode.
+
+### Reel: One Google Login, Several Useful Doors
+
+Core story:
+
+- The next integration challenge was not another isolated API key. Gmail, YouTube, and website analytics all belong to the same Google world, but they do not need the same permissions.
+- We built one workspace-level Google connection that can open YouTube and Analytics independently, while deliberately leaving sensitive Gmail access for a later consent step.
+- The refresh grant stays encrypted on the server; the browser sees connection status and useful numbers, never the reusable credential.
+- The first result is a live Website Analytics card using the same daily snapshot, graph, scheduler, and manual-refresh language as the music platforms.
+
+Short hooks:
+
+- "One Google account does not have to mean one giant permission request."
+- "We connected the website without handing OAuth secrets to the browser."
+- "The newest platform card is not a music platform at all. It is our own website."
+
+Series connection:
+
+- Separate user accounts made identity explicit. Workspace roles decide who can manage shared connections. Google onboarding is the first step toward making a fresh musician workspace configurable without editing deployment secrets by hand.

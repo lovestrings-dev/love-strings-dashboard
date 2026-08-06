@@ -768,3 +768,63 @@ Reason:
 
 - Separate credentials are only the first half of multi-user support; each member should immediately recognize that they are using their own account.
 - The smallest useful settings foundation should ship before adding card ordering, visibility, and appearance preferences.
+
+## 2026-08-06 - Workspace Role Boundaries
+
+Decision:
+
+- Use three workspace roles: Owner, Member, and Viewer.
+- Assign `dimasounder@gmail.com` as Owner and `yuliiakostyts@gmail.com` as Member.
+- Let Owners use every shared workflow and manage General Settings, including shared branding.
+- Let Members edit shared operational data but hide and deny General Settings access.
+- Make Viewers read-only across shared operational modules while still allowing their own profile settings and normal navigation.
+- Enrol future invited accounts as Viewer by default until an Owner deliberately promotes them.
+- Send workspace invitations only through an Owner-authorized server endpoint. Keep the Supabase service role server-side, assign the selected role during enrolment, and always return external invitations to the deployed password-setup page rather than the machine that sent them.
+- Enforce Viewer write restrictions at the protected API boundary and enforce Owner-only branding changes with Supabase RLS, in addition to hiding unavailable controls in the interface.
+
+Reason:
+
+- Dmitrii and Yuliia need different responsibilities without splitting the shared Love Strings records.
+- Friends should be able to explore the real app safely without changing campaign, production, event, budget, or roadmap data.
+- Server and database enforcement prevents a hidden button or a custom request from becoming an accidental permission bypass.
+
+## 2026-08-06 - Shared Google Account, Independent Services
+
+Decision:
+
+- Use one workspace-level Google OAuth account for YouTube and Google Analytics, with each service connected and disconnected independently in General Settings.
+- Keep Gmail outside this first connection because mailbox scopes have a different sensitivity and verification burden; add it later as a deliberately separate consent step.
+- Restrict connection management to Owners and store the refresh grant only in a service-role-only Supabase table, encrypted with a server-side AES-256-GCM key.
+- Discover the YouTube channel and prefer the Analytics property whose display name contains `lovestrings.at` during onboarding.
+
+Reason:
+
+- One Google identity reduces repeated setup for related Google services while preserving clear consent boundaries per service.
+- Server-only encrypted storage prevents reusable Google credentials from being exposed through browser queries or workspace-member RLS.
+
+## 2026-08-06 - Website Analytics Snapshot Contract
+
+Decision:
+
+- Use the connected Google Analytics property to collect rolling 30-day active users, sessions, page views, and the highest-session default channel group.
+- Save one snapshot per Vienna calendar day through the existing platform metrics ledger and display it as a Platforms-only Website Analytics card.
+- Reuse the existing platform evolution graphs for active users, sessions, and page views once at least two daily snapshots exist.
+- Refresh short-lived Google access tokens only on the server from the encrypted workspace refresh grant.
+
+Reason:
+
+- Rolling 30-day numbers provide a stable quick-look signal for a low-volume artist website while daily snapshots reveal direction over time.
+- Reusing the platform snapshot model keeps scheduling, history, visual language, and refresh behavior consistent with YouTube and Instagram.
+
+## 2026-08-06 - Beta 1.13 Release Boundary
+
+Decision:
+
+- Make workspace roles, Owner-managed shared settings, and reusable Google-service onboarding the Beta 1.13 functional increment.
+- Include the live Website Analytics collector and the missing general-campaign add-day control as the release's connected-data and daily-use refinements.
+- Keep multi-workspace platform isolation out of this release; Love Strings remains the single configured operational workspace until platform accounts and snapshots become workspace-scoped.
+
+Reason:
+
+- Roles and settings establish a safe foundation for Members and read-only Viewers without splitting the shared band data.
+- Shipping the tested Google connection now gives the current workspace immediate value while avoiding a rushed multi-tenant migration late in the release cycle.

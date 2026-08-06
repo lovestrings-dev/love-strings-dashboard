@@ -1,13 +1,14 @@
 "use client";
 
 import Image from "next/image";
-import type { ReactNode } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { forwardRef } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUpRight,
   ArrowUp,
   ArrowLeft,
+  BarChart3,
   CalendarDays,
   Camera,
   ChevronDown,
@@ -23,6 +24,7 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Send,
   Trash2,
   Video
 } from "lucide-react";
@@ -30,6 +32,20 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { AccountControl } from "./account-control";
 
 type Section = (typeof sections)[number];
+type WorkspaceRole = "member" | "owner" | "viewer";
+type GoogleConnectionStatus = {
+  accountEmail: string | null;
+  analytics: {
+    enabled: boolean;
+    propertyId: string | null;
+    propertyName: string | null;
+  };
+  updatedAt: string | null;
+  youtube: {
+    channelTitle: string | null;
+    enabled: boolean;
+  };
+};
 type MarketingStatus = "not-started" | "in-progress" | "done" | "irrelevant";
 type CampaignDayProgressStatus = "empty" | "partial" | "complete";
 type ProductionBudgetLine = {
@@ -444,6 +460,24 @@ const platformStats = [
     ]
   },
   {
+    platform: "Website Analytics",
+    slug: "google-analytics",
+    profileUrl: "https://analytics.google.com/",
+    icon: BarChart3,
+    dashboard: false,
+    metrics: [
+      { label: "Active Users, Last 30 Days", metricName: "active_users_30d", value: "0" },
+      { label: "Sessions, Last 30 Days", metricName: "sessions_30d", value: "0" },
+      { label: "Page Views, Last 30 Days", metricName: "page_views_30d", value: "0" },
+      {
+        label: "Top Traffic Source, Last 30 Days",
+        metricName: "top_traffic_source_sessions_30d",
+        value: "0",
+        context: "No traffic yet"
+      }
+    ]
+  },
+  {
     platform: "YouTube Music",
     slug: "youtube-music",
     profileUrl:
@@ -578,7 +612,9 @@ const defaultQrCodeLinks: QrCodeLink[] = [
   }))
 ];
 
-const appVersionLabel = "Beta 1.12";
+const appVersionLabel = "Beta 1.13";
+const defaultAppLogoUrl = "/love-strings-logo.jpeg";
+const loveStringsWorkspaceId = "00000000-0000-0000-0000-000000000001";
 
 const sections = [
   "Dashboard",
@@ -4896,7 +4932,12 @@ export default function Home() {
   const hasRequestedOtherTaskSupabaseLoad = useRef(false);
   const hasRequestedQrCodeSupabaseLoad = useRef(false);
   const [activeSection, setActiveSection] = useState<Section>("Dashboard");
-  const [isUserSettingsOpen, setIsUserSettingsOpen] = useState(false);
+  const [settingsView, setSettingsView] = useState<
+    "about" | "general" | "user" | null
+  >(null);
+  const [workspaceRole, setWorkspaceRole] = useState<WorkspaceRole | null>(null);
+  const [appLogoPath, setAppLogoPath] = useState("");
+  const [appLogoUrl, setAppLogoUrl] = useState(defaultAppLogoUrl);
   const [dailyFocusProgress, setDailyFocusProgress] = useState<
     DailyFocusProgressItem[]
   >([]);
@@ -5922,6 +5963,130 @@ export default function Home() {
   }
 
   useEffect(() => {
+    const parameters = new URLSearchParams(window.location.search);
+    if (parameters.get("settings") !== "general") return;
+
+    const timer = window.setTimeout(() => setSettingsView("general"), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadWorkspaceBranding() {
+      const supabase = createBrowserSupabaseClient();
+      const { data, error } = await supabase
+        .from("app_workspace_settings")
+        .select("logo_path")
+        .eq("workspace_id", loveStringsWorkspaceId)
+        .maybeSingle();
+
+      if (isCancelled || error || !data?.logo_path) {
+        return;
+      }
+
+      const { data: logoData } = await supabase.storage
+        .from("branding")
+        .createSignedUrl(data.logo_path, 60 * 60);
+
+      if (!isCancelled && logoData?.signedUrl) {
+        setAppLogoPath(data.logo_path);
+        setAppLogoUrl(logoData.signedUrl);
+      }
+    }
+
+    void loadWorkspaceBranding();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadWorkspaceRole() {
+      const supabase = createBrowserSupabaseClient();
+      const { data: userData } = await supabase.auth.getUser();
+      const user = userData.user;
+
+      if (!user) {
+        return;
+      }
+
+      const { data } = await supabase
+        .from("app_workspace_members")
+        .select("role")
+        .eq("workspace_id", loveStringsWorkspaceId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      const loadedRole = data?.role;
+
+      if (
+        !isCancelled &&
+        (loadedRole === "owner" ||
+          loadedRole === "member" ||
+          loadedRole === "viewer")
+      ) {
+        setWorkspaceRole(loadedRole);
+      }
+    }
+
+    void loadWorkspaceRole();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  function preventViewerWriteClick(event: ReactMouseEvent<HTMLElement>) {
+    if (workspaceRole !== "viewer" || settingsView) {
+      return;
+    }
+
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+
+    const control = target.closest("button, input, label, select, textarea");
+    if (!control) {
+      return;
+    }
+
+    if (control instanceof HTMLButtonElement) {
+      const label = (control.getAttribute("aria-label") || control.textContent || "")
+        .trim()
+        .toLowerCase();
+      const isReadOnlyNavigation =
+        control.hasAttribute("aria-expanded") ||
+        /^(hide|show|view|back|open)/.test(label);
+
+      if (isReadOnlyNavigation) {
+        return;
+      }
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function preventViewerWriteKeydown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (workspaceRole !== "viewer" || settingsView) {
+      return;
+    }
+
+    if (
+      event.target instanceof HTMLInputElement ||
+      event.target instanceof HTMLSelectElement ||
+      event.target instanceof HTMLTextAreaElement
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
+
+  useEffect(() => {
     const saveTimers = productionSaveTimers.current;
     const campaignBudgetTimers = marketingBudgetSaveTimers.current;
     const focusSaveTimers = otherTaskSaveTimers.current;
@@ -6906,19 +7071,23 @@ export default function Home() {
     <main className="dashboard-shell">
       <aside className="sidebar" aria-label="Primary">
         <div className="brand-header">
-          <AccountControl onOpenUserSettings={() => setIsUserSettingsOpen(true)} />
+          <AccountControl
+            onOpenAboutDashboard={() => setSettingsView("about")}
+            onOpenGeneralSettings={() => setSettingsView("general")}
+            onOpenUserSettings={() => setSettingsView("user")}
+          />
           <div className="brand-mark">
             <div>
               <strong>Love Strings</strong>
               <span>Sprint Dashboard</span>
-              <span className="app-version-label">{appVersionLabel}</span>
             </div>
             <Image
               alt=""
               aria-hidden
               className="brand-logo"
               height={44}
-              src="/love-strings-logo.jpeg"
+              src={appLogoUrl}
+              unoptimized
               width={44}
             />
           </div>
@@ -6931,7 +7100,7 @@ export default function Home() {
               key={section}
               onClick={() => {
                 setActiveSection(section);
-                setIsUserSettingsOpen(false);
+                setSettingsView(null);
               }}
               type="button"
             >
@@ -6942,13 +7111,41 @@ export default function Home() {
       </aside>
 
       <section className="workspace">
-        {isUserSettingsOpen ? (
+        {workspaceRole === "viewer" && !settingsView ? (
+          <div className="viewer-mode-notice" role="status">
+            Viewer mode: read-only access
+          </div>
+        ) : null}
+        <div
+          className={workspaceRole === "viewer" && !settingsView ? "viewer-read-only" : undefined}
+          onClickCapture={preventViewerWriteClick}
+          onKeyDownCapture={preventViewerWriteKeydown}
+        >
+        {settingsView === "user" ? (
           <UserSettingsView
             activeSection={activeSection}
-            onBack={() => setIsUserSettingsOpen(false)}
+            onBack={() => setSettingsView(null)}
           />
         ) : null}
-        {!isUserSettingsOpen && activeSection === "Roadmap" ? (
+        {settingsView === "about" ? (
+          <AboutDashboardView
+            activeSection={activeSection}
+            onBack={() => setSettingsView(null)}
+          />
+        ) : null}
+        {settingsView === "general" && workspaceRole === "owner" ? (
+          <GeneralSettingsView
+            activeSection={activeSection}
+            logoPath={appLogoPath}
+            logoUrl={appLogoUrl}
+            onBack={() => setSettingsView(null)}
+            onLogoChange={(logoPath, logoUrl) => {
+              setAppLogoPath(logoPath);
+              setAppLogoUrl(logoUrl);
+            }}
+          />
+        ) : null}
+        {!settingsView && activeSection === "Roadmap" ? (
           <RoadmapView
             campaigns={campaigns}
             onCreatePhase={createRoadmapPhase}
@@ -6960,7 +7157,7 @@ export default function Home() {
             songs={productionSongDrafts}
           />
         ) : null}
-        {!isUserSettingsOpen && activeSection === "Marketing" ? (
+        {!settingsView && activeSection === "Marketing" ? (
           <MarketingView
             campaigns={campaigns}
             focusTarget={marketingFocusTarget}
@@ -6978,7 +7175,7 @@ export default function Home() {
             productionSongs={productionSongDrafts}
           />
         ) : null}
-        {!isUserSettingsOpen && activeSection === "Platforms" ? (
+        {!settingsView && activeSection === "Platforms" ? (
           <PlatformsView
             appleMusicImportStatus={appleMusicImportStatus}
             onAddQrCode={addQrCodeLink}
@@ -6992,7 +7189,7 @@ export default function Home() {
             refreshStatus={refreshStatus}
           />
         ) : null}
-        {!isUserSettingsOpen && activeSection === "Production" ? (
+        {!settingsView && activeSection === "Production" ? (
           <ProductionView
             focusTarget={productionFocusTarget}
             onAddSong={addProductionSong}
@@ -7009,7 +7206,7 @@ export default function Home() {
             songs={productionSongDrafts}
           />
         ) : null}
-        {!isUserSettingsOpen && activeSection === "Budget" ? (
+        {!settingsView && activeSection === "Budget" ? (
           <BudgetView
             entries={budgetEntriesWithForecast}
             onAddEntry={addBudgetEntry}
@@ -7018,7 +7215,7 @@ export default function Home() {
             onOpenEntrySource={openBudgetEntrySource}
           />
         ) : null}
-        {!isUserSettingsOpen && activeSection === "Events" ? (
+        {!settingsView && activeSection === "Events" ? (
           <EventsView
             entries={eventEntryDrafts}
             focusTarget={eventFocusTarget}
@@ -7032,7 +7229,7 @@ export default function Home() {
             onLocationChange={updateLocationAddressBookEntry}
           />
         ) : null}
-        {!isUserSettingsOpen &&
+        {!settingsView &&
         activeSection !== "Roadmap" &&
         activeSection !== "Platforms" &&
         activeSection !== "Marketing" &&
@@ -7064,13 +7261,14 @@ export default function Home() {
             roadmapPhasesData={roadmapPhaseDrafts}
           />
         ) : null}
+        </div>
       </section>
       <ScrollAssistButton />
     </main>
   );
 }
 
-async function createAvatarImageBlob(file: File) {
+async function createSquareImageBlob(file: File) {
   if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
     throw new Error("Choose a JPEG, PNG, or WebP image.");
   }
@@ -7092,7 +7290,7 @@ async function createAvatarImageBlob(file: File) {
     const context = canvas.getContext("2d");
 
     if (!context) {
-      throw new Error("Avatar preparation is unavailable in this browser.");
+      throw new Error("Image preparation is unavailable in this browser.");
     }
 
     const sourceSize = Math.min(image.naturalWidth, image.naturalHeight);
@@ -7118,7 +7316,7 @@ async function createAvatarImageBlob(file: File) {
           if (blob) {
             resolve(blob);
           } else {
-            reject(new Error("Avatar preparation failed."));
+            reject(new Error("Image preparation failed."));
           }
         },
         "image/jpeg",
@@ -7128,6 +7326,479 @@ async function createAvatarImageBlob(file: File) {
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
+}
+
+function GeneralSettingsView({
+  activeSection,
+  logoPath,
+  logoUrl,
+  onBack,
+  onLogoChange
+}: {
+  activeSection: Section;
+  logoPath: string;
+  logoUrl: string;
+  onBack: () => void;
+  onLogoChange: (logoPath: string, logoUrl: string) => void;
+}) {
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const [logoStatus, setLogoStatus] = useState<RefreshStatus>({
+    message: "",
+    state: "idle"
+  });
+  const [invitationEmail, setInvitationEmail] = useState("");
+  const [invitationRole, setInvitationRole] = useState<WorkspaceRole>("viewer");
+  const [invitationStatus, setInvitationStatus] = useState<RefreshStatus>({
+    message: "",
+    state: "idle"
+  });
+  const [googleConnection, setGoogleConnection] =
+    useState<GoogleConnectionStatus | null>(null);
+  const [googleStatus, setGoogleStatus] = useState<RefreshStatus>({
+    message: "",
+    state: "loading"
+  });
+
+  useEffect(() => {
+    const parameters = new URLSearchParams(window.location.search);
+    const result = parameters.get("google");
+
+    if (result === "connected" || result === "error") {
+      window.setTimeout(
+        () =>
+          setGoogleStatus(
+            result === "connected"
+              ? { message: "Google service connected.", state: "success" }
+              : {
+                  message:
+                    parameters.get("google_message") ||
+                    "Google service connection failed.",
+                  state: "error"
+                }
+          ),
+        0
+      );
+    }
+
+    if (result) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
+    void loadGoogleConnection();
+
+    async function loadGoogleConnection() {
+      try {
+        const response = await fetch("/api/integrations/google/status");
+        const payload = (await response.json()) as GoogleConnectionStatus & {
+          error?: string;
+        };
+        if (!response.ok) {
+          throw new Error(payload.error || "Google connection status failed.");
+        }
+        setGoogleConnection(payload);
+        if (!result) setGoogleStatus({ message: "", state: "idle" });
+      } catch (error) {
+        setGoogleStatus({
+          message:
+            error instanceof Error ? error.message : "Google connection status failed.",
+          state: "error"
+        });
+      }
+    }
+  }, []);
+
+  async function disconnectGoogleService(service: "analytics" | "youtube") {
+    setGoogleStatus({ message: "Disconnecting service...", state: "loading" });
+
+    try {
+      const response = await fetch("/api/integrations/google/disconnect", {
+        body: JSON.stringify({ service }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Disconnect failed.");
+
+      setGoogleConnection((current) =>
+        current
+          ? {
+              ...current,
+              accountEmail:
+                service === "youtube" && !current.analytics.enabled
+                  ? null
+                  : service === "analytics" && !current.youtube.enabled
+                  ? null
+                  : current.accountEmail,
+              analytics:
+                service === "analytics"
+                  ? { enabled: false, propertyId: null, propertyName: null }
+                  : current.analytics,
+              youtube:
+                service === "youtube"
+                  ? { channelTitle: null, enabled: false }
+                  : current.youtube
+            }
+          : current
+      );
+      setGoogleStatus({ message: "Google service disconnected.", state: "success" });
+    } catch (error) {
+      setGoogleStatus({
+        message: error instanceof Error ? error.message : "Disconnect failed.",
+        state: "error"
+      });
+    }
+  }
+
+  async function sendInvitation(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setInvitationStatus({ message: "Sending invitation...", state: "loading" });
+
+    try {
+      const response = await fetch("/api/admin/invitations", {
+        body: JSON.stringify({ email: invitationEmail, role: invitationRole }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const result = (await response.json()) as { email?: string; error?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error || "Invitation could not be sent.");
+      }
+
+      setInvitationEmail("");
+      setInvitationStatus({
+        message: `Invitation sent to ${result.email ?? invitationEmail.trim()}.`,
+        state: "success"
+      });
+    } catch (error) {
+      setInvitationStatus({
+        message: error instanceof Error ? error.message : "Invitation could not be sent.",
+        state: "error"
+      });
+    }
+  }
+
+  async function uploadLogo(file: File) {
+    setLogoStatus({ message: "Preparing logo...", state: "loading" });
+
+    try {
+      const logoBlob = await createSquareImageBlob(file);
+      const supabase = createBrowserSupabaseClient();
+      const nextLogoPath = `love-strings/app-logo-${Date.now()}.jpg`;
+      const { error: uploadError } = await supabase.storage
+        .from("branding")
+        .upload(nextLogoPath, logoBlob, {
+          cacheControl: "3600",
+          contentType: "image/jpeg",
+          upsert: false
+        });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      const { error: settingsError } = await supabase
+        .from("app_workspace_settings")
+        .update({ logo_path: nextLogoPath })
+        .eq("workspace_id", loveStringsWorkspaceId);
+
+      if (settingsError) {
+        await supabase.storage.from("branding").remove([nextLogoPath]);
+        throw settingsError;
+      }
+
+      const { data: signedLogo, error: signedLogoError } = await supabase.storage
+        .from("branding")
+        .createSignedUrl(nextLogoPath, 60 * 60);
+
+      if (signedLogoError || !signedLogo?.signedUrl) {
+        throw signedLogoError ?? new Error("Logo preview could not be created.");
+      }
+
+      onLogoChange(nextLogoPath, signedLogo.signedUrl);
+      setLogoStatus({ message: "App logo updated.", state: "success" });
+
+      if (logoPath && logoPath !== nextLogoPath) {
+        await supabase.storage.from("branding").remove([logoPath]);
+      }
+    } catch (error) {
+      setLogoStatus({
+        message: error instanceof Error ? error.message : "Logo upload failed.",
+        state: "error"
+      });
+    }
+  }
+
+  return (
+    <section className="user-settings-canvas" aria-labelledby="general-settings-title">
+      <header className="user-settings-header">
+        <div>
+          <p className="eyebrow">Shared workspace</p>
+          <h1 id="general-settings-title">General Settings</h1>
+        </div>
+        <button className="user-settings-back" onClick={onBack} type="button">
+          <ArrowLeft aria-hidden size={18} />
+          <span>Back to {activeSection}</span>
+        </button>
+      </header>
+
+      <div className="user-settings-content">
+        <article className="general-settings-card general-settings-invitations">
+          <div className="general-settings-heading">
+            <div>
+              <p className="eyebrow">Workspace access</p>
+              <h2>Invite user</h2>
+            </div>
+          </div>
+
+          <form className="workspace-invitation-form" onSubmit={sendInvitation}>
+            <label>
+              <span>Email</span>
+              <input
+                autoComplete="email"
+                disabled={invitationStatus.state === "loading"}
+                onChange={(event) => setInvitationEmail(event.target.value)}
+                placeholder="name@example.com"
+                required
+                type="email"
+                value={invitationEmail}
+              />
+            </label>
+            <label>
+              <span>Role</span>
+              <select
+                disabled={invitationStatus.state === "loading"}
+                onChange={(event) =>
+                  setInvitationRole(event.target.value as WorkspaceRole)
+                }
+                value={invitationRole}
+              >
+                <option value="viewer">Viewer</option>
+                <option value="member">Member</option>
+                <option value="owner">Owner</option>
+              </select>
+            </label>
+            <button disabled={invitationStatus.state === "loading"} type="submit">
+              <Send aria-hidden size={16} />
+              <span>
+                {invitationStatus.state === "loading" ? "Sending..." : "Send invitation"}
+              </span>
+            </button>
+          </form>
+          {invitationStatus.message ? (
+            <p
+              className={
+                invitationStatus.state === "error" ? "settings-error" : "settings-status"
+              }
+              role={invitationStatus.state === "error" ? "alert" : "status"}
+            >
+              {invitationStatus.message}
+            </p>
+          ) : null}
+        </article>
+
+        <article className="general-settings-card google-services-card">
+          <div className="general-settings-heading">
+            <div>
+              <p className="eyebrow">External services</p>
+              <h2>Google services</h2>
+            </div>
+          </div>
+
+          <div className="google-account-summary">
+            <span>Google account</span>
+            <strong>{googleConnection?.accountEmail ?? "Not connected"}</strong>
+          </div>
+
+          <div className="google-service-list">
+            <div className="google-service-row">
+              <div>
+                <strong>YouTube</strong>
+                <span>
+                  {googleConnection?.youtube.enabled
+                    ? googleConnection.youtube.channelTitle || "Connected channel"
+                    : "Not connected"}
+                </span>
+              </div>
+              {googleConnection?.youtube.enabled ? (
+                <button
+                  disabled={googleStatus.state === "loading"}
+                  onClick={() => void disconnectGoogleService("youtube")}
+                  type="button"
+                >
+                  Disconnect
+                </button>
+              ) : (
+                <button
+                  disabled={googleStatus.state === "loading"}
+                  onClick={() =>
+                    window.location.assign(
+                      "/api/integrations/google/connect?service=youtube"
+                    )
+                  }
+                  type="button"
+                >
+                  <LinkIcon aria-hidden size={16} />
+                  Connect
+                </button>
+              )}
+            </div>
+
+            <div className="google-service-row">
+              <div>
+                <strong>Google Analytics</strong>
+                <span>
+                  {googleConnection?.analytics.enabled
+                    ? googleConnection.analytics.propertyName ||
+                      `Property ${googleConnection.analytics.propertyId}`
+                    : "Not connected"}
+                </span>
+              </div>
+              {googleConnection?.analytics.enabled ? (
+                <button
+                  disabled={googleStatus.state === "loading"}
+                  onClick={() => void disconnectGoogleService("analytics")}
+                  type="button"
+                >
+                  Disconnect
+                </button>
+              ) : (
+                <button
+                  disabled={googleStatus.state === "loading"}
+                  onClick={() =>
+                    window.location.assign(
+                      "/api/integrations/google/connect?service=analytics"
+                    )
+                  }
+                  type="button"
+                >
+                  <LinkIcon aria-hidden size={16} />
+                  Connect
+                </button>
+              )}
+            </div>
+          </div>
+
+          {googleStatus.message ? (
+            <p
+              className={googleStatus.state === "error" ? "settings-error" : "settings-status"}
+              role={googleStatus.state === "error" ? "alert" : "status"}
+            >
+              {googleStatus.message}
+            </p>
+          ) : null}
+        </article>
+
+        <article className="general-settings-card">
+          <div className="general-settings-heading">
+            <Image
+              alt="Current app logo"
+              className="general-settings-logo"
+              height={72}
+              src={logoUrl}
+              unoptimized
+              width={72}
+            />
+            <div>
+              <p className="eyebrow">App identity</p>
+              <h2>App logo</h2>
+            </div>
+          </div>
+
+          <input
+            accept="image/jpeg,image/png,image/webp"
+            aria-label="Choose app logo image"
+            className="user-avatar-file-input"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) {
+                void uploadLogo(file);
+              }
+            }}
+            ref={logoInputRef}
+            type="file"
+          />
+          <div className="general-settings-actions">
+            <button
+              disabled={logoStatus.state === "loading"}
+              onClick={() => logoInputRef.current?.click()}
+              type="button"
+            >
+              <Upload aria-hidden size={16} />
+              <span>
+                {logoStatus.state === "loading" ? "Uploading..." : "Upload logo"}
+              </span>
+            </button>
+            {logoStatus.message ? (
+              <p
+                className={logoStatus.state === "error" ? "settings-error" : "settings-status"}
+                role={logoStatus.state === "error" ? "alert" : "status"}
+              >
+                {logoStatus.message}
+              </p>
+            ) : null}
+          </div>
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function AboutDashboardView({
+  activeSection,
+  onBack
+}: {
+  activeSection: Section;
+  onBack: () => void;
+}) {
+  return (
+    <section className="user-settings-canvas" aria-labelledby="about-dashboard-title">
+      <header className="user-settings-header">
+        <div>
+          <p className="eyebrow">Love Strings</p>
+          <h1 id="about-dashboard-title">About Dashboard</h1>
+        </div>
+        <button className="user-settings-back" onClick={onBack} type="button">
+          <ArrowLeft aria-hidden size={18} />
+          <span>Back to {activeSection}</span>
+        </button>
+      </header>
+
+      <div className="user-settings-content">
+        <article className="about-dashboard-card">
+          <p className="eyebrow">Current version</p>
+          <h2>{appVersionLabel}</h2>
+          <p>
+            Love Strings Sprint Dashboard is an internal planning and tracking
+            tool. Its information is provided as is and should be reviewed before
+            it is used for financial, contractual, or publishing decisions.
+          </p>
+          <section className="about-dashboard-legal" aria-labelledby="license-terms-title">
+            <h3 id="license-terms-title">Proprietary license</h3>
+            <p>
+              This software, source code, database structure, user interface
+              design, documentation, product concepts, and related materials are
+              proprietary and confidential.
+            </p>
+            <p>
+              No part of this project may be copied, modified, published,
+              distributed, sublicensed, sold, hosted, or used commercially without
+              prior written permission from the copyright owner.
+            </p>
+            <p>
+              Access to this application, its repository, or project materials does
+              not grant any license or ownership rights.
+            </p>
+          </section>
+          <p className="about-dashboard-copyright">
+            Copyright (c) 2026 Dmitrii Baiakin, 1030 Vienna, Austria. All rights
+            reserved.
+          </p>
+        </article>
+      </div>
+    </section>
+  );
 }
 
 function UserSettingsView({
@@ -7266,7 +7937,7 @@ function UserSettingsView({
     setAvatarStatus({ message: "Preparing avatar...", state: "loading" });
 
     try {
-      const avatarBlob = await createAvatarImageBlob(file);
+      const avatarBlob = await createSquareImageBlob(file);
       const supabase = createBrowserSupabaseClient();
       const nextAvatarPath = `${userId}/avatar-${Date.now()}.jpg`;
       const { error: uploadError } = await supabase.storage
@@ -11058,6 +11729,71 @@ function MarketingCampaignBoard({
   }
 
   function addCampaignDay() {
+    if (isGeneralCampaign) {
+      const currentDates = campaignDays
+        .map((day) => parseCampaignDateKey(day.dateKey))
+        .filter((date): date is Date => Boolean(date))
+        .sort((firstDate, secondDate) => firstDate.getTime() - secondDate.getTime());
+      const campaignStartDate = parseCampaignDate(appliedGeneralStartDateInput);
+      const latestDate = currentDates[currentDates.length - 1];
+      const nextDate = latestDate
+        ? addUtcDays(latestDate, 1)
+        : campaignStartDate ?? parseCampaignDate(appliedReleaseDateInput);
+
+      if (!nextDate) return;
+
+      const nextDateKey = nextDate.toISOString().slice(0, 10);
+      const nextEndDateInput = formatDateForInput(nextDate);
+      const nextDayNumber = campaignDays.length + 1;
+
+      setReleaseDateInput(nextEndDateInput);
+      setAppliedReleaseDateInput(nextEndDateInput);
+      onReleaseDateSave(campaign.id, nextEndDateInput);
+      updateCampaignDaysState((currentDays) =>
+        [
+          ...currentDays,
+          {
+            dayNumber: nextDayNumber,
+            date: formatCampaignDate(nextDate),
+            dateKey: nextDateKey,
+            isDefaultDay: true,
+            releaseOffset: 0,
+            clipName: "General content",
+            extraTasks: [],
+            statuses: {
+              facebookPost: "irrelevant" as const,
+              instagramUpload: "not-started" as const,
+              production: "not-started" as const,
+              websiteUpdate: "irrelevant" as const,
+              youtubePost: "irrelevant" as const,
+              youtubeUpload: "not-started" as const
+            }
+          }
+        ]
+          .sort((firstDay, secondDay) =>
+            firstDay.dateKey.localeCompare(secondDay.dateKey)
+          )
+          .map((day, index) => ({
+            ...day,
+            dayNumber: index + 1,
+            releaseOffset: Math.round(
+              ((parseCampaignDateKey(day.dateKey)?.getTime() ?? nextDate.getTime()) -
+                nextDate.getTime()) /
+                86400000
+            )
+          }))
+      );
+      window.setTimeout(
+        () =>
+          onFocus(
+            campaign.id,
+            getMarketingCampaignDayElementId(campaign.id, nextDayNumber)
+          ),
+        0
+      );
+      return;
+    }
+
     const releaseDate =
       parseCampaignDate(appliedReleaseDateInput) ??
       new Date(Date.UTC(2026, 6, 10));
@@ -11448,18 +12184,16 @@ function MarketingCampaignBoard({
               </tbody>
             </table>
           </div>
-          {!isGeneralCampaign ? (
-            <div className="campaign-day-actions">
-              <button
-                className="add-campaign-day-button"
-                onClick={addCampaignDay}
-                type="button"
-              >
-                <Plus size={16} aria-hidden />
-                Add campaign day
-              </button>
-            </div>
-          ) : null}
+          <div className="campaign-day-actions">
+            <button
+              className="add-campaign-day-button"
+              onClick={addCampaignDay}
+              type="button"
+            >
+              <Plus size={16} aria-hidden />
+              Add campaign day
+            </button>
+          </div>
         </div>
       </section>
   );
@@ -13036,6 +13770,28 @@ function PlatformsView({
     []
   );
   const youtubeLastUpdate = getPlatformLastSnapshotDate(platformMetricRows, "youtube");
+  const analyticsActiveUsersTrend = getPlatformMetricTrend(
+    platformMetricRows,
+    "google-analytics",
+    "active_users_30d",
+    []
+  );
+  const analyticsSessionsTrend = getPlatformMetricTrend(
+    platformMetricRows,
+    "google-analytics",
+    "sessions_30d",
+    []
+  );
+  const analyticsPageViewsTrend = getPlatformMetricTrend(
+    platformMetricRows,
+    "google-analytics",
+    "page_views_30d",
+    []
+  );
+  const analyticsLastUpdate = getPlatformLastSnapshotDate(
+    platformMetricRows,
+    "google-analytics"
+  );
   const youtubeMusicSubscriberTrend = getPlatformMetricTrend(
     platformMetricRows,
     "youtube-music",
@@ -13093,7 +13849,7 @@ function PlatformsView({
         hideHeading
         platforms={getPlatformsViewStats(platformStatsData)}
         title="All Platform Metrics"
-        description="Manual seed values now; later these cards will read daily snapshots from Supabase."
+        description="Daily platform snapshots collected into the shared Supabase history."
         variant="full"
         renderCardAddon={(platform) =>
           <>
@@ -13131,6 +13887,28 @@ function PlatformsView({
                     color: "#2f75a8",
                     label: "Lifetime views",
                     points: youtubeTotalViewsTrend
+                  }
+                ]}
+                title="Evolution graphs"
+              />
+            ) : null}
+            {platform.slug === "google-analytics" ? (
+              <PlatformTrendPanelGroup
+                charts={[
+                  {
+                    color: "#1f7a58",
+                    label: "Active users, last 30 days",
+                    points: analyticsActiveUsersTrend
+                  },
+                  {
+                    color: "#c79522",
+                    label: "Sessions, last 30 days",
+                    points: analyticsSessionsTrend
+                  },
+                  {
+                    color: "#2f75a8",
+                    label: "Page views, last 30 days",
+                    points: analyticsPageViewsTrend
                   }
                 ]}
                 title="Evolution graphs"
@@ -13176,6 +13954,16 @@ function PlatformsView({
               Last update: {formatPlatformUpdateTimestamp(
                 youtubeLastUpdate,
                 getPlatformLastSnapshotImportedAt(platformMetricRows, "youtube")
+              )}
+            </span>
+          ) : platform.slug === "google-analytics" && analyticsLastUpdate ? (
+            <span className="platform-card-header-meta">
+              Last update: {formatPlatformUpdateTimestamp(
+                analyticsLastUpdate,
+                getPlatformLastSnapshotImportedAt(
+                  platformMetricRows,
+                  "google-analytics"
+                )
               )}
             </span>
           ) : platform.slug === "youtube-music" && youtubeMusicLastUpdate ? (
@@ -14175,6 +14963,7 @@ function getPlatformsViewStats(stats: typeof platformStats) {
   const platformOrder = [
     "instagram",
     "youtube",
+    "google-analytics",
     "youtube-music",
     "spotify",
     "apple-music",
