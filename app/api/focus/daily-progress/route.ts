@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireWorkspaceAccess } from "@/lib/server/workspace-owner";
 
 type FocusStatus = "not-started" | "in-progress" | "done" | "irrelevant";
 type FocusSource = "Marketing" | "Production" | "Other";
@@ -22,10 +23,6 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 export async function GET(request: NextRequest) {
-  if (!hasValidBasicAuth(request)) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  }
-
   const date = normalizeDate(request.nextUrl.searchParams.get("date") ?? "");
 
   if (!date) {
@@ -33,7 +30,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    return NextResponse.json({ items: await loadItems(date), status: "ok" });
+    const { workspaceId } = await requireWorkspaceAccess(request);
+    return NextResponse.json({ items: await loadItems(date, workspaceId), status: "ok" });
   } catch (error) {
     return NextResponse.json(
       { error: getErrorMessage(error, "Daily focus progress load failed.") },
@@ -43,11 +41,12 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  if (!hasValidBasicAuth(request) || !isSameOriginWrite(request)) {
+  if (!isSameOriginWrite(request)) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
   try {
+    const { workspaceId } = await requireWorkspaceAccess(request);
     const payload = (await request.json()) as { item?: DailyProgressItem };
     const item = normalizeItem(payload.item);
     const supabase = createServiceSupabaseClient();
@@ -57,14 +56,15 @@ export async function POST(request: NextRequest) {
         label: item.label,
         source: item.source,
         status: item.status,
-        task_key: item.taskKey
+        task_key: item.taskKey,
+        workspace_id: workspaceId
       },
-      { onConflict: "activity_date,task_key" }
+      { onConflict: "workspace_id,activity_date,task_key" }
     );
 
     if (error) throw error;
 
-    return NextResponse.json({ items: await loadItems(item.date), status: "ok" });
+    return NextResponse.json({ items: await loadItems(item.date, workspaceId), status: "ok" });
   } catch (error) {
     return NextResponse.json(
       { error: getErrorMessage(error, "Daily focus progress save failed.") },
@@ -73,12 +73,13 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function loadItems(date: string) {
+async function loadItems(date: string, workspaceId: string) {
   const supabase = createServiceSupabaseClient();
   const { data, error } = await supabase
     .from("focus_daily_progress")
     .select("activity_date, task_key, source, label, status")
     .eq("activity_date", date)
+    .eq("workspace_id", workspaceId)
     .order("updated_at", { ascending: true });
 
   if (error) throw error;
@@ -117,21 +118,6 @@ function normalizeItem(item?: DailyProgressItem): DailyProgressItem {
 
 function normalizeDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
-}
-
-function hasValidBasicAuth(request: NextRequest) {
-  const expectedUser = process.env.APP_BASIC_AUTH_USER;
-  const expectedPassword = process.env.APP_BASIC_AUTH_PASSWORD;
-
-  if (!expectedUser || !expectedPassword) {
-    return process.env.NODE_ENV === "development";
-  }
-
-  const expectedAuthorization = `Basic ${Buffer.from(
-    `${expectedUser}:${expectedPassword}`
-  ).toString("base64")}`;
-
-  return request.headers.get("authorization") === expectedAuthorization;
 }
 
 function isSameOriginWrite(request: NextRequest) {

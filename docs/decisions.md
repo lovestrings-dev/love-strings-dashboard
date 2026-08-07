@@ -828,3 +828,73 @@ Reason:
 
 - Roles and settings establish a safe foundation for Members and read-only Viewers without splitting the shared band data.
 - Shipping the tested Google connection now gives the current workspace immediate value while avoiding a rushed multi-tenant migration late in the release cycle.
+
+## 2026-08-07 - Love Strings as Reference Workspace, Not Application Variant
+
+Decision:
+
+- Treat Love Strings as the flagship/reference workspace used to develop and validate the product, never as a special application instance.
+- Keep all application features, UI behavior, backend logic, and database schema shared across workspaces.
+- Express legitimate workspace differences through workspace-scoped data, settings, branding, permissions, integrations, or explicit feature flags.
+- Do not duplicate code or introduce workspace-specific application branches. New capabilities developed with Love Strings are available to every workspace by default unless an explicit workspace-scoped feature flag controls rollout.
+
+Reason:
+
+- A single product implementation avoids drift, makes security guarantees consistent, and lets every workspace benefit from improvements immediately.
+- Workspace isolation belongs in data ownership and authorization boundaries, not in separate application behavior.
+
+## 2026-08-07 - Invitation-Only Workspace Membership
+
+Decision:
+
+- Authentication creates an account profile only; it never creates workspace membership.
+- Store each invitation as a pending, token-protected, workspace-scoped record and create membership only after the authenticated recipient accepts it server-side.
+- Make acceptance idempotent by using the existing `(workspace_id, user_id)` membership key and a single accepted invitation record.
+- Use a regular Supabase invitation for new accounts and a magic-link sign-in for an existing account joining an additional workspace.
+
+Reason:
+
+- A user can safely belong to multiple independently invited workspaces without gaining implicit access to Love Strings or any other workspace.
+- The server validates recipient identity, role, invitation expiry, and intended workspace before any membership write occurs.
+
+## 2026-08-07 - Server-Only Empty Workspace Provisioning
+
+Decision:
+
+- Provision a new workspace atomically with only its workspace record, settings, initial Owner membership, and that owner's dashboard-preference row.
+- Do not copy operational, analytics, integration, CRM, or branding data from Love Strings or any other workspace.
+- Require an explicit platform-operator registry entry for workspace creation; the server assigns the authenticated platform operator as the initial workspace Owner.
+- Remove database-level workspace ID defaults so a missing workspace scope fails rather than falling back to Love Strings.
+
+Reason:
+
+- Clean provisioning keeps tenant data isolated from the first record while preserving one shared application implementation.
+- Platform authority remains separate from workspace roles and is never trusted from a client request.
+
+## 2026-08-07 - Beta 1.14 Multi-Workspace Isolation Boundary
+
+Decision:
+
+- Release the completed multi-workspace segregation foundation as Beta 1.14.
+- Resolve normal application access exclusively from an authenticated user's
+  active workspace membership; do not use platform-operator status as an
+  operational data bypass.
+- Use a server-validated HTTP-only active-workspace cookie and a full client
+  reload when switching, rather than retaining client module state across
+  tenants.
+- Treat empty-workspace rendering as part of tenant isolation. Modules must
+  render a real empty state rather than fall back to Love Strings seed data or
+  browser-local drafts.
+- Keep the current Google service connection workspace-scoped and secure, but
+  defer the Love Strings-specific Analytics property and scheduled collector
+  redesign until each workspace can configure its own collection identity.
+
+Reason:
+
+- The first real second workspace, Test Band, makes tenant boundaries concrete
+  rather than theoretical. A user should be able to move between independent
+  bands without seeing a previous band's songs, roadmap, branding, metrics, or
+  browser-cached operational records.
+- QA found that a default Roadmap Phase 1 could still appear in an empty
+  workspace. Removing that fallback confirmed that even presentation defaults
+  must respect the same isolation contract as database policies.

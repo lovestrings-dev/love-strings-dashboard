@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireWorkspaceAccess } from "@/lib/server/workspace-owner";
 
 type OtherTaskStatus = "not-started" | "in-progress" | "done" | "irrelevant";
 type OtherTask = {
@@ -32,7 +33,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    return NextResponse.json({ status: "ok", tasks: await loadTasks() });
+    const { workspaceId } = await requireWorkspaceAccess(request);
+    return NextResponse.json({ status: "ok", tasks: await loadTasks(workspaceId) });
   } catch (error) {
     return NextResponse.json(
       { error: getErrorMessage(error, "Other tasks load failed.") },
@@ -49,6 +51,7 @@ export async function POST(request: NextRequest) {
   const payload = (await request.json()) as { tasks?: OtherTask[] };
 
   try {
+    const { workspaceId } = await requireWorkspaceAccess(request);
     const tasks = (payload.tasks ?? []).map(normalizeTask);
     const supabase = createServiceSupabaseClient();
 
@@ -60,15 +63,16 @@ export async function POST(request: NextRequest) {
           notes: task.notes,
           source: "app",
           status: task.status,
-          title: task.title
+          title: task.title,
+          workspace_id: workspaceId
         })),
-        { onConflict: "stable_key" }
+        { onConflict: "workspace_id,stable_key" }
       );
 
       if (error) throw error;
     }
 
-    return NextResponse.json({ status: "ok", tasks: await loadTasks() });
+    return NextResponse.json({ status: "ok", tasks: await loadTasks(workspaceId) });
   } catch (error) {
     return NextResponse.json(
       { error: getErrorMessage(error, "Other tasks save failed.") },
@@ -90,11 +94,13 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
+    const { workspaceId } = await requireWorkspaceAccess(request);
     const supabase = createServiceSupabaseClient();
     const { error } = await supabase
       .from("focus_other_tasks")
       .delete()
-      .eq("stable_key", stableKey);
+      .eq("stable_key", stableKey)
+      .eq("workspace_id", workspaceId);
 
     if (error) throw error;
 
@@ -107,11 +113,12 @@ export async function DELETE(request: NextRequest) {
   }
 }
 
-async function loadTasks() {
+async function loadTasks(workspaceId: string) {
   const supabase = createServiceSupabaseClient();
   const { data, error } = await supabase
     .from("focus_other_tasks")
     .select("stable_key, title, notes, due_date, status")
+    .eq("workspace_id", workspaceId)
     .order("due_date", { ascending: true })
     .order("created_at", { ascending: true });
 

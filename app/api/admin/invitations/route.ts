@@ -1,14 +1,13 @@
-import { createServerClient } from "@supabase/ssr";
-import { createClient } from "@supabase/supabase-js";
+import { createHash, randomBytes } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
+import {
+  requireWorkspaceAdministrator,
+  WorkspaceAccessError
+} from "@/lib/server/workspace-owner";
 
-type WorkspaceRole = "member" | "owner" | "viewer";
+type WorkspaceRole = "admin" | "member" | "owner" | "viewer";
 
-const loveStringsWorkspaceId = "00000000-0000-0000-0000-000000000001";
 const productionAppUrl = "https://love-strings-dashboard.vercel.app";
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 export async function POST(request: NextRequest) {
   if (!isSameOriginRequest(request)) {
@@ -16,26 +15,8 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const user = await getAuthenticatedUser(request);
-    if (!user) {
-      return NextResponse.json({ error: "Sign in again to send invitations." }, { status: 401 });
-    }
-
-    const serviceClient = createServiceSupabaseClient();
-    const { data: membership, error: membershipError } = await serviceClient
-      .from("app_workspace_members")
-      .select("role")
-      .eq("workspace_id", loveStringsWorkspaceId)
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    if (membershipError) throw membershipError;
-    if (membership?.role !== "owner") {
-      return NextResponse.json(
-        { error: "Only a workspace Owner can invite users." },
-        { status: 403 }
-      );
-    }
+    const { role: inviterRole, serviceClient, user: inviter, workspaceId } =
+      await requireWorkspaceAdministrator(request);
 
     const payload = (await request.json()) as { email?: string; role?: string };
     const email = payload.email?.trim().toLowerCase() ?? "";
@@ -47,21 +28,57 @@ export async function POST(request: NextRequest) {
     if (!role) {
       return NextResponse.json({ error: "Choose a valid workspace role." }, { status: 400 });
     }
+    if (!canAssignRole(inviterRole, role)) {
+      return NextResponse.json(
+        { error: "Only a workspace Owner can invite Owners or Admins." },
+        { status: 403 }
+      );
+    }
 
-    const { data: invitation, error: invitationError } =
-      await serviceClient.auth.admin.inviteUserByEmail(email, {
-        data: { workspace_role: role },
-        redirectTo: `${getPublicAppUrl()}/set-password`
-      });
+    const invitationToken = randomBytes(32).toString("base64url");
+    const tokenHash = createHash("sha256").update(invitationToken).digest("hex");
+    const { data: workspaceInvitation, error: workspaceInvitationError } =
+      await serviceClient
+        .from("app_workspace_invitations")
+        .insert({
+          created_by: inviter.id,
+          email,
+          role,
+          token_hash: tokenHash,
+          workspace_id: workspaceId
+        })
+        .select("id")
+        .single();
+    if (workspaceInvitationError) {
+      if (workspaceInvitationError.code === "23505") {
+        return NextResponse.json(
+          { error: "This email already has a pending invitation to this workspace." },
+          { status: 409 }
+        );
+      }
+      throw workspaceInvitationError;
+    }
+
+    const passwordSetupUrl = `${getPublicAppUrl()}/set-password?workspace_invitation=${invitationToken}`;
+    const { data: invitation, error: invitationError } = await serviceClient.auth.admin.inviteUserByEmail(
+      email,
+      { redirectTo: passwordSetupUrl }
+    );
 
     if (invitationError) {
       const message = invitationError.message.toLowerCase();
       if (message.includes("already") || message.includes("registered")) {
-        return NextResponse.json(
-          { error: "This email already has an account or a pending invitation." },
-          { status: 409 }
-        );
+        const { error: magicLinkError } = await serviceClient.auth.signInWithOtp({
+          email,
+          options: {
+            emailRedirectTo: `${passwordSetupUrl}&workspace_join=1`
+          }
+        });
+        if (!magicLinkError) {
+          return NextResponse.json({ email, role, status: "sent" });
+        }
       }
+      await serviceClient.from("app_workspace_invitations").delete().eq("id", workspaceInvitation.id);
       throw invitationError;
     }
 
@@ -69,56 +86,14 @@ export async function POST(request: NextRequest) {
       throw new Error("Supabase did not return the invited user.");
     }
 
-    const { error: roleError } = await serviceClient
-      .from("app_workspace_members")
-      .upsert(
-        {
-          role,
-          user_id: invitation.user.id,
-          workspace_id: loveStringsWorkspaceId
-        },
-        { onConflict: "workspace_id,user_id" }
-      );
-
-    if (roleError) throw roleError;
-
     return NextResponse.json({ email, role, status: "sent" });
   } catch (error) {
+    const status = error instanceof WorkspaceAccessError ? error.status : 500;
     return NextResponse.json(
       { error: getErrorMessage(error, "Invitation could not be sent.") },
-      { status: 500 }
+      { status }
     );
   }
-}
-
-async function getAuthenticatedUser(request: NextRequest) {
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error("Supabase authentication is not configured.");
-  }
-
-  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll: () => request.cookies.getAll(),
-      setAll: () => undefined
-    }
-  });
-  const {
-    data: { user },
-    error
-  } = await supabase.auth.getUser();
-
-  if (error) return null;
-  return user;
-}
-
-function createServiceSupabaseClient() {
-  if (!supabaseUrl || !supabaseServiceRoleKey) {
-    throw new Error("Supabase administration is not configured.");
-  }
-
-  return createClient(supabaseUrl, supabaseServiceRoleKey, {
-    auth: { autoRefreshToken: false, persistSession: false }
-  });
 }
 
 function getPublicAppUrl() {
@@ -143,7 +118,13 @@ function isSameOriginRequest(request: NextRequest) {
 }
 
 function normalizeRole(value?: string): WorkspaceRole | null {
-  return value === "owner" || value === "member" || value === "viewer" ? value : null;
+  return value === "owner" || value === "admin" || value === "member" || value === "viewer"
+    ? value
+    : null;
+}
+
+function canAssignRole(inviterRole: string, invitedRole: WorkspaceRole) {
+  return inviterRole === "owner" || invitedRole === "member" || invitedRole === "viewer";
 }
 
 function isEmail(value: string) {

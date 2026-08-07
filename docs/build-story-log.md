@@ -928,3 +928,56 @@ Short hooks:
 Series connection:
 
 - Separate user accounts made identity explicit. Workspace roles decide who can manage shared connections. Google onboarding is the first step toward making a fresh musician workspace configurable without editing deployment secrets by hand.
+
+### Reel: The Second Band Test
+
+Core story:
+
+- LS Dashboard began as a practical system for Love Strings, so the earliest
+  data, labels, and defaults naturally revolved around one band.
+- The important product decision was not to make a second Love Strings copy.
+  Love Strings became the flagship/reference workspace inside one shared app:
+  build a feature once, then let every workspace receive it by default.
+- That required more than adding another row in a database. We introduced
+  workspace roles, invitation-only membership, workspace-scoped branding and
+  integrations, and a safe way to create the first real second workspace:
+  Test Band.
+- The moment both `Love Strings` and `Test Band` appeared in the selector made
+  the new product shape visible. Two independent bands could use the same
+  dashboard without sharing songs, campaigns, events, money, analytics, or
+  logos.
+- During the final QA, Test Band was clean in the database but its empty
+  Dashboard still showed Love Strings' default Roadmap Phase 1. That small
+  visible leak mattered: isolation is not complete if another customer's plan
+  can appear even as a harmless-looking default.
+- We removed the fallback and gave an empty workspace its own honest empty
+  state instead.
+
+Short hooks:
+
+- "We did not build a second app for a second band."
+- "The second workspace found the bug the first workspace could never show us."
+- "If Test Band can see Love Strings' roadmap, the app is not multi-workspace yet."
+- "Build it once. Let every band use it separately."
+
+Visual sequence:
+
+1. Show early Love Strings Dashboard screens and the original one-band framing.
+2. Show the roles/settings work: Owner, Admin, Member, Viewer.
+3. Show Test Band being created with an empty Dashboard.
+4. Open the workspace selector and show Love Strings beside Test Band.
+5. Switch from full Love Strings data to the empty Test Band state.
+6. Show the unexpected Phase 1 Roadmap card, then the corrected `No roadmap
+   phases yet` state.
+7. End on the principle: one codebase, separate workspace data.
+
+Human-build detail:
+
+- The milestone is not a generic SaaS story invented in advance. It came from
+  looking at a real Love Strings operating dashboard and asking whether another
+  band could use the exact same tool without inheriting Love Strings' history.
+- The QA finding is the useful emotional proof: a default can feel harmless to
+  the developer and still be wrong to the second customer.
+- This is a bridge from the earlier "one band, two logins" episode. First the
+  people gained separate identities; now independent bands gain separate
+  operating spaces, while future product features remain shared.

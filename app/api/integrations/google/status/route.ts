@@ -1,20 +1,19 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import {
-  loveStringsWorkspaceId,
-  requireWorkspaceOwner,
+  requireWorkspaceAdministrator,
   WorkspaceAccessError
 } from "@/lib/server/workspace-owner";
 
 export async function GET(request: NextRequest) {
   try {
-    const { serviceClient } = await requireWorkspaceOwner(request);
+    const { serviceClient, workspaceId } = await requireWorkspaceAdministrator(request);
     const { data, error } = await serviceClient
       .from("app_google_connections")
       .select(
         "google_account_email, youtube_enabled, youtube_channel_title, analytics_enabled, analytics_property_id, analytics_property_name, updated_at"
       )
-      .eq("workspace_id", loveStringsWorkspaceId)
+      .eq("workspace_id", workspaceId)
       .maybeSingle();
 
     if (error) throw error;
@@ -41,4 +40,3 @@ export async function GET(request: NextRequest) {
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Google connection status failed.";
 }
-

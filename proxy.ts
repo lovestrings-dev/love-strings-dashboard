@@ -1,5 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import {
+  activeWorkspaceCookieName,
+  parseWorkspaceId
+} from "@/lib/workspace";
 
 const cronSecret = process.env.CRON_SECRET;
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -47,19 +51,27 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  const { data: membership, error: membershipError } = await supabase
+  const { data: memberships, error: membershipError } = await supabase
     .from("app_workspace_members")
-    .select("role")
-    .eq("workspace_id", "00000000-0000-0000-0000-000000000001")
+    .select("workspace_id, role, created_at")
     .eq("user_id", user.id)
-    .maybeSingle();
+    .order("created_at", { ascending: true });
+
+  const requestedWorkspaceId = parseWorkspaceId(
+    request.cookies.get(activeWorkspaceCookieName)?.value
+  );
+  const membership = requestedWorkspaceId
+    ? memberships?.find((item) => item.workspace_id === requestedWorkspaceId)
+    : memberships?.[0];
 
   if (membershipError || !membership) {
     if (request.nextUrl.pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Workspace access denied." }, { status: 403 });
     }
-
-    return new NextResponse("Workspace access denied.", { status: 403 });
+    const noWorkspaceUrl = request.nextUrl.clone();
+    noWorkspaceUrl.pathname = "/no-workspace";
+    noWorkspaceUrl.search = "";
+    return NextResponse.redirect(noWorkspaceUrl);
   }
 
   if (
@@ -73,11 +85,24 @@ export async function proxy(request: NextRequest) {
     );
   }
 
+  if (request.cookies.get(activeWorkspaceCookieName)?.value !== membership.workspace_id) {
+    response.cookies.set(
+      activeWorkspaceCookieName,
+      membership.workspace_id,
+      {
+        httpOnly: true,
+        path: "/",
+        sameSite: "lax",
+        secure: request.nextUrl.protocol === "https:"
+      }
+    );
+  }
+
   return response;
 }
 
 function isPublicPath(pathname: string) {
-  return pathname === "/login" || pathname === "/set-password";
+  return pathname === "/login" || pathname === "/no-workspace" || pathname === "/set-password";
 }
 
 function isAuthorizedCronRefreshRequest(request: NextRequest) {

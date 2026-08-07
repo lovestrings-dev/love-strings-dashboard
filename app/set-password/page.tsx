@@ -10,6 +10,7 @@ export default function SetPasswordPage() {
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [hasCheckedInvitation, setHasCheckedInvitation] = useState(false);
+  const [isWorkspaceJoin, setIsWorkspaceJoin] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -30,6 +31,8 @@ export default function SetPasswordPage() {
       const authorizationCode = queryParameters.get("code");
       const tokenHash = queryParameters.get("token_hash");
       const invitationType = queryParameters.get("type");
+      const workspaceInvitation = queryParameters.get("workspace_invitation");
+      const workspaceJoin = queryParameters.get("workspace_join") === "1";
 
       let sessionEstablished = false;
 
@@ -54,7 +57,25 @@ export default function SetPasswordPage() {
       }
 
       if (sessionEstablished) {
-        window.history.replaceState({}, "", "/set-password");
+        if (workspaceInvitation) {
+          const response = await fetch("/api/invitations/accept", {
+            body: JSON.stringify({ token: workspaceInvitation }),
+            headers: { "Content-Type": "application/json" },
+            method: "POST"
+          });
+          if (!response.ok) {
+            setError(((await response.json()) as { error?: string }).error || "Invitation could not be accepted.");
+            sessionEstablished = false;
+          }
+        }
+        if (sessionEstablished) {
+          setIsWorkspaceJoin(workspaceJoin);
+          window.history.replaceState({}, "", "/set-password");
+          if (workspaceJoin) {
+            router.replace("/");
+            router.refresh();
+          }
+        }
       }
 
       setIsReady(sessionEstablished);
@@ -62,7 +83,7 @@ export default function SetPasswordPage() {
     }
 
     return () => listener.subscription.unsubscribe();
-  }, []);
+  }, [router]);
 
   async function savePassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -116,6 +137,8 @@ export default function SetPasswordPage() {
             This invitation could not be verified. Request a fresh invitation and
             open its link only once.
           </p>
+        ) : isWorkspaceJoin ? (
+          <p>Joining workspace...</p>
         ) : (
           <form className="login-form" onSubmit={savePassword}>
             <label>

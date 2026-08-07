@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { refreshAllMetricCollectors } from "@/lib/metrics/collectors";
+import { requireWorkspaceAccess } from "@/lib/server/workspace-owner";
 
 export async function GET(request: NextRequest) {
   if (!isAuthorizedRefreshRequest(request)) {
@@ -16,14 +17,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  const result = await refreshAllMetricCollectors();
+  const { workspaceId } = await requireWorkspaceAccess(request);
+  const result = await refreshAllMetricCollectors(workspaceId);
   return NextResponse.json({ ...result, status: "ok" });
 }
 
 function isAuthorizedRefreshRequest(request: NextRequest) {
   return (
     isAuthorizedCronRequest(request) ||
-    isAuthorizedBasicAuthRequest(request) ||
     isAuthorizedManualRefreshRequest(request)
   );
 }
@@ -37,25 +38,6 @@ function isAuthorizedCronRequest(request: NextRequest) {
       authorization &&
       authorization === `Bearer ${cronSecret}`
   );
-}
-
-function isAuthorizedBasicAuthRequest(request: NextRequest) {
-  const appUser = process.env.APP_BASIC_AUTH_USER;
-  const appPassword = process.env.APP_BASIC_AUTH_PASSWORD;
-  const authorization = request.headers.get("authorization");
-
-  if (!appUser || !appPassword || !authorization) {
-    return false;
-  }
-
-  const [scheme, credentials] = authorization.split(" ");
-
-  if (scheme !== "Basic" || !credentials) {
-    return false;
-  }
-
-  const [username, password] = atob(credentials).split(":");
-  return username === appUser && password === appPassword;
 }
 
 function isAuthorizedManualRefreshRequest(request: NextRequest) {

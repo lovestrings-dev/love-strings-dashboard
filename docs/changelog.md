@@ -473,3 +473,46 @@ Release checks:
 - Confirmed Google Analytics uses the same daily cron, app-open fallback, and manual Platforms refresh path as the existing collectors.
 - Verified the general-campaign add-day control after the full day list at desktop and 390px mobile widths.
 - TypeScript, lint, and the Next.js 16.2.9 production build pass locally.
+
+## Beta 1.14 (Release Candidate)
+
+Headline: **One shared dashboard can now safely serve independent workspaces.**
+
+Includes:
+
+- Established Love Strings as the flagship/reference workspace, not a separate application fork: all workspaces share the same application code, UI, backend, and schema.
+- Added the workspace `admin` role. Owners retain all Admin capabilities and future platform-level responsibilities; Admins manage their own workspace's members/viewers, integrations, and branding; Members operate normal workspace data; Viewers remain read-only.
+- Moved branding to workspace UUID storage namespaces and permitted Owner/Admin branding management only within their active workspace.
+- Replaced implicit Love Strings enrolment with server-validated, invitation-only workspace membership. Invitation acceptance is workspace-bound and idempotent, so a user can join several independently invited workspaces without affecting another membership.
+- Added server-only, platform-operator-restricted workspace provisioning. New workspaces receive only their workspace record, settings, initial Owner membership, and dashboard preference; no Love Strings operational, analytics, integration, CRM, or branding data is copied.
+- Created the first real second workspace, `Test Band`, and verified it has its own ID/settings and no operational data.
+- Added the membership-derived workspace selector and server-validated HTTP-only `ls_active_workspace` cookie. Switching hard-reloads the client boundary to discard prior workspace state.
+- Removed authenticated Love Strings workspace fallback. A valid selected membership is retained; missing/invalid selection resolves deterministically from the user's memberships; users with no memberships see a dedicated no-workspace state.
+- Made Dashboard, Marketing, Production, Platforms, Events, Budget, Focus, Roadmap, General Settings/branding, manual metrics, and Google connection routes resolve the selected workspace consistently.
+- Replaced browser-local operational-data hydration with server-scoped state so an empty workspace cannot revive stale Love Strings records.
+- Completed two-workspace isolation QA. It found one visible defect: an empty Test Band could show Love Strings' default Roadmap Phase 1. The fallback was removed and empty Roadmap now renders its own empty state.
+
+Google/OAuth security position:
+
+- Google sign-in remains separate from Google service connection; normal sign-in does not grant Gmail, Drive, YouTube, or Analytics content access.
+- Connected Google refresh grants remain encrypted server-side and are not returned through normal browser APIs. Connection records are workspace-owned and connection management is Owner/Admin scoped.
+- The existing Google Analytics property preference and scheduled collector are still Love Strings-specific; workspace-specific Analytics/YouTube collection is deliberately deferred.
+
+Database changes:
+
+- `202608060008_add_workspace_ownership_foundation.sql` through `202608060012_segregate_platform_analytics.sql`
+- `202608070001_add_workspace_admin_role.sql` through `202608070005_restrict_workspace_provisioning_function.sql`
+
+Release checks:
+
+- Remote migration history is synchronized through `202608070005`.
+- Test Band database readback confirms zero Production, Marketing, Events, Budget, Focus, Roadmap, analytics/account, and QR operational rows.
+- Workspace-scoped service routes, upserts, replacement functions, and delete paths were audited.
+- Lint, TypeScript, Next.js production build, and `git diff --check` pass.
+
+Not included in Beta 1.14:
+
+- Deployed authenticated smoke testing and external Test Band onboarding.
+- Invitation management UI, platform-owner workspace monitoring, and multi-workspace scheduled metrics refresh.
+- Workspace-specific Google Analytics property selection and YouTube collector redesign.
+- Gmail/CRM, Spotify, Deezer, and Amazon integrations.

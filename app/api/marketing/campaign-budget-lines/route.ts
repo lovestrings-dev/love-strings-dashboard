@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireWorkspaceAccess } from "@/lib/server/workspace-owner";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -7,11 +8,12 @@ const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 type BudgetLinePayload = { amount?: unknown; description?: unknown; id?: unknown };
 
 export async function POST(request: NextRequest) {
-  if (!hasValidAppAccess(request) || !isSameOriginWrite(request)) {
+  if (!isSameOriginWrite(request)) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
   try {
+    const { workspaceId } = await requireWorkspaceAccess(request);
     const payload = (await request.json()) as {
       campaignId?: string;
       lines?: BudgetLinePayload[];
@@ -37,7 +39,8 @@ export async function POST(request: NextRequest) {
     const supabase = createServiceSupabaseClient();
     const { error } = await supabase.rpc("replace_marketing_campaign_budget_lines", {
       p_campaign_id: payload.campaignId,
-      p_lines: lines
+      p_lines: lines,
+      p_workspace_id: workspaceId
     });
     if (error) throw error;
 
@@ -48,16 +51,6 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
-
-function hasValidAppAccess(request: NextRequest) {
-  const expectedUser = process.env.APP_BASIC_AUTH_USER;
-  const expectedPassword = process.env.APP_BASIC_AUTH_PASSWORD;
-  if (!expectedUser || !expectedPassword) return process.env.NODE_ENV === "development";
-  const expectedAuthorization = `Basic ${Buffer.from(
-    `${expectedUser}:${expectedPassword}`
-  ).toString("base64")}`;
-  return request.headers.get("authorization") === expectedAuthorization;
 }
 
 function isSameOriginWrite(request: NextRequest) {

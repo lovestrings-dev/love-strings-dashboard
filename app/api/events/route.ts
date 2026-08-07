@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireWorkspaceAccess } from "@/lib/server/workspace-owner";
 
 type BudgetSourceBucket = "events" | "production" | "marketing" | "other";
 type ProductionBudgetLine = {
@@ -78,7 +79,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const snapshot = await loadEventsSnapshot();
+    const { workspaceId } = await requireWorkspaceAccess(request);
+    const snapshot = await loadEventsSnapshot(workspaceId);
 
     return NextResponse.json({
       ...snapshot,
@@ -102,7 +104,8 @@ export async function POST(request: NextRequest) {
   const locations = payload.locations ?? [];
 
   try {
-    const savedSnapshot = await saveEventsSnapshot({ entries, locations });
+    const { workspaceId } = await requireWorkspaceAccess(request);
+    const savedSnapshot = await saveEventsSnapshot({ entries, locations, workspaceId });
 
     return NextResponse.json({
       ...savedSnapshot,
@@ -116,7 +119,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function loadEventsSnapshot() {
+async function loadEventsSnapshot(workspaceId: string) {
   const supabase = createServiceSupabaseClient();
   const [locationsResult, eventsResult, budgetLinesResult] = await Promise.all([
     supabase
@@ -124,12 +127,14 @@ async function loadEventsSnapshot() {
       .select(
         "id, stable_key, location_name, location_url, address, address_url, contact_name, contact_phone, contact_notes"
       )
+      .eq("workspace_id", workspaceId)
       .order("location_name", { ascending: true }),
     supabase
       .from("events")
       .select(
         "id, stable_key, event_date, event_name, event_url, poster_url, location_id, location_name, location_url, address, address_url"
       )
+      .eq("workspace_id", workspaceId)
       .order("event_date", { ascending: false }),
     supabase
       .from("event_budget_lines")
@@ -150,10 +155,12 @@ async function loadEventsSnapshot() {
 
 async function saveEventsSnapshot({
   entries,
-  locations
+  locations,
+  workspaceId
 }: {
   entries: EventEntry[];
   locations: LocationAddressBookEntry[];
+  workspaceId: string;
 }) {
   const supabase = createServiceSupabaseClient();
   const normalizedLocations = locations.map(normalizeLocationForSave);
@@ -166,13 +173,14 @@ async function saveEventsSnapshot({
     contact_name: location.contactName,
     contact_phone: location.contactPhone,
     contact_notes: location.contactNotes,
-    source: "app"
+    source: "app",
+    workspace_id: workspaceId
   }));
 
   if (locationRows.length > 0) {
     const { error: locationError } = await supabase
       .from("event_locations")
-      .upsert(locationRows, { onConflict: "stable_key" });
+      .upsert(locationRows, { onConflict: "workspace_id,stable_key" });
 
     if (locationError) throw locationError;
   }
@@ -180,12 +188,14 @@ async function saveEventsSnapshot({
   await deleteMissingRows({
     keepStableKeys: normalizedLocations.map((item) => item.stableKey),
     supabase,
-    table: "event_locations"
+    table: "event_locations",
+    workspaceId
   });
 
   const { data: savedLocations, error: savedLocationError } = await supabase
     .from("event_locations")
-    .select("id, stable_key");
+    .select("id, stable_key")
+    .eq("workspace_id", workspaceId);
 
   if (savedLocationError) throw savedLocationError;
 
@@ -213,14 +223,15 @@ async function saveEventsSnapshot({
       location_url: entry.locationUrl,
       address: entry.address,
       address_url: entry.addressUrl,
-      source: "app"
+      source: "app",
+      workspace_id: workspaceId
     };
   });
 
   if (eventRows.length > 0) {
     const { error: eventError } = await supabase
       .from("events")
-      .upsert(eventRows, { onConflict: "stable_key" });
+      .upsert(eventRows, { onConflict: "workspace_id,stable_key" });
 
     if (eventError) throw eventError;
   }
@@ -228,12 +239,14 @@ async function saveEventsSnapshot({
   await deleteMissingRows({
     keepStableKeys: normalizedEntries.map((item) => item.stableKey),
     supabase,
-    table: "events"
+    table: "events",
+    workspaceId
   });
 
   const { data: savedEvents, error: savedEventError } = await supabase
     .from("events")
-    .select("id, stable_key");
+    .select("id, stable_key")
+    .eq("workspace_id", workspaceId);
 
   if (savedEventError) throw savedEventError;
 
@@ -256,10 +269,14 @@ async function saveEventsSnapshot({
     }));
   });
 
-  const { error: deleteBudgetError } = await supabase
-    .from("event_budget_lines")
-    .delete()
-    .not("event_id", "is", null);
+  const workspaceEventIds = (savedEvents ?? []).map((event) => event.id);
+  const deleteBudgetResult = workspaceEventIds.length
+    ? await supabase
+        .from("event_budget_lines")
+        .delete()
+        .in("event_id", workspaceEventIds)
+    : { error: null };
+  const deleteBudgetError = deleteBudgetResult.error;
 
   if (deleteBudgetError) throw deleteBudgetError;
 
@@ -271,7 +288,7 @@ async function saveEventsSnapshot({
     if (budgetError) throw budgetError;
   }
 
-  return loadEventsSnapshot();
+  return loadEventsSnapshot(workspaceId);
 }
 
 function normalizeLocationForSave(location: LocationAddressBookEntry) {
@@ -332,15 +349,18 @@ function normalizeEventForSave(
 async function deleteMissingRows({
   keepStableKeys,
   supabase,
-  table
+  table,
+  workspaceId
 }: {
   keepStableKeys: string[];
   supabase: ReturnType<typeof createServiceSupabaseClient>;
   table: "event_locations" | "events";
+  workspaceId: string;
 }) {
   const { data: existingRows, error: selectError } = await supabase
     .from(table)
-    .select("id, stable_key");
+    .select("id, stable_key")
+    .eq("workspace_id", workspaceId);
 
   if (selectError) throw selectError;
 
@@ -356,7 +376,8 @@ async function deleteMissingRows({
   const { error } = await supabase
     .from(table)
     .delete()
-    .in("id", idsToDelete);
+    .in("id", idsToDelete)
+    .eq("workspace_id", workspaceId);
 
   if (error) throw error;
 }

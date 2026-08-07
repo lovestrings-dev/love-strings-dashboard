@@ -1,6 +1,6 @@
 "use client";
 
-import { Info, LogOut, Settings, UserRound } from "lucide-react";
+import { ChevronDown, Info, LogOut, Settings, UserRound } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
@@ -19,8 +19,17 @@ export function AccountControl({
   const [email, setEmail] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [workspaceRole, setWorkspaceRole] = useState<
-    "member" | "owner" | "viewer" | null
+    "admin" | "member" | "owner" | "viewer" | null
   >(null);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
+  const [isSwitchingWorkspace, setIsSwitchingWorkspace] = useState(false);
+  const [workspaces, setWorkspaces] = useState<Array<{
+    id: string;
+    logoPath: string;
+    name: string;
+    role: "admin" | "member" | "owner" | "viewer";
+    slug: string;
+  }>>([]);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const accountControlRef = useRef<HTMLDivElement>(null);
@@ -36,23 +45,33 @@ export function AccountControl({
         return;
       }
 
-      const [profileResult, membershipResult] = await Promise.all([
+      const [profileResult, workspaceResult, workspacesResult] = await Promise.all([
         supabase
           .from("app_profiles")
           .select("avatar_path, display_name")
           .eq("id", user.id)
           .maybeSingle(),
-        supabase
-          .from("app_workspace_members")
-          .select("role")
-          .eq("workspace_id", "00000000-0000-0000-0000-000000000001")
-          .eq("user_id", user.id)
-          .maybeSingle()
+        fetch("/api/workspace/active"),
+        fetch("/api/workspaces")
       ]);
       const profile = profileResult.data;
-      const loadedRole = membershipResult.data?.role;
+      const workspacePayload = (await workspaceResult.json().catch(() => null)) as {
+        workspaceId?: string;
+        role?: string;
+      } | null;
+      const workspaceListPayload = (await workspacesResult.json().catch(() => null)) as {
+        workspaces?: typeof workspaces;
+      } | null;
+      if (workspacesResult.ok && Array.isArray(workspaceListPayload?.workspaces)) {
+        setWorkspaces(workspaceListPayload.workspaces);
+      }
+      setActiveWorkspaceId(workspaceResult.ok ? workspacePayload?.workspaceId ?? "" : "");
+      const loadedRole = workspaceResult.ok ? workspacePayload?.role : null;
       setWorkspaceRole(
-        loadedRole === "owner" || loadedRole === "member" || loadedRole === "viewer"
+        loadedRole === "owner" ||
+        loadedRole === "admin" ||
+        loadedRole === "member" ||
+        loadedRole === "viewer"
           ? loadedRole
           : null
       );
@@ -145,6 +164,23 @@ export function AccountControl({
     router.refresh();
   }
 
+  async function switchWorkspace(workspaceId: string) {
+    if (!workspaceId || workspaceId === activeWorkspaceId) return;
+    setIsSwitchingWorkspace(true);
+    try {
+      const response = await fetch("/api/workspaces", {
+        body: JSON.stringify({ workspaceId }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      if (!response.ok) throw new Error("Workspace switch failed.");
+      window.location.reload();
+    } catch (error) {
+      console.error("Unable to switch workspace.", error);
+      setIsSwitchingWorkspace(false);
+    }
+  }
+
   return (
     <div
       className="account-control"
@@ -167,6 +203,26 @@ export function AccountControl({
       </div>
       {isMenuOpen ? (
         <div className="account-menu" role="menu">
+          {workspaces.length > 1 ? (
+            <label className="workspace-selector">
+              <span>Workspace</span>
+              <span className="workspace-selector-control">
+                <select
+                  aria-label="Active workspace"
+                  disabled={isSwitchingWorkspace}
+                  onChange={(event) => void switchWorkspace(event.target.value)}
+                  value={activeWorkspaceId}
+                >
+                  {workspaces.map((workspace) => (
+                    <option key={workspace.id} value={workspace.id}>
+                      {workspace.name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown aria-hidden size={15} />
+              </span>
+            </label>
+          ) : null}
           <button
             onClick={() => {
               setIsMenuOpen(false);
@@ -178,7 +234,7 @@ export function AccountControl({
             <UserRound aria-hidden size={17} />
             <span>User settings</span>
           </button>
-          {workspaceRole === "owner" ? (
+          {workspaceRole === "owner" || workspaceRole === "admin" ? (
             <button
               onClick={() => {
                 setIsMenuOpen(false);

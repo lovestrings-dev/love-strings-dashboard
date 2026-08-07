@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireWorkspaceAccess } from "@/lib/server/workspace-owner";
 
 type BudgetEntryType = "earned" | "spent" | "one-off" | "recurring";
 type BudgetSourceBucket = "events" | "production" | "marketing" | "other";
@@ -44,7 +45,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const snapshot = await loadBudgetSnapshot();
+    const { workspaceId } = await requireWorkspaceAccess(request);
+    const snapshot = await loadBudgetSnapshot(workspaceId);
 
     return NextResponse.json({
       ...snapshot,
@@ -66,9 +68,11 @@ export async function POST(request: NextRequest) {
   const payload = (await request.json()) as BudgetSnapshotPayload;
 
   try {
+    const { workspaceId } = await requireWorkspaceAccess(request);
     const snapshot = await saveBudgetSnapshot({
       deletedForecastIds: payload.deletedForecastIds ?? [],
-      entries: payload.entries ?? []
+      entries: payload.entries ?? [],
+      workspaceId
     });
 
     return NextResponse.json({
@@ -83,7 +87,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function loadBudgetSnapshot() {
+async function loadBudgetSnapshot(workspaceId: string) {
   const supabase = createServiceSupabaseClient();
   const [entriesResult, hiddenEntriesResult] = await Promise.all([
     supabase
@@ -91,10 +95,12 @@ async function loadBudgetSnapshot() {
       .select(
         "id, stable_key, entry_date, description, amount, budget_bucket, entry_type, recurring_cadence, payment_plan_end_date"
       )
+      .eq("workspace_id", workspaceId)
       .order("entry_date", { ascending: false }),
     supabase
       .from("budget_hidden_generated_entries")
       .select("generated_entry_id")
+      .eq("workspace_id", workspaceId)
       .order("created_at", { ascending: true })
   ]);
 
@@ -109,10 +115,12 @@ async function loadBudgetSnapshot() {
 
 async function saveBudgetSnapshot({
   deletedForecastIds,
-  entries
+  entries,
+  workspaceId
 }: {
   deletedForecastIds: string[];
   entries: BudgetEntry[];
+  workspaceId: string;
 }) {
   const supabase = createServiceSupabaseClient();
   const normalizedEntries = entries.filter((entry) => !entry.generated).map(normalizeBudgetEntryForSave);
@@ -138,14 +146,15 @@ async function saveBudgetSnapshot({
       recurring_cadence:
         entry.type === "recurring" ? entry.recurringCadence ?? "monthly" : null,
       source: "app",
-      stable_key: stableKey
+      stable_key: stableKey,
+      workspace_id: workspaceId
     };
   });
 
   if (budgetRows.length > 0) {
     const { error } = await supabase
       .from("budget_entries")
-      .upsert(budgetRows, { onConflict: "stable_key" });
+      .upsert(budgetRows, { onConflict: "workspace_id,stable_key" });
 
     if (error) throw error;
   }
@@ -153,7 +162,8 @@ async function saveBudgetSnapshot({
   await deleteMissingRows({
     keepStableKeys: normalizedEntries.map((item) => item.stableKey),
     supabase,
-    table: "budget_entries"
+    table: "budget_entries",
+    workspaceId
   });
 
   const normalizedHiddenIds = Array.from(
@@ -168,9 +178,10 @@ async function saveBudgetSnapshot({
   if (normalizedHiddenIds.length > 0) {
     const { error } = await supabase.from("budget_hidden_generated_entries").upsert(
       normalizedHiddenIds.map((generatedEntryId) => ({
-        generated_entry_id: generatedEntryId
+        generated_entry_id: generatedEntryId,
+        workspace_id: workspaceId
       })),
-      { onConflict: "generated_entry_id" }
+      { onConflict: "workspace_id,generated_entry_id" }
     );
 
     if (error) throw error;
@@ -180,10 +191,11 @@ async function saveBudgetSnapshot({
     column: "generated_entry_id",
     keepStableKeys: normalizedHiddenIds,
     supabase,
-    table: "budget_hidden_generated_entries"
+    table: "budget_hidden_generated_entries",
+    workspaceId
   });
 
-  return loadBudgetSnapshot();
+  return loadBudgetSnapshot(workspaceId);
 }
 
 function mapBudgetSnapshotRows({
@@ -287,14 +299,16 @@ async function deleteMissingRows({
   column = "stable_key",
   keepStableKeys,
   supabase,
-  table
+  table,
+  workspaceId
 }: {
   column?: string;
   keepStableKeys: string[];
   supabase: ReturnType<typeof createServiceSupabaseClient>;
   table: string;
+  workspaceId: string;
 }) {
-  const query = supabase.from(table).delete();
+  const query = supabase.from(table).delete().eq("workspace_id", workspaceId);
   const { error } =
     keepStableKeys.length > 0
       ? await query.not(column, "in", `(${keepStableKeys.map(escapePostgrestValue).join(",")})`)

@@ -6,7 +6,7 @@ import {
   fetchGoogleJson,
   isGoogleService
 } from "@/lib/google/oauth";
-import { loveStringsWorkspaceId, requireWorkspaceOwner } from "@/lib/server/workspace-owner";
+import { requireWorkspaceAdministrator } from "@/lib/server/workspace-owner";
 
 type GoogleUserInfo = { email?: string; sub?: string };
 type YouTubeChannelsResponse = {
@@ -27,6 +27,7 @@ export async function GET(request: NextRequest) {
     const savedState = request.cookies.get("ls_google_oauth_state")?.value;
     const service = request.cookies.get("ls_google_oauth_service")?.value ?? null;
     const savedOrigin = request.cookies.get("ls_google_oauth_origin")?.value;
+    const savedWorkspaceId = request.cookies.get("ls_google_oauth_workspace")?.value;
 
     if (!code || !state || !savedState || state !== savedState || !isGoogleService(service)) {
       throw new Error("Google authorization session could not be verified.");
@@ -35,7 +36,10 @@ export async function GET(request: NextRequest) {
       throw new Error("Google authorization returned to an unexpected app origin.");
     }
 
-    const { serviceClient, user } = await requireWorkspaceOwner(request);
+    const { serviceClient, user, workspaceId } = await requireWorkspaceAdministrator(request);
+    if (!savedWorkspaceId || savedWorkspaceId !== workspaceId) {
+      throw new Error("The active workspace changed during Google authorization.");
+    }
     const redirectUri = `${savedOrigin}/api/integrations/google/callback`;
     const tokens = await exchangeGoogleAuthorizationCode(code, redirectUri);
     const userInfo = await fetchGoogleJson<GoogleUserInfo>(
@@ -50,7 +54,7 @@ export async function GET(request: NextRequest) {
     const { data: existing, error: existingError } = await serviceClient
       .from("app_google_connections")
       .select("*")
-      .eq("workspace_id", loveStringsWorkspaceId)
+      .eq("workspace_id", workspaceId)
       .maybeSingle();
     if (existingError) throw existingError;
     if (existing?.google_account_subject && existing.google_account_subject !== userInfo.sub) {
@@ -75,7 +79,7 @@ export async function GET(request: NextRequest) {
           ...(tokens.scope?.split(" ").filter(Boolean) ?? [])
         ])
       ),
-      workspace_id: loveStringsWorkspaceId
+      workspace_id: workspaceId
     };
 
     if (service === "youtube") {
@@ -142,10 +146,10 @@ function clearOAuthCookies(response: NextResponse) {
   for (const name of [
     "ls_google_oauth_state",
     "ls_google_oauth_service",
-    "ls_google_oauth_origin"
+    "ls_google_oauth_origin",
+    "ls_google_oauth_workspace"
   ]) {
     response.cookies.set(name, "", { maxAge: 0, path: "/api/integrations/google" });
   }
   return response;
 }
-

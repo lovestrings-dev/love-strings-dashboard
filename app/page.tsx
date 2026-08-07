@@ -32,7 +32,7 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { AccountControl } from "./account-control";
 
 type Section = (typeof sections)[number];
-type WorkspaceRole = "member" | "owner" | "viewer";
+type WorkspaceRole = "admin" | "member" | "owner" | "viewer";
 type GoogleConnectionStatus = {
   accountEmail: string | null;
   analytics: {
@@ -612,9 +612,8 @@ const defaultQrCodeLinks: QrCodeLink[] = [
   }))
 ];
 
-const appVersionLabel = "Beta 1.13";
+const appVersionLabel = "Beta 1.14";
 const defaultAppLogoUrl = "/love-strings-logo.jpeg";
-const loveStringsWorkspaceId = "00000000-0000-0000-0000-000000000001";
 
 const sections = [
   "Dashboard",
@@ -1822,10 +1821,7 @@ function createProductionSongSeed({
     id,
     releaseDate,
     roadmapPhaseId: null,
-    steps: ensureProductionReleaseStep(
-      buildProductionSteps(deadline, title, statusPattern),
-      releaseDate
-    ),
+    steps: buildProductionSteps(deadline, title, statusPattern),
     title
   };
 }
@@ -1847,10 +1843,7 @@ function createProductionSongFromWorkbookSeed(
     id: seed.id,
     releaseDate,
     roadmapPhaseId: null,
-    steps: ensureProductionReleaseStep(
-      buildProductionStepsFromWorkbookSeed(seed),
-      releaseDate
-    ),
+    steps: buildProductionStepsFromWorkbookSeed(seed),
     title: seed.title
   };
 }
@@ -1943,9 +1936,12 @@ function normalizeProductionSongsWithBudgetDefaults(
       ...song,
       releaseDate,
       roadmapPhaseId: song.roadmapPhaseId ?? null,
-      steps: ensureProductionReleaseStep(
+      steps: sortProductionStepsByDeadline(
         song.steps
-          .filter((step) => step.label.trim().toLowerCase() !== "edit")
+          .filter((step) => {
+            const label = step.label.trim().toLowerCase();
+            return label !== "edit" && label !== "release" && step.id !== "release";
+          })
           .map((step) => ({
           ...step,
           budgetLines:
@@ -1956,56 +1952,10 @@ function normalizeProductionSongsWithBudgetDefaults(
             ...task,
             budgetLines: task.budgetLines ?? []
           }))
-          })),
-        releaseDate
+          }))
       )
     };
   });
-}
-
-function ensureProductionReleaseStep(
-  steps: ProductionStep[],
-  releaseDate: string
-) {
-  const releaseStatus: MarketingStatus =
-    (parseCampaignDate(releaseDate)?.getTime() ?? Number.MAX_SAFE_INTEGER) <=
-    getTodayUtcDate().getTime()
-      ? "done"
-      : "not-started";
-  const existingReleaseStep = steps.find(
-    (step) => step.id === "release" || step.label.toLowerCase() === "release"
-  );
-
-  if (existingReleaseStep) {
-    return sortProductionStepsByDeadline(
-      steps.map((step) =>
-        step === existingReleaseStep
-          ? {
-              ...step,
-              deadline: releaseDate,
-              id: "release",
-              isDefaultStep: true,
-              label: "Release",
-              status: releaseStatus
-            }
-          : step
-      )
-    );
-  }
-
-  return sortProductionStepsByDeadline([
-    ...steps,
-    {
-      id: "release",
-      label: "Release",
-      deadline: releaseDate,
-      isDefaultStep: true,
-      notes: "",
-      budgetLines: [],
-      status: releaseStatus,
-      extraTasks: []
-    }
-  ]);
 }
 
 const productionReleaseScheduleOffsets: Record<string, number> = {
@@ -2018,8 +1968,7 @@ const productionReleaseScheduleOffsets: Record<string, number> = {
   master: -17,
   license: -16,
   "cover-art": -15,
-  distributor: -14,
-  release: 0
+  distributor: -14
 };
 
 function applyProductionReleaseSchedule(
@@ -2032,10 +1981,7 @@ function applyProductionReleaseSchedule(
     return song;
   }
 
-  const scheduledSteps = ensureProductionReleaseStep(
-    song.steps,
-    releaseDateInput
-  ).map((step) => {
+  const scheduledSteps = song.steps.map((step) => {
     const offset = productionReleaseScheduleOffsets[createStableId(step.label)];
 
     return offset === undefined
@@ -3430,14 +3376,25 @@ function getProductionCompletionScore(song: ProductionSongConfig) {
 
 function getProductionBenchmarkDays(song: ProductionSongConfig) {
   const sortedSteps = sortProductionStepsByDeadline(song.steps);
-  const firstStep = sortedSteps[0];
-  const firstWorkStep =
-    firstStep?.label === "Demo" && firstStep.status === "done"
-      ? sortedSteps[1] ?? firstStep
-      : firstStep;
-  const lastStep = sortedSteps.at(-1);
-  const startDate = firstWorkStep ? parseCampaignDate(firstWorkStep.deadline) : null;
-  const endDate = lastStep ? parseCampaignDate(lastStep.deadline) : null;
+  const demoStep = sortedSteps.find(
+    (step) => step.label.trim().toLowerCase() === "demo"
+  );
+  const firstProductionStep = sortedSteps.find(
+    (step) => step.label.trim().toLowerCase() !== "demo"
+  );
+  const cycleStartStep =
+    demoStep?.status === "done"
+      ? firstProductionStep
+      : demoStep ?? firstProductionStep;
+  const distributorStep = sortedSteps.find(
+    (step) => step.label.trim().toLowerCase() === "distributor"
+  );
+  const startDate = cycleStartStep
+    ? parseCampaignDate(cycleStartStep.deadline)
+    : null;
+  const endDate = distributorStep
+    ? parseCampaignDate(distributorStep.deadline)
+    : null;
 
   if (!startDate || !endDate) {
     return null;
@@ -4531,33 +4488,6 @@ async function saveProductionSongToSupabase(
   }
 }
 
-async function saveProductionSongsToSupabase(songs: ProductionSongConfig[]) {
-  try {
-    const response = await fetch("/api/production/songs", {
-      body: JSON.stringify({ songs }),
-      credentials: "same-origin",
-      headers: {
-        "Content-Type": "application/json",
-        "x-love-strings-production": "write"
-      },
-      method: "POST"
-    });
-
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({}));
-      throw new Error(
-        body.error ?? `Production seed failed with status ${response.status}.`
-      );
-    }
-
-    const result = await response.json();
-    return (result.savedSongs ?? []) as Array<{ dbId: string; id: string }>;
-  } catch (error) {
-    console.warn("Unable to seed production songs in Supabase.", error);
-    return [];
-  }
-}
-
 async function deleteProductionSongFromSupabase(songDbId: string) {
   try {
     const response = await fetch("/api/production/songs", {
@@ -4936,6 +4866,8 @@ export default function Home() {
     "about" | "general" | "user" | null
   >(null);
   const [workspaceRole, setWorkspaceRole] = useState<WorkspaceRole | null>(null);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
+  const [activeWorkspaceName, setActiveWorkspaceName] = useState("Workspace");
   const [appLogoPath, setAppLogoPath] = useState("");
   const [appLogoUrl, setAppLogoUrl] = useState(defaultAppLogoUrl);
   const [dailyFocusProgress, setDailyFocusProgress] = useState<
@@ -4943,7 +4875,7 @@ export default function Home() {
   >([]);
   const [appleMusicReminderDismissedDate, setAppleMusicReminderDismissedDate] =
     useState("");
-  const [platformStatsData, setPlatformStatsData] = useState(platformStats);
+  const [platformStatsData, setPlatformStatsData] = useState<typeof platformStats>([]);
   const [platformMetricRows, setPlatformMetricRows] = useState<MetricRow[]>([]);
   const [refreshStatus, setRefreshStatus] = useState<RefreshStatus>({
     message: "",
@@ -4972,29 +4904,16 @@ export default function Home() {
     entryId: string;
     token: number;
   } | null>(null);
-  const [campaigns, setCampaigns] = useState(() =>
-    sortCampaignsByReleaseDate(marketingCampaigns)
-  );
-  const [productionSongDrafts, setProductionSongDrafts] = useState(() =>
-    sortProductionSongsByDeadline(
-      normalizeProductionSongsWithBudgetDefaults(productionSongs)
-    )
-  );
-  const [roadmapPhaseDrafts, setRoadmapPhaseDrafts] = useState(roadmapPhases);
-  const [budgetEntryDrafts, setBudgetEntryDrafts] = useState(() =>
-    sortBudgetEntriesByDate(budgetEntries)
-  );
+  const [campaigns, setCampaigns] = useState<MarketingCampaignConfig[]>([]);
+  const [productionSongDrafts, setProductionSongDrafts] = useState<ProductionSongConfig[]>([]);
+  const [roadmapPhaseDrafts, setRoadmapPhaseDrafts] = useState<RoadmapPhase[]>([]);
+  const [budgetEntryDrafts, setBudgetEntryDrafts] = useState<BudgetEntry[]>([]);
   const [deletedBudgetForecastIds, setDeletedBudgetForecastIds] = useState<string[]>([]);
-  const [eventEntryDrafts, setEventEntryDrafts] = useState(() =>
-    normalizeEventEntries(eventEntries)
-  );
+  const [eventEntryDrafts, setEventEntryDrafts] = useState<EventEntry[]>([]);
   const fallbackEventEntriesForAddressBook = useRef(eventEntryDrafts);
-  const [locationAddressBook, setLocationAddressBook] = useState(() =>
-    buildLocationAddressBookEntries(eventEntries)
-  );
+  const [locationAddressBook, setLocationAddressBook] = useState<LocationAddressBookEntry[]>([]);
   const [otherTasks, setOtherTasks] = useState<OtherTask[]>([]);
-  const [qrCodeLinks, setQrCodeLinks] =
-    useState<QrCodeLink[]>(defaultQrCodeLinks);
+  const [qrCodeLinks, setQrCodeLinks] = useState<QrCodeLink[]>([]);
   const [hasLoadedCampaignDrafts, setHasLoadedCampaignDrafts] = useState(false);
   const [hasLoadedProductionDrafts, setHasLoadedProductionDrafts] =
     useState(false);
@@ -5111,6 +5030,7 @@ export default function Home() {
   }
 
   const loadPlatformStats = useCallback(async () => {
+    if (!activeWorkspaceId) return [];
     try {
       const supabase = createBrowserSupabaseClient();
       const { data, error } = await supabase
@@ -5128,6 +5048,7 @@ export default function Home() {
             releases(title)
           `
         )
+        .eq("workspace_id", activeWorkspaceId)
         .order("snapshot_date", { ascending: false })
         .order("imported_at", { ascending: false });
 
@@ -5145,7 +5066,7 @@ export default function Home() {
       console.warn("Using local platform metric fallback.", error);
       return [];
     }
-  }, []);
+  }, [activeWorkspaceId]);
 
   async function saveMarketingCampaignHeader(
     campaignId: string,
@@ -5509,7 +5430,7 @@ export default function Home() {
 
     hasCheckedOpeningMetricRefresh.current = true;
     const todayKey = getViennaDateKey();
-    const autoRefreshStorageKey = `love-strings-last-auto-metric-refresh-${todayKey}`;
+    const autoRefreshStorageKey = `workspace-metric-refresh-${activeWorkspaceId}-${todayKey}`;
     const metricRows = await loadPlatformStats();
 
     if (
@@ -5538,7 +5459,7 @@ export default function Home() {
       window.localStorage.removeItem(autoRefreshStorageKey);
       console.warn("Unable to refresh platform metrics on app open.", error);
     }
-  }, [loadPlatformStats]);
+  }, [activeWorkspaceId, loadPlatformStats]);
 
   async function importAppleMusicCsv(file: File) {
     setAppleMusicImportStatus({
@@ -5973,15 +5894,45 @@ export default function Home() {
   useEffect(() => {
     let isCancelled = false;
 
+    async function loadActiveWorkspace() {
+      const response = await fetch("/api/workspace/active");
+      const payload = (await response.json()) as { workspaceId?: string };
+      if (!isCancelled && response.ok && payload.workspaceId) {
+        setActiveWorkspaceId(payload.workspaceId);
+        const workspacesResponse = await fetch("/api/workspaces");
+        const workspacesPayload = (await workspacesResponse.json().catch(() => null)) as {
+          workspaces?: Array<{ id: string; name: string }>;
+        } | null;
+        const workspace = workspacesPayload?.workspaces?.find(
+          (candidate) => candidate.id === payload.workspaceId,
+        );
+        if (!isCancelled && workspace?.name) setActiveWorkspaceName(workspace.name);
+      }
+    }
+
+    void loadActiveWorkspace();
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isCancelled = false;
+
     async function loadWorkspaceBranding() {
+      if (!activeWorkspaceId) return;
       const supabase = createBrowserSupabaseClient();
       const { data, error } = await supabase
         .from("app_workspace_settings")
         .select("logo_path")
-        .eq("workspace_id", loveStringsWorkspaceId)
+        .eq("workspace_id", activeWorkspaceId)
         .maybeSingle();
 
       if (isCancelled || error || !data?.logo_path) {
+        if (!isCancelled) {
+          setAppLogoPath("");
+          setAppLogoUrl(defaultAppLogoUrl);
+        }
         return;
       }
 
@@ -6000,12 +5951,13 @@ export default function Home() {
     return () => {
       isCancelled = true;
     };
-  }, []);
+  }, [activeWorkspaceId]);
 
   useEffect(() => {
     let isCancelled = false;
 
     async function loadWorkspaceRole() {
+      if (!activeWorkspaceId) return;
       const supabase = createBrowserSupabaseClient();
       const { data: userData } = await supabase.auth.getUser();
       const user = userData.user;
@@ -6017,7 +5969,7 @@ export default function Home() {
       const { data } = await supabase
         .from("app_workspace_members")
         .select("role")
-        .eq("workspace_id", loveStringsWorkspaceId)
+        .eq("workspace_id", activeWorkspaceId)
         .eq("user_id", user.id)
         .maybeSingle();
       const loadedRole = data?.role;
@@ -6025,6 +5977,7 @@ export default function Home() {
       if (
         !isCancelled &&
         (loadedRole === "owner" ||
+          loadedRole === "admin" ||
           loadedRole === "member" ||
           loadedRole === "viewer")
       ) {
@@ -6037,7 +5990,7 @@ export default function Home() {
     return () => {
       isCancelled = true;
     };
-  }, []);
+  }, [activeWorkspaceId]);
 
   function preventViewerWriteClick(event: ReactMouseEvent<HTMLElement>) {
     if (workspaceRole !== "viewer" || settingsView) {
@@ -6113,7 +6066,7 @@ export default function Home() {
     let isCancelled = false;
 
     try {
-      const storedCampaigns = window.localStorage.getItem(campaignDraftStorageKey);
+      const storedCampaigns = null;
 
       if (storedCampaigns) {
         const parsedCampaigns = JSON.parse(storedCampaigns);
@@ -6161,7 +6114,7 @@ export default function Home() {
     let isCancelled = false;
 
     try {
-      const storedQrLinks = window.localStorage.getItem(qrCodeLinksStorageKey);
+      const storedQrLinks = null;
 
       if (storedQrLinks) {
         const parsedQrLinks = JSON.parse(storedQrLinks);
@@ -6230,13 +6183,8 @@ export default function Home() {
         return;
       }
 
-      const savedLinks =
-        remoteLinks.length === 0
-          ? await saveQrCodeLinksToSupabase(qrCodeLinks)
-          : remoteLinks;
-
-      if (!isCancelled && savedLinks) {
-        setQrCodeLinks(savedLinks);
+      if (!isCancelled) {
+        setQrCodeLinks(remoteLinks);
       }
 
       if (!isCancelled) {
@@ -6263,7 +6211,7 @@ export default function Home() {
     let isCancelled = false;
 
     try {
-      const storedSongs = window.localStorage.getItem(productionDraftStorageKey);
+      const storedSongs = null;
 
       if (storedSongs) {
         const parsedSongs = JSON.parse(storedSongs);
@@ -6318,10 +6266,8 @@ export default function Home() {
     let isCancelled = false;
 
     try {
-      const storedDeletedBudgetForecasts = window.localStorage.getItem(
-        deletedBudgetForecastStorageKey
-      );
-      const storedBudgetEntries = window.localStorage.getItem(budgetDraftStorageKey);
+      const storedDeletedBudgetForecasts = null;
+      const storedBudgetEntries = null;
 
       if (storedDeletedBudgetForecasts) {
         const parsedDeletedForecasts = JSON.parse(storedDeletedBudgetForecasts);
@@ -6404,16 +6350,8 @@ export default function Home() {
       }
 
       if (snapshot.entries.length === 0 && snapshot.deletedForecastIds.length === 0) {
-        const seedSnapshot = await saveBudgetSnapshotToSupabase({
-          deletedForecastIds: deletedBudgetForecastIds,
-          entries: budgetEntryDrafts
-        });
-
-        if (seedSnapshot) {
-          setBudgetEntryDrafts(seedSnapshot.entries);
-          setDeletedBudgetForecastIds(seedSnapshot.deletedForecastIds);
-        }
-
+        setBudgetEntryDrafts([]);
+        setDeletedBudgetForecastIds([]);
         setHasLoadedBudgetSupabaseSnapshot(true);
         return;
       }
@@ -6446,7 +6384,7 @@ export default function Home() {
     let isCancelled = false;
 
     try {
-      const storedEventEntries = window.localStorage.getItem(eventDraftStorageKey);
+      const storedEventEntries = null;
 
       if (storedEventEntries) {
         const parsedEntries = JSON.parse(storedEventEntries);
@@ -6497,9 +6435,7 @@ export default function Home() {
     let isCancelled = false;
 
     try {
-      const storedLocationAddressBook = window.localStorage.getItem(
-        locationAddressBookStorageKey
-      );
+      const storedLocationAddressBook = null;
 
       if (storedLocationAddressBook) {
         const parsedLocations = JSON.parse(storedLocationAddressBook);
@@ -6559,7 +6495,7 @@ export default function Home() {
     let isCancelled = false;
 
     try {
-      const storedOtherTasks = window.localStorage.getItem(otherTaskStorageKey);
+      const storedOtherTasks = null;
 
       if (storedOtherTasks) {
         const parsedOtherTasks = JSON.parse(storedOtherTasks);
@@ -6622,23 +6558,7 @@ export default function Home() {
         return;
       }
 
-      const hasMigratedLocalTasks =
-        window.localStorage.getItem(otherTaskSupabaseMigrationKey) === "done";
-      const shouldMergeLocalTasks =
-        otherTasks.length > 0 && (!hasMigratedLocalTasks || remoteTasks.length === 0);
-      const mergedTasks = shouldMergeLocalTasks
-        ? await saveOtherTasksToSupabase(otherTasks)
-        : remoteTasks;
-
-      if (isCancelled || mergedTasks === null) {
-        return;
-      }
-
-      if (shouldMergeLocalTasks) {
-        window.localStorage.setItem(otherTaskSupabaseMigrationKey, "done");
-      }
-
-      setOtherTasks(mergedTasks);
+      setOtherTasks(remoteTasks);
     }
 
     void loadSharedOtherTasks();
@@ -6668,21 +6588,8 @@ export default function Home() {
       }
 
       if (snapshot.entries.length === 0 && snapshot.locations.length === 0) {
-        const seedSnapshot = await saveEventsSnapshotToSupabase({
-          entries: eventEntryDrafts,
-          locations: locationAddressBook
-        });
-
-        if (seedSnapshot) {
-          setEventEntryDrafts(seedSnapshot.entries);
-          setLocationAddressBook(
-            mergeLocationAddressBookWithEvents(
-              seedSnapshot.locations,
-              seedSnapshot.entries
-            )
-          );
-        }
-
+        setEventEntryDrafts([]);
+        setLocationAddressBook([]);
         setHasLoadedEventSupabaseSnapshot(true);
         return;
       }
@@ -6725,6 +6632,7 @@ export default function Home() {
 
   useEffect(() => {
     async function loadMarketingCampaigns() {
+      if (!activeWorkspaceId) return;
       try {
         const supabase = createBrowserSupabaseClient();
         const { data, error } = await supabase
@@ -6764,6 +6672,7 @@ export default function Home() {
               )
             `
           )
+          .eq("workspace_id", activeWorkspaceId)
           .order("release_date", { ascending: false })
           .order("day_number", {
             ascending: true,
@@ -6783,31 +6692,18 @@ export default function Home() {
           (data ?? []) as MarketingCampaignDbRow[]
         );
 
-        if (nextCampaigns.length > 0) {
-          setCampaigns((currentCampaigns) => {
-            const mergedCampaigns = mergeMarketingCampaignLocalBudgetLines(
-              nextCampaigns,
-              currentCampaigns
-            );
-
-            window.localStorage.setItem(
-              campaignDraftStorageKey,
-              JSON.stringify(mergedCampaigns)
-            );
-
-            return mergedCampaigns;
-          });
-        }
+        setCampaigns(nextCampaigns);
       } catch (error) {
         console.warn("Using local marketing campaign fallback.", error);
       }
     }
 
     loadMarketingCampaigns();
-  }, []);
+  }, [activeWorkspaceId]);
 
   useEffect(() => {
     async function loadProductionSongs() {
+      if (!activeWorkspaceId) return;
       try {
         const supabase = createBrowserSupabaseClient();
         const [
@@ -6819,6 +6715,7 @@ export default function Home() {
           supabase
             .from("production_songs")
             .select("id, slug, title, production_deadline, release_date, roadmap_phase_id, album_art_url")
+            .eq("workspace_id", activeWorkspaceId)
             .order("production_deadline", { ascending: true }),
           supabase
             .from("production_steps")
@@ -6844,21 +6741,7 @@ export default function Home() {
         if (budgetLinesResult.error) throw budgetLinesResult.error;
 
         if ((songsResult.data ?? []).length === 0) {
-          const seedSongs = normalizeProductionSongsWithBudgetDefaults(productionSongs);
-          const savedSongs = await saveProductionSongsToSupabase(seedSongs);
-          const savedSongById = new Map(
-            savedSongs.map((song) => [song.id, song.dbId])
-          );
-          const nextSongs = seedSongs.map((song) => ({
-            ...song,
-            dbId: savedSongById.get(song.id)
-          }));
-
-          setProductionSongDrafts(sortProductionSongsByDeadline(nextSongs));
-          window.localStorage.setItem(
-            productionDraftStorageKey,
-            JSON.stringify(nextSongs)
-          );
+          setProductionSongDrafts([]);
           setHasLoadedProductionDrafts(true);
           return;
         }
@@ -6873,10 +6756,6 @@ export default function Home() {
         );
 
         setProductionSongDrafts(nextSongs);
-        window.localStorage.setItem(
-          productionDraftStorageKey,
-          JSON.stringify(nextSongs)
-        );
         setHasLoadedProductionDrafts(true);
       } catch (error) {
         console.warn("Using local production fallback.", error);
@@ -6884,7 +6763,7 @@ export default function Home() {
     }
 
     loadProductionSongs();
-  }, []);
+  }, [activeWorkspaceId]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -6895,8 +6774,8 @@ export default function Home() {
         return response.json() as Promise<{ phases?: Array<Partial<RoadmapPhase>> }>;
       })
       .then((result) => {
-        if (!isCancelled && result.phases?.length) {
-          setRoadmapPhaseDrafts(normalizeRoadmapPhases(result.phases));
+        if (!isCancelled) {
+          setRoadmapPhaseDrafts(normalizeRoadmapPhases(result.phases ?? []));
         }
       })
       .catch((error) => console.warn("Using Roadmap phase fallback.", error));
@@ -7078,7 +6957,7 @@ export default function Home() {
           />
           <div className="brand-mark">
             <div>
-              <strong>Love Strings</strong>
+              <strong>{activeWorkspaceName}</strong>
               <span>Sprint Dashboard</span>
             </div>
             <Image
@@ -7133,7 +7012,8 @@ export default function Home() {
             onBack={() => setSettingsView(null)}
           />
         ) : null}
-        {settingsView === "general" && workspaceRole === "owner" ? (
+        {settingsView === "general" &&
+        (workspaceRole === "owner" || workspaceRole === "admin") ? (
           <GeneralSettingsView
             activeSection={activeSection}
             logoPath={appLogoPath}
@@ -7143,6 +7023,8 @@ export default function Home() {
               setAppLogoPath(logoPath);
               setAppLogoUrl(logoUrl);
             }}
+            workspaceId={activeWorkspaceId}
+            workspaceRole={workspaceRole}
           />
         ) : null}
         {!settingsView && activeSection === "Roadmap" ? (
@@ -7259,6 +7141,7 @@ export default function Home() {
             productionSongs={productionSongDrafts}
             qrCodeLinks={qrCodeLinks}
             roadmapPhasesData={roadmapPhaseDrafts}
+            workspaceName={activeWorkspaceName}
           />
         ) : null}
         </div>
@@ -7333,13 +7216,17 @@ function GeneralSettingsView({
   logoPath,
   logoUrl,
   onBack,
-  onLogoChange
+  onLogoChange,
+  workspaceId,
+  workspaceRole
 }: {
   activeSection: Section;
   logoPath: string;
   logoUrl: string;
   onBack: () => void;
   onLogoChange: (logoPath: string, logoUrl: string) => void;
+  workspaceId: string;
+  workspaceRole: "admin" | "owner";
 }) {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [logoStatus, setLogoStatus] = useState<RefreshStatus>({
@@ -7349,6 +7236,13 @@ function GeneralSettingsView({
   const [invitationEmail, setInvitationEmail] = useState("");
   const [invitationRole, setInvitationRole] = useState<WorkspaceRole>("viewer");
   const [invitationStatus, setInvitationStatus] = useState<RefreshStatus>({
+    message: "",
+    state: "idle"
+  });
+  const [canCreateWorkspaces, setCanCreateWorkspaces] = useState(false);
+  const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const [newWorkspaceSlug, setNewWorkspaceSlug] = useState("");
+  const [workspaceCreationStatus, setWorkspaceCreationStatus] = useState<RefreshStatus>({
     message: "",
     state: "idle"
   });
@@ -7385,6 +7279,15 @@ function GeneralSettingsView({
     }
 
     void loadGoogleConnection();
+
+    void loadWorkspaceProvisioningAccess();
+
+    async function loadWorkspaceProvisioningAccess() {
+      const response = await fetch("/api/platform/workspaces");
+      if (!response.ok) return;
+      const payload = (await response.json()) as { canCreateWorkspaces?: boolean };
+      setCanCreateWorkspaces(payload.canCreateWorkspaces === true);
+    }
 
     async function loadGoogleConnection() {
       try {
@@ -7478,13 +7381,38 @@ function GeneralSettingsView({
     }
   }
 
+  async function createWorkspace(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setWorkspaceCreationStatus({ message: "Creating workspace...", state: "loading" });
+    try {
+      const response = await fetch("/api/platform/workspaces", {
+        body: JSON.stringify({ name: newWorkspaceName, slug: newWorkspaceSlug }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const payload = (await response.json()) as { error?: string; name?: string };
+      if (!response.ok) throw new Error(payload.error || "Workspace creation failed.");
+      setNewWorkspaceName("");
+      setNewWorkspaceSlug("");
+      setWorkspaceCreationStatus({
+        message: `${payload.name || "Workspace"} is ready for onboarding.`,
+        state: "success"
+      });
+    } catch (error) {
+      setWorkspaceCreationStatus({
+        message: error instanceof Error ? error.message : "Workspace creation failed.",
+        state: "error"
+      });
+    }
+  }
+
   async function uploadLogo(file: File) {
     setLogoStatus({ message: "Preparing logo...", state: "loading" });
 
     try {
       const logoBlob = await createSquareImageBlob(file);
       const supabase = createBrowserSupabaseClient();
-      const nextLogoPath = `love-strings/app-logo-${Date.now()}.jpg`;
+      const nextLogoPath = `${workspaceId}/app-logo-${Date.now()}.jpg`;
       const { error: uploadError } = await supabase.storage
         .from("branding")
         .upload(nextLogoPath, logoBlob, {
@@ -7500,7 +7428,7 @@ function GeneralSettingsView({
       const { error: settingsError } = await supabase
         .from("app_workspace_settings")
         .update({ logo_path: nextLogoPath })
-        .eq("workspace_id", loveStringsWorkspaceId);
+        .eq("workspace_id", workspaceId);
 
       if (settingsError) {
         await supabase.storage.from("branding").remove([nextLogoPath]);
@@ -7543,6 +7471,47 @@ function GeneralSettingsView({
       </header>
 
       <div className="user-settings-content">
+        {canCreateWorkspaces ? (
+          <article className="general-settings-card general-settings-invitations">
+            <div className="general-settings-heading">
+              <div>
+                <p className="eyebrow">Platform owner</p>
+                <h2>Create workspace</h2>
+              </div>
+            </div>
+            <form className="workspace-invitation-form" onSubmit={createWorkspace}>
+              <label>
+                <span>Name</span>
+                <input
+                  disabled={workspaceCreationStatus.state === "loading"}
+                  onChange={(event) => setNewWorkspaceName(event.target.value)}
+                  placeholder="Test Band"
+                  required
+                  value={newWorkspaceName}
+                />
+              </label>
+              <label>
+                <span>Slug</span>
+                <input
+                  disabled={workspaceCreationStatus.state === "loading"}
+                  onChange={(event) => setNewWorkspaceSlug(event.target.value)}
+                  placeholder="test-band"
+                  required
+                  value={newWorkspaceSlug}
+                />
+              </label>
+              <button disabled={workspaceCreationStatus.state === "loading"} type="submit">
+                <Plus aria-hidden size={16} />
+                <span>{workspaceCreationStatus.state === "loading" ? "Creating..." : "Create workspace"}</span>
+              </button>
+            </form>
+            {workspaceCreationStatus.message ? (
+              <p className={workspaceCreationStatus.state === "error" ? "settings-error" : "settings-status"}>
+                {workspaceCreationStatus.message}
+              </p>
+            ) : null}
+          </article>
+        ) : null}
         <article className="general-settings-card general-settings-invitations">
           <div className="general-settings-heading">
             <div>
@@ -7575,7 +7544,12 @@ function GeneralSettingsView({
               >
                 <option value="viewer">Viewer</option>
                 <option value="member">Member</option>
-                <option value="owner">Owner</option>
+                {workspaceRole === "owner" ? (
+                  <>
+                    <option value="admin">Admin</option>
+                    <option value="owner">Owner</option>
+                  </>
+                ) : null}
               </select>
             </label>
             <button disabled={invitationStatus.state === "loading"} type="submit">
@@ -10418,7 +10392,6 @@ function ProductionStepRow({
   songId: string;
   step: ProductionStep;
 }) {
-  const isReleaseStep = step.id === "release";
   const canDeleteStep =
     !step.isDefaultStep ||
     deletableProductionStepLabels.has(step.label.trim().toLowerCase());
@@ -10473,7 +10446,6 @@ function ProductionStepRow({
               </label>
               <select
                 aria-label={`${step.label} status`}
-                disabled={isReleaseStep}
                 onChange={(event) =>
                   onStepChange(step.id, {
                     status: event.target.value as MarketingStatus
@@ -10509,7 +10481,6 @@ function ProductionStepRow({
               </span>
               <input
                 aria-label={`${step.label} deadline`}
-                disabled={isReleaseStep}
                 inputMode="numeric"
                 onChange={(event) =>
                   onStepChange(step.id, { deadline: event.target.value })
@@ -11806,6 +11777,67 @@ function MarketingCampaignBoard({
     ]);
   }
 
+  function addCampaignDayBefore() {
+    if (!isGeneralCampaign) return;
+
+    const currentDates = campaignDays
+      .map((day) => parseCampaignDateKey(day.dateKey))
+      .filter((date): date is Date => Boolean(date))
+      .sort((firstDate, secondDate) => firstDate.getTime() - secondDate.getTime());
+    const earliestDate = currentDates[0] ?? parseCampaignDate(appliedGeneralStartDateInput);
+    const campaignEndDate = parseCampaignDate(appliedReleaseDateInput);
+
+    if (!earliestDate || !campaignEndDate) return;
+
+    const previousDate = addUtcDays(earliestDate, -1);
+    const nextStartDateInput = formatDateForInput(previousDate);
+    const nextDays = [
+      ...campaignDays,
+      {
+        dayNumber: 0,
+        date: formatCampaignDate(previousDate),
+        dateKey: previousDate.toISOString().slice(0, 10),
+        isDefaultDay: true,
+        releaseOffset: Math.round(
+          (previousDate.getTime() - campaignEndDate.getTime()) / 86400000
+        ),
+        clipName: "General content",
+        extraTasks: [],
+        statuses: {
+          facebookPost: "irrelevant" as const,
+          instagramUpload: "not-started" as const,
+          production: "not-started" as const,
+          websiteUpdate: "irrelevant" as const,
+          youtubePost: "irrelevant" as const,
+          youtubeUpload: "not-started" as const
+        }
+      }
+    ]
+      .sort((firstDay, secondDay) => firstDay.dateKey.localeCompare(secondDay.dateKey))
+      .map((day, index) => ({ ...day, dayNumber: index + 1 }));
+
+    setGeneralStartDateInput(nextStartDateInput);
+    setAppliedGeneralStartDateInput(nextStartDateInput);
+    setCampaignDays(nextDays);
+    onGeneralCampaignSettingsSave(
+      campaign.id,
+      {
+        albumArtUrl: appliedGeneralAlbumArtUrlInput,
+        releaseTitle: appliedGeneralTitleInput,
+        startDate: nextStartDateInput
+      },
+      nextDays
+    );
+    window.setTimeout(
+      () =>
+        onFocus(
+          campaign.id,
+          getMarketingCampaignDayElementId(campaign.id, 1)
+        ),
+      0
+    );
+  }
+
   function deleteCampaignDay(dayNumber: number) {
     onFocus(campaign.id, getMarketingCampaignDayElementId(campaign.id, dayNumber));
     updateCampaignDaysState((currentDays) =>
@@ -12078,6 +12110,18 @@ function MarketingCampaignBoard({
                 </div>
               </section>
             </details>
+          ) : null}
+          {isGeneralCampaign ? (
+            <div className="campaign-day-actions">
+              <button
+                className="add-campaign-day-button"
+                onClick={addCampaignDayBefore}
+                type="button"
+              >
+                <Plus size={16} aria-hidden />
+                Add campaign day before
+              </button>
+            </div>
           ) : null}
           {!isGeneralCampaign ? (
             <details className="campaign-danger-zone">
@@ -12605,6 +12649,7 @@ function DashboardView({
   productionSongs,
   qrCodeLinks,
   roadmapPhasesData
+  ,workspaceName
 }: {
   appleMusicReminderDismissedDate: string;
   budgetEntries: BudgetEntry[];
@@ -12628,6 +12673,7 @@ function DashboardView({
   productionSongs: ProductionSongConfig[];
   qrCodeLinks: QrCodeLink[];
   roadmapPhasesData: RoadmapPhase[];
+  workspaceName: string;
 }) {
   const campaignPreview = getDashboardCampaignPreview(campaigns);
   const budgetSummary = getBudgetSummary(budgetEntries);
@@ -12653,7 +12699,7 @@ function DashboardView({
     appleMusicUpdateTask ? [appleMusicUpdateTask] : [],
     campaigns
   );
-  const phaseOne = roadmapPhasesData[0] ?? roadmapPhases[0];
+  const phaseOne = roadmapPhasesData[0] ?? null;
 
   function updateFocusTaskStatus(task: FocusQueueItem, nextStatus: MarketingStatus) {
     const target = task.actionTarget;
@@ -12737,7 +12783,7 @@ function DashboardView({
       <header className="topbar dashboard-main-topbar">
         <div className="topbar-title-block">
           <p className="eyebrow">Daily command screen</p>
-          <h1 className="dashboard-main-title">Love Strings Dashboard</h1>
+          <h1 className="dashboard-main-title">{workspaceName} Dashboard</h1>
         </div>
         <ModuleHeaderDate />
       </header>
@@ -12788,7 +12834,7 @@ function DashboardView({
 
       <DashboardBudgetPreview summary={budgetSummary} />
 
-      <DashboardRoadmapPhasePreview phase={phaseOne} songs={productionSongs} />
+      {phaseOne ? <DashboardRoadmapPhasePreview phase={phaseOne} songs={productionSongs} /> : null}
 
       <QrCodeLinksSection
         links={qrCodeLinks}
@@ -15620,8 +15666,8 @@ function RoadmapView({
   const [settingsPhaseId, setSettingsPhaseId] = useState<string | null>(null);
   const releasedSongs = songs.filter(isRoadmapSongReleased).length;
   const months = buildLiveRoadmapMonths(songs, phases);
-  const firstPhase = phases[0] ?? roadmapPhases[0];
-  const lastPhase = phases[phases.length - 1] ?? roadmapPhases[roadmapPhases.length - 1];
+  const firstPhase = phases[0] ?? null;
+  const lastPhase = phases[phases.length - 1] ?? null;
 
   return (
     <>
@@ -15633,7 +15679,7 @@ function RoadmapView({
         <ModuleHeaderDate />
       </header>
 
-      <section className="roadmap-overview panel" aria-label="General roadmap progress">
+      {firstPhase && lastPhase ? <section className="roadmap-overview panel" aria-label="General roadmap progress">
         <div className="roadmap-overview-header">
           <p className="eyebrow">General Roadmap Progress</p>
           <div className="roadmap-overview-summary">
@@ -15668,7 +15714,13 @@ function RoadmapView({
             songs={songs}
           />
         ) : null}
-      </section>
+      </section> : (
+        <section className="roadmap-overview panel" aria-label="General roadmap progress">
+          <p className="eyebrow">General Roadmap Progress</p>
+          <h2>No roadmap phases yet.</h2>
+          <p>Create a phase when this workspace is ready to plan its release roadmap.</p>
+        </section>
+      )}
 
       <section className="roadmap-phase-grid" aria-label="Roadmap phases">
         {phases.map((phase) => {
@@ -15876,12 +15928,10 @@ function sortRoadmapSongs(songs: ProductionSongConfig[]) {
   );
 }
 
-function buildLiveRoadmapMonths(
-  songs: ProductionSongConfig[],
-  phases: RoadmapPhase[] = roadmapPhases
-) {
-  const firstPhase = phases[0] ?? roadmapPhases[0];
-  const lastPhase = phases[phases.length - 1] ?? roadmapPhases[roadmapPhases.length - 1];
+function buildLiveRoadmapMonths(songs: ProductionSongConfig[], phases: RoadmapPhase[]) {
+  const firstPhase = phases[0];
+  const lastPhase = phases[phases.length - 1];
+  if (!firstPhase || !lastPhase) return [];
   const [startYear, startMonth] = firstPhase.startMonth.split("-").map(Number);
   const [endYear, endMonth] = lastPhase.endMonth.split("-").map(Number);
   const cursor = new Date(Date.UTC(startYear, startMonth - 1, 1));

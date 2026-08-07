@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireWorkspaceAccess } from "@/lib/server/workspace-owner";
 
 type RoadmapPhasePayload = {
   description?: string;
@@ -12,9 +13,10 @@ type RoadmapPhasePayload = {
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    return NextResponse.json({ phases: await loadPhases(), status: "ok" });
+    const { workspaceId } = await requireWorkspaceAccess(request);
+    return NextResponse.json({ phases: await loadPhases(workspaceId), status: "ok" });
   } catch (error) {
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
@@ -26,10 +28,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const { workspaceId } = await requireWorkspaceAccess(request);
     const supabase = createServiceSupabaseClient();
     const { data: latestPhase, error: latestError } = await supabase
       .from("roadmap_phases")
       .select("phase_number, end_month")
+      .eq("workspace_id", workspaceId)
       .order("phase_number", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -41,15 +45,16 @@ export async function POST(request: NextRequest) {
     const { error } = await supabase.from("roadmap_phases").insert({
       description: "Define the purpose and expected outcome of this phase.",
       end_month: endMonth,
-      id: `phase-${phaseNumber}`,
+      id: `${workspaceId}-phase-${phaseNumber}`,
       phase_number: phaseNumber,
       position: phaseNumber,
       start_month: startMonth,
-      title: `New Phase ${phaseNumber}`
+      title: `New Phase ${phaseNumber}`,
+      workspace_id: workspaceId
     });
     if (error) throw error;
 
-    return NextResponse.json({ phases: await loadPhases(), status: "ok" });
+    return NextResponse.json({ phases: await loadPhases(workspaceId), status: "ok" });
   } catch (error) {
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
@@ -61,6 +66,7 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
+    const { workspaceId } = await requireWorkspaceAccess(request);
     const payload = (await request.json()) as RoadmapPhasePayload;
     const id = payload.id?.trim();
     const startMonth = normalizeMonth(payload.startMonth);
@@ -78,20 +84,22 @@ export async function PATCH(request: NextRequest) {
         start_month: `${startMonth}-01`,
         title: payload.title?.trim() || "Untitled phase"
       })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("workspace_id", workspaceId);
     if (error) throw error;
 
-    return NextResponse.json({ phases: await loadPhases(), status: "ok" });
+    return NextResponse.json({ phases: await loadPhases(workspaceId), status: "ok" });
   } catch (error) {
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
   }
 }
 
-async function loadPhases() {
+async function loadPhases(workspaceId: string) {
   const supabase = createServiceSupabaseClient();
   const { data, error } = await supabase
     .from("roadmap_phases")
     .select("id, phase_number, title, start_month, end_month, description, position")
+    .eq("workspace_id", workspaceId)
     .order("position", { ascending: true })
     .order("phase_number", { ascending: true });
   if (error) throw error;

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireWorkspaceAccess } from "@/lib/server/workspace-owner";
 
 type QrLink = {
   id: string;
@@ -18,12 +19,9 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 export async function GET(request: NextRequest) {
-  if (!hasValidAppAccess(request)) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  }
-
   try {
-    return NextResponse.json({ links: await loadLinks(), status: "ok" });
+    const { workspaceId } = await requireWorkspaceAccess(request);
+    return NextResponse.json({ links: await loadLinks(workspaceId), status: "ok" });
   } catch (error) {
     return NextResponse.json(
       { error: getErrorMessage(error, "QR links load failed.") },
@@ -33,11 +31,12 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  if (!hasValidAppAccess(request) || !isSameOriginWrite(request)) {
+  if (!isSameOriginWrite(request)) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
   try {
+    const { workspaceId } = await requireWorkspaceAccess(request);
     const payload = (await request.json()) as { links?: QrLink[] };
     const links = (payload.links ?? []).map(normalizeLink);
 
@@ -53,12 +52,13 @@ export async function POST(request: NextRequest) {
         qr_image_url: link.qrImageUrl,
         stable_key: link.id,
         target_url: link.targetUrl
-      }))
+      })),
+      p_workspace_id: workspaceId
     });
 
     if (error) throw error;
 
-    return NextResponse.json({ links: await loadLinks(), status: "ok" });
+    return NextResponse.json({ links: await loadLinks(workspaceId), status: "ok" });
   } catch (error) {
     return NextResponse.json(
       { error: getErrorMessage(error, "QR links save failed.") },
@@ -67,11 +67,12 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function loadLinks() {
+async function loadLinks(workspaceId: string) {
   const supabase = createServiceSupabaseClient();
   const { data, error } = await supabase
     .from("qr_links")
     .select("stable_key, name, qr_image_url, target_url")
+    .eq("workspace_id", workspaceId)
     .order("position", { ascending: true });
 
   if (error) throw error;
@@ -95,20 +96,6 @@ function normalizeLink(link: QrLink): QrLink {
     qrImageUrl: typeof link.qrImageUrl === "string" ? link.qrImageUrl : "",
     targetUrl: typeof link.targetUrl === "string" ? link.targetUrl : ""
   };
-}
-
-function hasValidAppAccess(request: NextRequest) {
-  const expectedUser = process.env.APP_BASIC_AUTH_USER;
-  const expectedPassword = process.env.APP_BASIC_AUTH_PASSWORD;
-
-  if (!expectedUser || !expectedPassword) {
-    return process.env.NODE_ENV === "development";
-  }
-
-  const expectedAuthorization = `Basic ${Buffer.from(
-    `${expectedUser}:${expectedPassword}`
-  ).toString("base64")}`;
-  return request.headers.get("authorization") === expectedAuthorization;
 }
 
 function isSameOriginWrite(request: NextRequest) {

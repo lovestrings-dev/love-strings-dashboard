@@ -24,6 +24,63 @@ Reasons:
 - Supports frontend and backend API routes
 - Credible for a portfolio/business case
 
+## Multi-Workspace Product Invariant
+
+Love Strings is the flagship and reference workspace, not a special application
+instance. The application has one shared codebase, UI, backend, and schema for
+every workspace.
+
+Workspace-specific differences must be represented only by workspace-scoped
+data, settings, branding, permissions, integrations, or explicit feature flags.
+Do not add duplicated implementations, Love Strings-only application branches,
+or workspace-name checks for product behavior. New functionality built while
+using Love Strings should be available to all workspaces by default unless an
+explicit, workspace-scoped feature flag intentionally controls rollout.
+
+## Current Multi-Workspace Boundary (Beta 1.14)
+
+- `app_workspaces`, workspace settings, memberships, and workspace-scoped
+  operational rows form the tenant boundary. Love Strings is the reference
+  workspace; Test Band is the first separately provisioned workspace.
+- Roles are Owner, Admin, Member, and Viewer. Owner and Admin can manage their
+  own workspace's branding and integrations; Admin may invite Member/Viewer
+  users, while promotion or invitation to Admin/Owner remains Owner-only.
+- Authentication creates an account/profile only. A pending invitation binds a
+  recipient, role, and `workspace_id`; server-side acceptance creates an
+  idempotent membership without changing memberships in other workspaces.
+- The active workspace is the server-validated `ls_active_workspace`
+  HTTP-only cookie. The app retains a valid selected membership, chooses the
+  first membership by creation time when selection is absent/invalid, and
+  presents a no-workspace state when the user has none. It never grants Love
+  Strings membership or selects it merely because it is the reference.
+- The selector receives only membership-safe metadata: workspace ID, name,
+  slug, branding-path reference, and the member's role. Switching is validated
+  on the server and hard-reloads client state.
+- Workspace provisioning is server-only and restricted to platform operators.
+  It atomically creates a workspace row, settings, initial Owner membership,
+  and dashboard preference only; it must never copy operational data,
+  integrations, analytics, CRM data, or branding from another workspace.
+- Workspace branding uses a UUID-scoped storage path. Storage and settings RLS
+  require both membership and a matching workspace path, so an administrator
+  of one workspace cannot access another workspace's branding object.
+- Service-role routes resolve the selected workspace through server-side
+  membership before reads, upserts, replacement RPCs, refreshes, or deletes.
+  Browser local storage is not an operational data source across workspaces.
+
+Current integration boundary:
+
+- Google sign-in is authentication-only and separate from connecting Google
+  services. Normal sign-in does not authorize Gmail, Drive, YouTube, Analytics,
+  or other account content.
+- Google connection records belong to a workspace. Refresh tokens are encrypted
+  server-side; normal clients receive status metadata, never reusable OAuth
+  credentials. Owner/Admin connection controls remain limited to their active
+  workspace.
+- The existing Google Analytics property preference and scheduled metric
+  collector still target Love Strings operationally. Multi-workspace collection
+  is intentionally deferred rather than silently applying that integration to
+  a new workspace.
+
 ## Data Source Direction
 
 Build the project database early.

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireWorkspaceAccess } from "@/lib/server/workspace-owner";
 
 type AppleMusicCsvRow = {
   avgDailyListeners: number;
@@ -40,16 +41,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: validationError }, { status: 400 });
   }
 
-  const result = await importAppleMusicCsvMetrics(payload);
+  const { workspaceId } = await requireWorkspaceAccess(request);
+  const result = await importAppleMusicCsvMetrics(payload, workspaceId);
   return NextResponse.json({ ...result, status: "ok" });
 }
 
-async function importAppleMusicCsvMetrics(payload: AppleMusicImportPayload) {
+async function importAppleMusicCsvMetrics(
+  payload: AppleMusicImportPayload,
+  workspaceId: string
+) {
   const supabase = createServiceSupabaseClient();
   const fileName = payload.fileName ?? "Apple Music CSV";
   const source = "apple-music-csv";
   const accountName = "Love Strings Apple Music";
-  const currentReleaseName = await resolveCurrentReleaseName(supabase, payload);
+  const currentReleaseName = await resolveCurrentReleaseName(
+    supabase,
+    payload,
+    workspaceId
+  );
   const currentReleaseRow =
     payload.rows.find(
       (row) => row.song.toLowerCase() === currentReleaseName.toLowerCase()
@@ -73,9 +82,10 @@ async function importAppleMusicCsvMetrics(payload: AppleMusicImportPayload) {
         account_name: accountName,
         external_id: "apple-music-for-artists-csv",
         platform_id: platform.id,
-        url: "https://artists.apple.com/"
+        url: "https://artists.apple.com/",
+        workspace_id: workspaceId
       },
-      { onConflict: "platform_id,account_name" }
+      { onConflict: "workspace_id,platform_id,account_name" }
     )
     .select("id")
     .single();
@@ -85,7 +95,7 @@ async function importAppleMusicCsvMetrics(payload: AppleMusicImportPayload) {
   const songIdsByTitle = new Map<string, string>();
 
   for (const row of payload.rows) {
-    const song = await findOrCreateSong(supabase, row.song);
+    const song = await findOrCreateSong(supabase, row.song, workspaceId);
     songIdsByTitle.set(song.title.toLowerCase(), song.id);
   }
 
@@ -220,11 +230,12 @@ async function importAppleMusicCsvMetrics(payload: AppleMusicImportPayload) {
           platform_id: platform.id,
           snapshot_date: payload.reportEndDate,
           song_id: row.song_id ?? null,
-          source
+          source,
+          workspace_id: workspaceId
         },
         {
           onConflict:
-            "snapshot_date,platform_id,platform_account_id,content_post_id,song_id,release_id,metric_name,source"
+            "workspace_id,snapshot_date,platform_id,platform_account_id,content_post_id,song_id,release_id,metric_name,source"
         }
       );
 
@@ -239,7 +250,8 @@ async function importAppleMusicCsvMetrics(payload: AppleMusicImportPayload) {
       records_inserted: importedRows.length,
       records_seen: payload.rows.length,
       source,
-      source_file: fileName
+      source_file: fileName,
+      workspace_id: workspaceId
     });
 
   if (logError) throw logError;
@@ -256,7 +268,8 @@ async function importAppleMusicCsvMetrics(payload: AppleMusicImportPayload) {
 
 async function resolveCurrentReleaseName(
   supabase: ReturnType<typeof createServiceSupabaseClient>,
-  payload: AppleMusicImportPayload
+  payload: AppleMusicImportPayload,
+  workspaceId: string
 ) {
   const songsByNormalizedTitle = new Map(
     payload.rows.map((row) => [normalizeSongTitle(row.song), row.song])
@@ -264,6 +277,7 @@ async function resolveCurrentReleaseName(
   const { data: releasedCampaigns, error } = await supabase
     .from("marketing_campaigns")
     .select("title,release_date")
+    .eq("workspace_id", workspaceId)
     .eq("campaign_kind", "song")
     .lte("release_date", payload.reportEndDate)
     .order("release_date", { ascending: false });
@@ -297,11 +311,13 @@ function normalizeSongTitle(title: string) {
 
 async function findOrCreateSong(
   supabase: ReturnType<typeof createServiceSupabaseClient>,
-  title: string
+  title: string,
+  workspaceId: string
 ) {
   const { data: existingSong, error: selectError } = await supabase
     .from("songs")
     .select("id,title")
+    .eq("workspace_id", workspaceId)
     .ilike("title", title)
     .limit(1)
     .maybeSingle();
@@ -316,7 +332,8 @@ async function findOrCreateSong(
     .from("songs")
     .insert({
       status: "released",
-      title
+      title,
+      workspace_id: workspaceId
     })
     .select("id,title")
     .single();

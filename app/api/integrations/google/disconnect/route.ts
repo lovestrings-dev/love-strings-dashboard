@@ -6,8 +6,7 @@ import {
   revokeGoogleToken
 } from "@/lib/google/oauth";
 import {
-  loveStringsWorkspaceId,
-  requireWorkspaceOwner,
+  requireWorkspaceAdministrator,
   WorkspaceAccessError
 } from "@/lib/server/workspace-owner";
 
@@ -22,11 +21,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unknown Google service." }, { status: 400 });
     }
 
-    const { serviceClient } = await requireWorkspaceOwner(request);
+    const { serviceClient, workspaceId } = await requireWorkspaceAdministrator(request);
     const { data: connection, error } = await serviceClient
       .from("app_google_connections")
       .select("*")
-      .eq("workspace_id", loveStringsWorkspaceId)
+      .eq("workspace_id", workspaceId)
       .maybeSingle();
     if (error) throw error;
     if (!connection) return NextResponse.json({ status: "disconnected" });
@@ -45,7 +44,7 @@ export async function POST(request: NextRequest) {
       const { error: deleteError } = await serviceClient
         .from("app_google_connections")
         .delete()
-        .eq("workspace_id", loveStringsWorkspaceId);
+        .eq("workspace_id", workspaceId);
       if (deleteError) throw deleteError;
     } else {
       const updates =
@@ -63,7 +62,7 @@ export async function POST(request: NextRequest) {
       const { error: updateError } = await serviceClient
         .from("app_google_connections")
         .update(updates)
-        .eq("workspace_id", loveStringsWorkspaceId);
+        .eq("workspace_id", workspaceId);
       if (updateError) throw updateError;
     }
 
@@ -87,4 +86,3 @@ function isSameOriginRequest(request: NextRequest) {
     return false;
   }
 }
-

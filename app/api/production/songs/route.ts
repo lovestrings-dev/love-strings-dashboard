@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireWorkspaceAccess } from "@/lib/server/workspace-owner";
 
 type MarketingStatus = "not-started" | "in-progress" | "done";
 type BudgetSourceBucket = "events" | "production" | "marketing" | "other";
@@ -59,10 +60,11 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const { workspaceId } = await requireWorkspaceAccess(request);
     const savedSongs = [];
 
     for (const song of songs) {
-      savedSongs.push(await saveProductionSong(song));
+      savedSongs.push(await saveProductionSong(song, workspaceId));
     }
 
     return NextResponse.json({
@@ -89,11 +91,13 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "Missing production song id." }, { status: 400 });
   }
 
+  const { workspaceId } = await requireWorkspaceAccess(request);
   const supabase = createServiceSupabaseClient();
   const { error } = await supabase
     .from("production_songs")
     .delete()
-    .eq("id", payload.dbId);
+    .eq("id", payload.dbId)
+    .eq("workspace_id", workspaceId);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -102,7 +106,7 @@ export async function DELETE(request: NextRequest) {
   return NextResponse.json({ status: "ok" });
 }
 
-async function saveProductionSong(song: ProductionSongConfig) {
+async function saveProductionSong(song: ProductionSongConfig, workspaceId: string) {
   const supabase = createServiceSupabaseClient();
   const productionDeadline = formatInputDateForDatabase(song.deadline);
   const releaseDate = formatInputDateForDatabase(song.releaseDate);
@@ -123,11 +127,12 @@ async function saveProductionSong(song: ProductionSongConfig) {
     roadmap_phase_id: song.roadmapPhaseId,
     album_art_url: song.albumArtUrl,
     source: "app",
+    workspace_id: workspaceId,
     ...(song.dbId ? { id: song.dbId } : {})
   };
   const { data: savedSong, error: songError } = await supabase
     .from("production_songs")
-    .upsert(songPayload, { onConflict: "slug" })
+    .upsert(songPayload, { onConflict: "workspace_id,slug" })
     .select("id, slug")
     .single();
 
@@ -138,7 +143,8 @@ async function saveProductionSong(song: ProductionSongConfig) {
   const { error: campaignSyncError } = await supabase
     .from("marketing_campaigns")
     .update({ release_date: releaseDate })
-    .eq("production_song_id", savedSong.id);
+    .eq("production_song_id", savedSong.id)
+    .eq("workspace_id", workspaceId);
 
   if (campaignSyncError) {
     throw campaignSyncError;

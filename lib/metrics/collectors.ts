@@ -5,7 +5,7 @@ import {
   fetchGoogleJson,
   refreshGoogleAccessToken
 } from "@/lib/google/oauth";
-import { loveStringsWorkspaceId } from "@/lib/server/workspace-owner";
+import { defaultWorkspaceId } from "@/lib/workspace";
 
 type CollectorStatus = "fulfilled" | "rejected" | "skipped";
 
@@ -67,17 +67,17 @@ type GoogleAnalyticsReport = {
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-export async function refreshAllMetricCollectors() {
+export async function refreshAllMetricCollectors(workspaceId = defaultWorkspaceId) {
   const startedAt = new Date().toISOString();
   const collectors: Array<{
     name: MetricCollectorResult["name"];
     refresh: () => Promise<MetricCollectorResult>;
   }> = [
-    { name: "google-analytics", refresh: refreshGoogleAnalyticsMetrics },
-    { name: "youtube", refresh: refreshYouTubeMetrics },
-    { name: "instagram", refresh: refreshInstagramMetrics },
-    { name: "youtube-music", refresh: refreshYouTubeMusicMetrics },
-    { name: "spotify", refresh: refreshSpotifyMetrics }
+    { name: "google-analytics", refresh: () => refreshGoogleAnalyticsMetrics(workspaceId) },
+    { name: "youtube", refresh: () => refreshYouTubeMetrics(workspaceId) },
+    { name: "instagram", refresh: () => refreshInstagramMetrics(workspaceId) },
+    { name: "youtube-music", refresh: () => refreshYouTubeMusicMetrics(workspaceId) },
+    { name: "spotify", refresh: () => refreshSpotifyMetrics(workspaceId) }
   ];
   const results = await Promise.allSettled(collectors.map((collector) => collector.refresh()));
 
@@ -98,7 +98,7 @@ export async function refreshAllMetricCollectors() {
   };
 }
 
-async function refreshGoogleAnalyticsMetrics(): Promise<MetricCollectorResult> {
+async function refreshGoogleAnalyticsMetrics(workspaceId: string): Promise<MetricCollectorResult> {
   if (
     !process.env.GOOGLE_OAUTH_CLIENT_ID ||
     !process.env.GOOGLE_OAUTH_CLIENT_SECRET ||
@@ -117,7 +117,7 @@ async function refreshGoogleAnalyticsMetrics(): Promise<MetricCollectorResult> {
     .select(
       "analytics_enabled, analytics_property_id, analytics_property_name, encrypted_refresh_token"
     )
-    .eq("workspace_id", loveStringsWorkspaceId)
+    .eq("workspace_id", workspaceId)
     .maybeSingle();
 
   if (error) throw error;
@@ -200,7 +200,8 @@ async function refreshGoogleAnalyticsMetrics(): Promise<MetricCollectorResult> {
         notes: topTrafficSource
       }
     ],
-    "google-analytics-data-api"
+    "google-analytics-data-api",
+    workspaceId
   );
 
   return {
@@ -216,7 +217,7 @@ async function refreshGoogleAnalyticsMetrics(): Promise<MetricCollectorResult> {
   };
 }
 
-async function refreshSpotifyMetrics(): Promise<MetricCollectorResult> {
+async function refreshSpotifyMetrics(workspaceId: string): Promise<MetricCollectorResult> {
   const clientId = process.env.SPOTIFY_CLIENT_ID;
   const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
   const artistId = process.env.SPOTIFY_ARTIST_ID ?? "4CESELwcVlIPnfiWuaxRbF";
@@ -253,7 +254,8 @@ async function refreshSpotifyMetrics(): Promise<MetricCollectorResult> {
         metricValue: Number(artist.popularity ?? 0)
       }
     ],
-    "spotify-web-api"
+    "spotify-web-api",
+    workspaceId
   );
 
   return {
@@ -266,7 +268,7 @@ async function refreshSpotifyMetrics(): Promise<MetricCollectorResult> {
   };
 }
 
-async function refreshYouTubeMusicMetrics(): Promise<MetricCollectorResult> {
+async function refreshYouTubeMusicMetrics(workspaceId: string): Promise<MetricCollectorResult> {
   const youtubeApiKey = process.env.YOUTUBE_API_KEY;
   const youtubeMusicChannelId =
     process.env.YOUTUBE_MUSIC_CHANNEL_ID ?? "UCKlfg9lYKyMOg_Oiz-Zb1Fg";
@@ -323,7 +325,8 @@ async function refreshYouTubeMusicMetrics(): Promise<MetricCollectorResult> {
           ]
         : [])
     ],
-    "youtube-data-api"
+    "youtube-data-api",
+    workspaceId
   );
 
   return {
@@ -338,7 +341,7 @@ async function refreshYouTubeMusicMetrics(): Promise<MetricCollectorResult> {
   };
 }
 
-async function refreshYouTubeMetrics(): Promise<MetricCollectorResult> {
+async function refreshYouTubeMetrics(workspaceId: string): Promise<MetricCollectorResult> {
   const youtubeApiKey = process.env.YOUTUBE_API_KEY;
 
   if (!youtubeApiKey) {
@@ -424,7 +427,8 @@ async function refreshYouTubeMetrics(): Promise<MetricCollectorResult> {
         notes: cleanAsciiTitle(latestShort.snippet?.title ?? "Latest short")
       }
     ],
-    "youtube-data-api"
+    "youtube-data-api",
+    workspaceId
   );
 
   return {
@@ -439,7 +443,7 @@ async function refreshYouTubeMetrics(): Promise<MetricCollectorResult> {
   };
 }
 
-async function refreshInstagramMetrics(): Promise<MetricCollectorResult> {
+async function refreshInstagramMetrics(workspaceId: string): Promise<MetricCollectorResult> {
   const accessToken = process.env.INSTAGRAM_ACCESS_TOKEN;
   const accountId = process.env.INSTAGRAM_BUSINESS_ACCOUNT_ID;
 
@@ -512,7 +516,8 @@ async function refreshInstagramMetrics(): Promise<MetricCollectorResult> {
           ]
         : [])
     ],
-    "instagram-api"
+    "instagram-api",
+    workspaceId
   );
 
   return {
@@ -530,7 +535,8 @@ async function refreshInstagramMetrics(): Promise<MetricCollectorResult> {
 async function upsertPlatformMetricSnapshots(
   accountInput: PlatformAccountInput,
   snapshots: MetricSnapshotInput[],
-  source: string
+  source: string,
+  workspaceId: string
 ) {
   const supabase = createServiceSupabaseClient();
   const snapshotDate = getViennaSnapshotDate();
@@ -556,9 +562,10 @@ async function upsertPlatformMetricSnapshots(
         account_name: accountInput.accountName,
         external_id: accountInput.externalId,
         platform_id: platform.id,
-        url: accountInput.url
+        url: accountInput.url,
+        workspace_id: workspaceId
       },
-      { onConflict: "platform_id,account_name" }
+      { onConflict: "workspace_id,platform_id,account_name" }
     )
     .select("id")
     .single();
@@ -567,7 +574,7 @@ async function upsertPlatformMetricSnapshots(
 
   for (const snapshot of snapshots) {
     const contentPostId = snapshot.contentExternalId
-      ? await upsertContentPost(supabase, account.id, snapshot)
+      ? await upsertContentPost(supabase, account.id, snapshot, workspaceId)
       : null;
 
     const { error } = await supabase
@@ -582,11 +589,12 @@ async function upsertPlatformMetricSnapshots(
           platform_account_id: account.id,
           platform_id: platform.id,
           snapshot_date: snapshotDate,
-          source
+          source,
+          workspace_id: workspaceId
         },
         {
           onConflict:
-            "snapshot_date,platform_id,platform_account_id,content_post_id,song_id,release_id,metric_name,source"
+            "workspace_id,snapshot_date,platform_id,platform_account_id,content_post_id,song_id,release_id,metric_name,source"
         }
       );
 
@@ -611,7 +619,8 @@ function getViennaSnapshotDate() {
 async function upsertContentPost(
   supabase: SupabaseClient,
   platformAccountId: string,
-  snapshot: MetricSnapshotInput
+  snapshot: MetricSnapshotInput,
+  workspaceId: string
 ) {
   const { data, error } = await supabase
     .from("content_posts")
@@ -621,7 +630,8 @@ async function upsertContentPost(
         external_id: snapshot.contentExternalId,
         platform_account_id: platformAccountId,
         title: snapshot.contentTitle,
-        url: snapshot.contentUrl
+        url: snapshot.contentUrl,
+        workspace_id: workspaceId
       },
       { onConflict: "platform_account_id,external_id" }
     )

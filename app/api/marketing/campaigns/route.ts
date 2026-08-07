@@ -1,15 +1,17 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireWorkspaceAccess } from "@/lib/server/workspace-owner";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 export async function POST(request: NextRequest) {
-  if (!hasValidAppAccess(request) || !isSameOriginWrite(request)) {
+  if (!isSameOriginWrite(request)) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
   try {
+    const { workspaceId } = await requireWorkspaceAccess(request);
     const payload = (await request.json()) as {
       albumArtUrl?: string;
       campaignKind?: "general" | "song";
@@ -47,7 +49,8 @@ export async function POST(request: NextRequest) {
         source: "app",
         start_date: payload.startDate,
         status: "planned",
-        title
+        title,
+        workspace_id: workspaceId
       })
       .select("id, slug, campaign_kind, production_song_id")
       .single();
@@ -58,7 +61,8 @@ export async function POST(request: NextRequest) {
       const { error: productionSyncError } = await supabase
         .from("production_songs")
         .update({ release_date: payload.releaseDate })
-        .eq("id", data.production_song_id);
+        .eq("id", data.production_song_id)
+        .eq("workspace_id", workspaceId);
 
       if (productionSyncError) throw productionSyncError;
     }
@@ -69,11 +73,12 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  if (!hasValidAppAccess(request) || !isSameOriginWrite(request)) {
+  if (!isSameOriginWrite(request)) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
   try {
+    const { workspaceId } = await requireWorkspaceAccess(request);
     const payload = (await request.json()) as {
       campaignId?: string;
       updates?: {
@@ -131,6 +136,7 @@ export async function PATCH(request: NextRequest) {
       .from("marketing_campaigns")
       .update(updates)
       .eq("id", payload.campaignId)
+      .eq("workspace_id", workspaceId)
       .select("slug, campaign_kind, production_song_id")
       .single();
 
@@ -144,7 +150,8 @@ export async function PATCH(request: NextRequest) {
       const { error: productionSyncError } = await supabase
         .from("production_songs")
         .update({ release_date: updates.release_date })
-        .eq("id", campaign.production_song_id);
+        .eq("id", campaign.production_song_id)
+        .eq("workspace_id", workspaceId);
 
       if (productionSyncError) throw productionSyncError;
     }
@@ -155,11 +162,12 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  if (!hasValidAppAccess(request) || !isSameOriginWrite(request)) {
+  if (!isSameOriginWrite(request)) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
   try {
+    const { workspaceId } = await requireWorkspaceAccess(request);
     const payload = (await request.json()) as { campaignId?: string };
     if (!isUuid(payload.campaignId)) {
       return NextResponse.json({ error: "Campaign id is invalid." }, { status: 400 });
@@ -169,24 +177,14 @@ export async function DELETE(request: NextRequest) {
     const { error } = await supabase
       .from("marketing_campaigns")
       .delete()
-      .eq("id", payload.campaignId);
+      .eq("id", payload.campaignId)
+      .eq("workspace_id", workspaceId);
 
     if (error) throw error;
     return NextResponse.json({ status: "ok" });
   } catch (error) {
     return errorResponse(error, "Marketing campaign deletion failed.");
   }
-}
-
-function hasValidAppAccess(request: NextRequest) {
-  const expectedUser = process.env.APP_BASIC_AUTH_USER;
-  const expectedPassword = process.env.APP_BASIC_AUTH_PASSWORD;
-  if (!expectedUser || !expectedPassword) return process.env.NODE_ENV === "development";
-
-  const expectedAuthorization = `Basic ${Buffer.from(
-    `${expectedUser}:${expectedPassword}`
-  ).toString("base64")}`;
-  return request.headers.get("authorization") === expectedAuthorization;
 }
 
 function isSameOriginWrite(request: NextRequest) {

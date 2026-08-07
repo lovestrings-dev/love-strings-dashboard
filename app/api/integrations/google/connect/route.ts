@@ -3,8 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { createGoogleAuthorizationUrl, isGoogleService } from "@/lib/google/oauth";
 import {
-  loveStringsWorkspaceId,
-  requireWorkspaceOwner,
+  requireWorkspaceAdministrator,
   WorkspaceAccessError
 } from "@/lib/server/workspace-owner";
 
@@ -15,11 +14,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unknown Google service." }, { status: 400 });
     }
 
-    const { serviceClient } = await requireWorkspaceOwner(request);
+    const { serviceClient, workspaceId } = await requireWorkspaceAdministrator(request);
     const { data: connection, error } = await serviceClient
       .from("app_google_connections")
       .select("google_account_email")
-      .eq("workspace_id", loveStringsWorkspaceId)
+      .eq("workspace_id", workspaceId)
       .maybeSingle();
     if (error) throw error;
 
@@ -43,6 +42,7 @@ export async function GET(request: NextRequest) {
     response.cookies.set("ls_google_oauth_state", state, cookieOptions);
     response.cookies.set("ls_google_oauth_service", service, cookieOptions);
     response.cookies.set("ls_google_oauth_origin", request.nextUrl.origin, cookieOptions);
+    response.cookies.set("ls_google_oauth_workspace", workspaceId, cookieOptions);
     return response;
   } catch (error) {
     if (error instanceof WorkspaceAccessError) {
@@ -58,4 +58,3 @@ function createSettingsReturnUrl(request: NextRequest, result: string) {
   url.searchParams.set("google", result);
   return url;
 }
-
