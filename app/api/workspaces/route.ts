@@ -5,6 +5,14 @@ import { createServerClient } from "@supabase/ssr";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+function workspaceResponse(body: unknown, init?: ResponseInit) {
+  const response = NextResponse.json(body, init);
+  response.headers.set("Cache-Control", "private, no-store, max-age=0");
+  return response;
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,7 +27,7 @@ export async function GET(request: NextRequest) {
 
     const workspaceIds = (memberships ?? []).map((membership) => membership.workspace_id);
     if (workspaceIds.length === 0) {
-      return NextResponse.json({ workspaces: [] });
+      return workspaceResponse({ workspaces: [] });
     }
 
     const [{ data: workspaceRows, error: workspaceError }, { data: settingsRows, error: settingsError }] =
@@ -38,7 +46,7 @@ export async function GET(request: NextRequest) {
       (settingsRows ?? []).map((settings) => [settings.workspace_id, settings.logo_path ?? ""]),
     );
 
-    return NextResponse.json({
+    return workspaceResponse({
       workspaces: (memberships ?? []).flatMap((membership) => {
         const workspace = workspaceById.get(membership.workspace_id);
         if (!workspace) return [];
@@ -53,7 +61,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     const status = error instanceof WorkspaceAccessError ? error.status : 500;
-    return NextResponse.json({ error: "Workspace list unavailable." }, { status });
+    return workspaceResponse({ error: "Workspace list unavailable." }, { status });
   }
 }
 
@@ -61,7 +69,7 @@ export async function POST(request: NextRequest) {
   try {
     const payload = (await request.json()) as { workspaceId?: string };
     const workspaceId = parseWorkspaceId(payload.workspaceId);
-    if (!workspaceId) return NextResponse.json({ error: "Invalid workspace." }, { status: 400 });
+    if (!workspaceId) return workspaceResponse({ error: "Invalid workspace." }, { status: 400 });
     const user = await authenticatedUser(request);
     const service = createServiceSupabaseClient();
     const { data: membership, error } = await service
@@ -71,13 +79,13 @@ export async function POST(request: NextRequest) {
       .eq("user_id", user.id)
       .maybeSingle();
     if (error) throw error;
-    if (!membership) return NextResponse.json({ error: "Workspace access denied." }, { status: 403 });
-    const response = NextResponse.json({ status: "switched", workspaceId });
+    if (!membership) return workspaceResponse({ error: "Workspace access denied." }, { status: 403 });
+    const response = workspaceResponse({ status: "switched", workspaceId });
     response.cookies.set(activeWorkspaceCookieName, workspaceId, { httpOnly: true, path: "/", sameSite: "lax", secure: request.nextUrl.protocol === "https:" });
     return response;
   } catch (error) {
     const status = error instanceof WorkspaceAccessError ? error.status : 500;
-    return NextResponse.json({ error: "Workspace switch failed." }, { status });
+    return workspaceResponse({ error: "Workspace switch failed." }, { status });
   }
 }
 

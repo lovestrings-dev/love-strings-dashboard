@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Info, LogOut, Settings, UserRound } from "lucide-react";
+import { ChevronDown, Info, LogOut, Settings, ShieldCheck, UserRound } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
@@ -8,10 +8,12 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 export function AccountControl({
   onOpenAboutDashboard,
   onOpenGeneralSettings,
+  onOpenPlatformAdministration,
   onOpenUserSettings
 }: {
   onOpenAboutDashboard: () => void;
   onOpenGeneralSettings: () => void;
+  onOpenPlatformAdministration: () => void;
   onOpenUserSettings: () => void;
 }) {
   const router = useRouter();
@@ -23,6 +25,7 @@ export function AccountControl({
   >(null);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
   const [isSwitchingWorkspace, setIsSwitchingWorkspace] = useState(false);
+  const [isPlatformOperator, setIsPlatformOperator] = useState(false);
   const [workspaces, setWorkspaces] = useState<Array<{
     id: string;
     logoPath: string;
@@ -45,14 +48,15 @@ export function AccountControl({
         return;
       }
 
-      const [profileResult, workspaceResult, workspacesResult] = await Promise.all([
+      const [profileResult, workspaceResult, workspacesResult, platformResult] = await Promise.all([
         supabase
           .from("app_profiles")
           .select("avatar_path, display_name")
           .eq("id", user.id)
           .maybeSingle(),
-        fetch("/api/workspace/active"),
-        fetch("/api/workspaces")
+        fetch("/api/workspace/active", { cache: "no-store" }),
+        fetch("/api/workspaces", { cache: "no-store" }),
+        fetch("/api/platform/workspaces", { cache: "no-store" })
       ]);
       const profile = profileResult.data;
       const workspacePayload = (await workspaceResult.json().catch(() => null)) as {
@@ -65,6 +69,7 @@ export function AccountControl({
       if (workspacesResult.ok && Array.isArray(workspaceListPayload?.workspaces)) {
         setWorkspaces(workspaceListPayload.workspaces);
       }
+      setIsPlatformOperator(platformResult.ok);
       setActiveWorkspaceId(workspaceResult.ok ? workspacePayload?.workspaceId ?? "" : "");
       const loadedRole = workspaceResult.ok ? workspacePayload?.role : null;
       setWorkspaceRole(
@@ -173,8 +178,11 @@ export function AccountControl({
         headers: { "content-type": "application/json" },
         method: "POST",
       });
-      if (!response.ok) throw new Error("Workspace switch failed.");
-      window.location.reload();
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? "Workspace switch failed.");
+      }
+      window.location.assign("/");
     } catch (error) {
       console.error("Unable to switch workspace.", error);
       setIsSwitchingWorkspace(false);
@@ -245,6 +253,19 @@ export function AccountControl({
             >
               <Settings aria-hidden size={17} />
               <span>General Settings</span>
+            </button>
+          ) : null}
+          {isPlatformOperator ? (
+            <button
+              onClick={() => {
+                setIsMenuOpen(false);
+                onOpenPlatformAdministration();
+              }}
+              role="menuitem"
+              type="button"
+            >
+              <ShieldCheck aria-hidden size={17} />
+              <span>Platform administration</span>
             </button>
           ) : null}
           <button

@@ -4863,7 +4863,7 @@ export default function Home() {
   const hasRequestedQrCodeSupabaseLoad = useRef(false);
   const [activeSection, setActiveSection] = useState<Section>("Dashboard");
   const [settingsView, setSettingsView] = useState<
-    "about" | "general" | "user" | null
+    "about" | "general" | "platform" | "user" | null
   >(null);
   const [workspaceRole, setWorkspaceRole] = useState<WorkspaceRole | null>(null);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
@@ -5389,6 +5389,14 @@ export default function Home() {
       const result = await response.json();
       await loadPlatformStats();
 
+      if (result.skipped) {
+        setRefreshStatus({
+          message: "No platform metrics are configured for this workspace yet.",
+          state: "idle"
+        });
+        return;
+      }
+
       const refreshedCount =
         result.results?.filter(
           (item: { status: string }) => item.status === "fulfilled"
@@ -5895,11 +5903,13 @@ export default function Home() {
     let isCancelled = false;
 
     async function loadActiveWorkspace() {
-      const response = await fetch("/api/workspace/active");
+      const response = await fetch("/api/workspace/active", { cache: "no-store" });
       const payload = (await response.json()) as { workspaceId?: string };
       if (!isCancelled && response.ok && payload.workspaceId) {
+        setPlatformMetricRows([]);
+        setPlatformStatsData([]);
         setActiveWorkspaceId(payload.workspaceId);
-        const workspacesResponse = await fetch("/api/workspaces");
+        const workspacesResponse = await fetch("/api/workspaces", { cache: "no-store" });
         const workspacesPayload = (await workspacesResponse.json().catch(() => null)) as {
           workspaces?: Array<{ id: string; name: string }>;
         } | null;
@@ -6786,10 +6796,14 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!activeWorkspaceId) {
+      return;
+    }
+
     window.setTimeout(() => {
       void refreshPlatformStatsOnOpenIfMissing();
     }, 0);
-  }, [refreshPlatformStatsOnOpenIfMissing]);
+  }, [activeWorkspaceId, refreshPlatformStatsOnOpenIfMissing]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -6953,6 +6967,7 @@ export default function Home() {
           <AccountControl
             onOpenAboutDashboard={() => setSettingsView("about")}
             onOpenGeneralSettings={() => setSettingsView("general")}
+            onOpenPlatformAdministration={() => setSettingsView("platform")}
             onOpenUserSettings={() => setSettingsView("user")}
           />
           <div className="brand-mark">
@@ -7025,6 +7040,12 @@ export default function Home() {
             }}
             workspaceId={activeWorkspaceId}
             workspaceRole={workspaceRole}
+          />
+        ) : null}
+        {settingsView === "platform" ? (
+          <PlatformAdministrationView
+            activeSection={activeSection}
+            onBack={() => setSettingsView(null)}
           />
         ) : null}
         {!settingsView && activeSection === "Roadmap" ? (
@@ -7239,13 +7260,6 @@ function GeneralSettingsView({
     message: "",
     state: "idle"
   });
-  const [canCreateWorkspaces, setCanCreateWorkspaces] = useState(false);
-  const [newWorkspaceName, setNewWorkspaceName] = useState("");
-  const [newWorkspaceSlug, setNewWorkspaceSlug] = useState("");
-  const [workspaceCreationStatus, setWorkspaceCreationStatus] = useState<RefreshStatus>({
-    message: "",
-    state: "idle"
-  });
   const [googleConnection, setGoogleConnection] =
     useState<GoogleConnectionStatus | null>(null);
   const [googleStatus, setGoogleStatus] = useState<RefreshStatus>({
@@ -7279,15 +7293,6 @@ function GeneralSettingsView({
     }
 
     void loadGoogleConnection();
-
-    void loadWorkspaceProvisioningAccess();
-
-    async function loadWorkspaceProvisioningAccess() {
-      const response = await fetch("/api/platform/workspaces");
-      if (!response.ok) return;
-      const payload = (await response.json()) as { canCreateWorkspaces?: boolean };
-      setCanCreateWorkspaces(payload.canCreateWorkspaces === true);
-    }
 
     async function loadGoogleConnection() {
       try {
@@ -7381,31 +7386,6 @@ function GeneralSettingsView({
     }
   }
 
-  async function createWorkspace(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setWorkspaceCreationStatus({ message: "Creating workspace...", state: "loading" });
-    try {
-      const response = await fetch("/api/platform/workspaces", {
-        body: JSON.stringify({ name: newWorkspaceName, slug: newWorkspaceSlug }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST"
-      });
-      const payload = (await response.json()) as { error?: string; name?: string };
-      if (!response.ok) throw new Error(payload.error || "Workspace creation failed.");
-      setNewWorkspaceName("");
-      setNewWorkspaceSlug("");
-      setWorkspaceCreationStatus({
-        message: `${payload.name || "Workspace"} is ready for onboarding.`,
-        state: "success"
-      });
-    } catch (error) {
-      setWorkspaceCreationStatus({
-        message: error instanceof Error ? error.message : "Workspace creation failed.",
-        state: "error"
-      });
-    }
-  }
-
   async function uploadLogo(file: File) {
     setLogoStatus({ message: "Preparing logo...", state: "loading" });
 
@@ -7471,47 +7451,6 @@ function GeneralSettingsView({
       </header>
 
       <div className="user-settings-content">
-        {canCreateWorkspaces ? (
-          <article className="general-settings-card general-settings-invitations">
-            <div className="general-settings-heading">
-              <div>
-                <p className="eyebrow">Platform owner</p>
-                <h2>Create workspace</h2>
-              </div>
-            </div>
-            <form className="workspace-invitation-form" onSubmit={createWorkspace}>
-              <label>
-                <span>Name</span>
-                <input
-                  disabled={workspaceCreationStatus.state === "loading"}
-                  onChange={(event) => setNewWorkspaceName(event.target.value)}
-                  placeholder="Test Band"
-                  required
-                  value={newWorkspaceName}
-                />
-              </label>
-              <label>
-                <span>Slug</span>
-                <input
-                  disabled={workspaceCreationStatus.state === "loading"}
-                  onChange={(event) => setNewWorkspaceSlug(event.target.value)}
-                  placeholder="test-band"
-                  required
-                  value={newWorkspaceSlug}
-                />
-              </label>
-              <button disabled={workspaceCreationStatus.state === "loading"} type="submit">
-                <Plus aria-hidden size={16} />
-                <span>{workspaceCreationStatus.state === "loading" ? "Creating..." : "Create workspace"}</span>
-              </button>
-            </form>
-            {workspaceCreationStatus.message ? (
-              <p className={workspaceCreationStatus.state === "error" ? "settings-error" : "settings-status"}>
-                {workspaceCreationStatus.message}
-              </p>
-            ) : null}
-          </article>
-        ) : null}
         <article className="general-settings-card general-settings-invitations">
           <div className="general-settings-heading">
             <div>
@@ -7714,6 +7653,130 @@ function GeneralSettingsView({
             ) : null}
           </div>
         </article>
+      </div>
+    </section>
+  );
+}
+
+function PlatformAdministrationView({
+  activeSection,
+  onBack
+}: {
+  activeSection: Section;
+  onBack: () => void;
+}) {
+  const [accessChecked, setAccessChecked] = useState(false);
+  const [canCreateWorkspaces, setCanCreateWorkspaces] = useState(false);
+  const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const [newWorkspaceSlug, setNewWorkspaceSlug] = useState("");
+  const [status, setStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
+
+  useEffect(() => {
+    let isCancelled = false;
+    void fetch("/api/platform/workspaces", { cache: "no-store" })
+      .then(async (response) => ({ ok: response.ok, payload: await response.json() }))
+      .then(({ ok, payload }) => {
+        if (isCancelled) return;
+        setCanCreateWorkspaces(ok && payload.canCreateWorkspaces === true);
+        setAccessChecked(true);
+      })
+      .catch(() => {
+        if (!isCancelled) setAccessChecked(true);
+      });
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  async function createWorkspace(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatus({ message: "Creating workspace...", state: "loading" });
+    try {
+      const response = await fetch("/api/platform/workspaces", {
+        body: JSON.stringify({ name: newWorkspaceName, slug: newWorkspaceSlug }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const payload = (await response.json()) as { error?: string; name?: string };
+      if (!response.ok) throw new Error(payload.error || "Workspace creation failed.");
+      setNewWorkspaceName("");
+      setNewWorkspaceSlug("");
+      setStatus({
+        message: `${payload.name || "Workspace"} is ready for onboarding.`,
+        state: "success"
+      });
+    } catch (error) {
+      setStatus({
+        message: error instanceof Error ? error.message : "Workspace creation failed.",
+        state: "error"
+      });
+    }
+  }
+
+  return (
+    <section className="user-settings-canvas" aria-labelledby="platform-administration-title">
+      <header className="user-settings-header">
+        <div>
+          <p className="eyebrow">Platform administration</p>
+          <h1 id="platform-administration-title">Workspace provisioning</h1>
+        </div>
+        <button className="user-settings-back" onClick={onBack} type="button">
+          <ArrowLeft aria-hidden size={18} />
+          <span>Back to {activeSection}</span>
+        </button>
+      </header>
+      <div className="user-settings-content">
+        {accessChecked && !canCreateWorkspaces ? (
+          <article className="general-settings-card">
+            <h2>Platform access required</h2>
+            <p>Only registered platform operators can provision workspaces.</p>
+          </article>
+        ) : null}
+        {canCreateWorkspaces ? (
+          <article className="general-settings-card general-settings-invitations">
+            <div className="general-settings-heading">
+              <div>
+                <p className="eyebrow">All workspaces</p>
+                <h2>Create workspace</h2>
+              </div>
+            </div>
+            <p className="settings-description">
+              This is platform-level administration. It is not a setting of the
+              currently selected workspace.
+            </p>
+            <form className="workspace-invitation-form" onSubmit={createWorkspace}>
+              <label>
+                <span>Name</span>
+                <input
+                  disabled={status.state === "loading"}
+                  onChange={(event) => setNewWorkspaceName(event.target.value)}
+                  placeholder="Test Band"
+                  required
+                  value={newWorkspaceName}
+                />
+              </label>
+              <label>
+                <span>Slug</span>
+                <input
+                  disabled={status.state === "loading"}
+                  onChange={(event) => setNewWorkspaceSlug(event.target.value)}
+                  placeholder="test-band"
+                  required
+                  value={newWorkspaceSlug}
+                />
+              </label>
+              <button disabled={status.state === "loading"} type="submit">
+                <Plus aria-hidden size={16} />
+                <span>{status.state === "loading" ? "Creating..." : "Create workspace"}</span>
+              </button>
+            </form>
+            {status.message ? (
+              <p className={status.state === "error" ? "settings-error" : "settings-status"}>
+                {status.message}
+              </p>
+            ) : null}
+          </article>
+        ) : null}
       </div>
     </section>
   );
@@ -14615,7 +14678,13 @@ function mergePlatformMetricRows(
   currentStats: typeof platformStats,
   rows: MetricRow[]
 ) {
-  return currentStats.map((platform) => ({
+  // The active workspace is deliberately cleared before its metrics load. Build
+  // neutral cards from the metric catalog when rows exist, rather than merging
+  // into an empty array or falling back to Love Strings' displayed values.
+  const baseStats =
+    currentStats.length > 0 ? currentStats : getNeutralPlatformStatsTemplate(rows);
+
+  return baseStats.map((platform) => ({
     ...platform,
     metrics: platform.metrics.map((metric) => {
       const row = rows
@@ -14641,6 +14710,25 @@ function mergePlatformMetricRows(
       };
     })
   }));
+}
+
+function getNeutralPlatformStatsTemplate(rows: MetricRow[]): typeof platformStats {
+  const platformSlugs = new Set(
+    rows
+      .map((row) => getSingle(row.platforms)?.slug)
+      .filter((slug): slug is string => Boolean(slug))
+  );
+
+  return platformStats
+    .filter((platform) => platformSlugs.has(platform.slug))
+    .map((platform) => ({
+      ...platform,
+      metrics: platform.metrics.map((metric) => ({
+        label: metric.label,
+        metricName: metric.metricName,
+        value: "—"
+      }))
+    })) as typeof platformStats;
 }
 
 const platformMetricDeltaKeys = new Set([

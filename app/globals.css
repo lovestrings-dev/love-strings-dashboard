@@ -277,6 +277,13 @@ button {
   color: #77d6c9;
 }
 
+.settings-description {
+  color: #aeb6b3;
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+
 .user-settings-canvas {
   min-height: calc(100vh - 48px);
 }
