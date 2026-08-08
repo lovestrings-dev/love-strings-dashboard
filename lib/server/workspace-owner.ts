@@ -3,11 +3,8 @@ import { createClient } from "@supabase/supabase-js";
 import type { NextRequest } from "next/server";
 import {
   activeWorkspaceCookieName,
-  defaultWorkspaceId,
   parseWorkspaceId
 } from "@/lib/workspace";
-
-export const loveStringsWorkspaceId = defaultWorkspaceId;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -23,16 +20,6 @@ export class WorkspaceAccessError extends Error {
   }
 }
 
-export async function requireWorkspaceOwner(request: NextRequest) {
-  const access = await requireWorkspaceAccess(request);
-
-  if (access.role !== "owner") {
-    throw new WorkspaceAccessError("Only a workspace Owner can perform this action.", 403);
-  }
-
-  return access;
-}
-
 export async function requirePlatformOwner(request: NextRequest) {
   const user = await getAuthenticatedUser(request);
   const serviceClient = createServiceSupabaseClient();
@@ -43,7 +30,7 @@ export async function requirePlatformOwner(request: NextRequest) {
     .maybeSingle();
   if (error) throw error;
   if (!operator) {
-    throw new WorkspaceAccessError("Only a platform owner can create workspaces.", 403);
+    throw new WorkspaceAccessError("Only a platform operator can create workspaces.", 403);
   }
   return { serviceClient, user };
 }
@@ -51,9 +38,9 @@ export async function requirePlatformOwner(request: NextRequest) {
 export async function requireWorkspaceAdministrator(request: NextRequest) {
   const access = await requireWorkspaceAccess(request);
 
-  if (access.role !== "owner" && access.role !== "admin") {
+  if (access.role !== "admin") {
     throw new WorkspaceAccessError(
-      "Only a workspace Owner or Admin can manage workspace administration.",
+      "Only a workspace Admin can manage workspace administration.",
       403
     );
   }

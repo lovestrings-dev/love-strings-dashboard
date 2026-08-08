@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { data: workspaceId, error } = await serviceClient.rpc("provision_workspace", {
-      p_initial_owner_id: user.id,
+      p_initial_admin_id: user.id,
       p_name: name,
       p_slug: slug
     });

@@ -7,14 +7,17 @@
 - Amazon Music: investigate whether artist analytics are available by API or only through Amazon Music for Artists/manual exports.
 - Search Console remains optional future research; Google Analytics is now connected and represented by a Platforms-only Website Analytics card.
 
-## Beta 1.14 Follow-Ups
+## Beta 1.15 Post-Deploy Follow-Ups
 
 - Run deployed authenticated smoke testing with a normal sign-in session:
   selector switching, safe Test Band write/update/delete, same-name collision,
   rejection of an unauthorized workspace ID, and no-workspace behavior.
-- Invite and onboard an external Test Band user only after that deployed smoke
-  test; confirm their role sees only Test Band and cannot reach Love Strings.
-- Build invitation-management UI, not another invitation/membership backend.
+- Complete the deployed Test Band Admin invitation smoke test: resend the
+  pending invitation, accept it through the production redirect, then confirm
+  the invited user sees only Test Band and cannot reach Love Strings or Platform
+  Administration.
+- Consider invitation resend/revoke audit history and an explicit expired
+  invitation replacement policy only after real lifecycle use provides a need.
 - Redesign scheduled metrics refresh to enumerate configured workspaces instead
   of using the current Love Strings collector default.
 - Add platform-owner workspace monitoring separately from normal workspace

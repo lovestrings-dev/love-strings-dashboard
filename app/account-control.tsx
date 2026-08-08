@@ -21,7 +21,7 @@ export function AccountControl({
   const [email, setEmail] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [workspaceRole, setWorkspaceRole] = useState<
-    "admin" | "member" | "owner" | "viewer" | null
+    "admin" | "member" | "viewer" | null
   >(null);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
   const [isSwitchingWorkspace, setIsSwitchingWorkspace] = useState(false);
@@ -30,7 +30,7 @@ export function AccountControl({
     id: string;
     logoPath: string;
     name: string;
-    role: "admin" | "member" | "owner" | "viewer";
+    role: "admin" | "member" | "viewer";
     slug: string;
   }>>([]);
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -73,7 +73,6 @@ export function AccountControl({
       setActiveWorkspaceId(workspaceResult.ok ? workspacePayload?.workspaceId ?? "" : "");
       const loadedRole = workspaceResult.ok ? workspacePayload?.role : null;
       setWorkspaceRole(
-        loadedRole === "owner" ||
         loadedRole === "admin" ||
         loadedRole === "member" ||
         loadedRole === "viewer"
@@ -242,7 +241,7 @@ export function AccountControl({
             <UserRound aria-hidden size={17} />
             <span>User settings</span>
           </button>
-          {workspaceRole === "owner" || workspaceRole === "admin" ? (
+          {workspaceRole === "admin" ? (
             <button
               onClick={() => {
                 setIsMenuOpen(false);

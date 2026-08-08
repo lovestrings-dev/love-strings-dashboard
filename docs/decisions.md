@@ -871,6 +871,73 @@ Reason:
 - Clean provisioning keeps tenant data isolated from the first record while preserving one shared application implementation.
 - Platform authority remains separate from workspace roles and is never trusted from a client request.
 
+## 2026-08-08 - Workspace Role Normalization
+
+Decision:
+
+- Keep `platform_operator` exclusively as a platform-level registry privilege
+  in `app_platform_operators`; it is not a workspace role and does not imply
+  operational access to any workspace.
+- Use only Admin, Member, and Viewer as workspace membership roles. Admin has
+  all workspace-administration capabilities, including settings, branding,
+  integrations, and invitations to any workspace role.
+- Migrate existing Owner memberships and pending Owner invitations to Admin,
+  then reject Owner as a workspace role at the database and application
+  boundaries.
+- When membership role-change/removal functionality is added, preserve at
+  least one Admin in every workspace.
+
+Reason:
+
+- Platform authority and workspace administration protect different scopes and
+  should not be conflated through the overloaded word “owner”.
+- A three-role workspace model retains the current operating permissions while
+  making future membership lifecycle rules smaller and clearer.
+
+## 2026-08-08 - Workspace Membership Lifecycle
+
+Decision:
+
+- Let workspace Admins list, change, and remove memberships only within their
+  active workspace. Role changes support Admin, Member, and Viewer.
+- Keep self-demotion and self-removal unavailable in the first UI/API version
+  to avoid accidental loss of the administrator's active session.
+- Enforce the at-least-one-Admin invariant with a database trigger as well as
+  server-side active-workspace authorization; the trigger serializes concurrent
+  admin demotions/removals by locking the workspace row.
+- Never read or mutate `app_platform_operators` through workspace membership
+  management.
+
+Reason:
+
+- Membership management needs a small, explicit server boundary rather than
+  direct browser writes to tenant access data.
+- Database enforcement preserves the Admin safety invariant even if a future
+  service-role caller bypasses the UI or route-level validation.
+
+## 2026-08-08 - Workspace Invitation Lifecycle
+
+Decision:
+
+- Let workspace Admins manage invitations only in their active workspace.
+  Invitation roles are Admin, Member, and Viewer; platform-operator status is
+  neither granted nor considered by this lifecycle.
+- Retain invitation records for their lifecycle state: pending, accepted,
+  expired, or revoked. API responses expose only safe metadata and never the
+  invite token or its hash.
+- Resending a pending invitation rotates its token and refreshes expiry before
+  email delivery. Revoking a pending invitation prevents acceptance without
+  changing any existing membership.
+- Acceptance must atomically require an unexpired, unrevoked, unaccepted token
+  before it can create a workspace membership.
+
+Reason:
+
+- Active-workspace server scoping prevents an Admin from enumerating or
+  changing another workspace's invitations.
+- Token rotation and explicit revocation make previously issued links
+  unusable without exposing sensitive invitation material to the browser.
+
 ## 2026-08-07 - Beta 1.14 Multi-Workspace Isolation Boundary
 
 Decision:
@@ -898,3 +965,28 @@ Reason:
 - QA found that a default Roadmap Phase 1 could still appear in an empty
   workspace. Removing that fallback confirmed that even presentation defaults
   must respect the same isolation contract as database policies.
+
+## 2026-08-08 - Beta 1.15 Workspace Access Lifecycle Boundary
+
+Decision:
+
+- Release the normalized Admin/Member/Viewer workspace model, with
+  `platform_operator` remaining exclusively in `app_platform_operators`.
+- Let an active-workspace Admin manage existing memberships and invitation
+  lifecycle only within that workspace. The database must reject removal or
+  demotion of a workspace's final Admin.
+- Treat invitation resend as credential rotation and revocation as a terminal
+  state. Acceptance must validate an unexpired, unrevoked invitation and the
+  invited recipient before membership creation.
+- When a Supabase authentication session has just been established in the
+  browser, accept its access token only through a same-origin request and
+  verify it server-side before processing the workspace invitation token.
+
+Reason:
+
+- The first real Test Band invitation showed that authentication success and
+  server-cookie availability can be temporarily out of sync. A verified bearer
+  token closes that handoff without weakening recipient or invitation checks.
+- Membership and invitation administration are operational workspace powers,
+  not platform powers, and therefore must remain scoped to an Admin's active
+  workspace.

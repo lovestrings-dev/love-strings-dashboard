@@ -452,6 +452,167 @@ button {
   opacity: 0.55;
 }
 
+.workspace-member-list {
+  display: grid;
+  gap: 10px;
+}
+
+.workspace-member-row {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 40px minmax(0, 1fr) 130px auto;
+}
+
+.workspace-member-avatar {
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  height: 40px;
+  object-fit: cover;
+  width: 40px;
+}
+
+.workspace-member-avatar-fallback {
+  align-items: center;
+  background: var(--background);
+  color: var(--accent-strong);
+  display: inline-flex;
+  font-size: 14px;
+  font-weight: 900;
+  justify-content: center;
+}
+
+.workspace-member-identity {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.workspace-member-identity strong,
+.workspace-member-identity span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-member-identity span,
+.workspace-member-self {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.workspace-member-row select {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+.workspace-member-remove {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--danger);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+  gap: 6px;
+  justify-content: center;
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+.workspace-member-remove:disabled,
+.workspace-member-row select:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.workspace-invitation-list {
+  display: grid;
+  gap: 10px;
+}
+
+.workspace-invitation-row {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 130px minmax(150px, auto) auto;
+  padding-top: 10px;
+}
+
+.workspace-invitation-identity,
+.workspace-invitation-meta {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.workspace-invitation-identity strong,
+.workspace-invitation-identity span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-invitation-identity span,
+.workspace-invitation-meta > span:last-child {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.workspace-invitation-row select {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+.workspace-invitation-state {
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: capitalize;
+}
+
+.workspace-invitation-state-pending { color: var(--accent-strong); }
+.workspace-invitation-state-accepted { color: #15803d; }
+.workspace-invitation-state-expired,
+.workspace-invitation-state-revoked { color: var(--muted); }
+
+.workspace-invitation-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.workspace-invitation-actions button:first-child {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+.workspace-invitation-actions button:disabled,
+.workspace-invitation-row select:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .google-account-summary {
   align-items: center;
   background: var(--background);
@@ -5858,6 +6019,34 @@ h2 {
   }
 
   .workspace-invitation-form button {
+    width: 100%;
+  }
+
+  .workspace-member-row {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .workspace-member-row select,
+  .workspace-member-remove,
+  .workspace-member-self {
+    grid-column: 2;
+  }
+
+  .workspace-member-remove {
+    width: 100%;
+  }
+
+  .workspace-invitation-row {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-invitation-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .workspace-invitation-actions button:first-child,
+  .workspace-invitation-actions .workspace-member-remove {
     width: 100%;
   }
 

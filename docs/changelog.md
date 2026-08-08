@@ -516,3 +516,55 @@ Not included in Beta 1.14:
 - Invitation management UI, platform-owner workspace monitoring, and multi-workspace scheduled metrics refresh.
 - Workspace-specific Google Analytics property selection and YouTube collector redesign.
 - Gmail/CRM, Spotify, Deezer, and Amazon integrations.
+
+## Beta 1.15 (Release Candidate)
+
+Headline: **Workspace access is now manageable through a safe Admin lifecycle.**
+
+Includes:
+
+- Simplified workspace roles to Admin, Member, and Viewer. Existing workspace
+  Owner memberships and pending Owner invitations were migrated to Admin; the
+  platform-level `app_platform_operators` registry remains separate.
+- Made Admin the complete workspace-administration role for settings, branding,
+  integrations, invitations, and normal operational editing, without granting
+  workspace creation or platform access.
+- Added active-workspace Admin member management: safe member listing, role
+  changes between Admin/Member/Viewer, and workspace-scoped member removal.
+- Added a database trigger that prevents a workspace from losing its final
+  Admin, including concurrent demotion/removal attempts.
+- Added invitation lifecycle visibility and management: pending, accepted,
+  expired, and revoked states; pending-role changes; resend with secure token
+  rotation; and revocation without deleting any account or membership.
+- Hardened invitation acceptance so it atomically checks recipient, expiry,
+  revocation, and acceptance state before creating membership and selecting the
+  new workspace.
+- Fixed the real first-invitation handoff: a browser-established Supabase
+  session is verified through a same-origin bearer token when a matching server
+  auth cookie is not yet available.
+- Included the multi-workspace QA fixes already in the unreleased batch,
+  including safe empty-workspace behavior and platform/workspace separation.
+
+Database changes:
+
+- `202608080001_normalize_workspace_roles.sql`
+- `202608080002_remove_legacy_workspace_owner_helper.sql`
+- `202608080003_enforce_workspace_admin_membership_invariant.sql`
+- `202608080004_add_workspace_invitation_lifecycle.sql`
+
+Release checks:
+
+- Linked migrations are synchronized through `202608080004`.
+- Rollback-only database tests covered Admin-role safety, workspace-scoped
+  removal, invitation rotation/revocation/expiry behavior, and no persistent
+  test rows.
+- Lint, TypeScript, production build, database lint, and `git diff --check`
+  pass locally.
+
+Still deferred:
+
+- Deployed authenticated invitation acceptance smoke testing; resend the
+  existing Test Band Admin invitation only after this release is deployed.
+- Multi-workspace scheduled metrics refresh, workspace-specific Analytics/
+  YouTube collection, Gmail/CRM, Spotify, Deezer, Amazon, and workspace
+  archive/delete workflows.

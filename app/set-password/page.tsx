@@ -13,6 +13,7 @@ export default function SetPasswordPage() {
   const [isWorkspaceJoin, setIsWorkspaceJoin] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [invitationError, setInvitationError] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -26,7 +27,7 @@ export default function SetPasswordPage() {
     async function establishInvitationSession() {
       const hashParameters = new URLSearchParams(window.location.hash.slice(1));
       const queryParameters = new URLSearchParams(window.location.search);
-      const accessToken = hashParameters.get("access_token");
+      const hashAccessToken = hashParameters.get("access_token");
       const refreshToken = hashParameters.get("refresh_token");
       const authorizationCode = queryParameters.get("code");
       const tokenHash = queryParameters.get("token_hash");
@@ -35,37 +36,49 @@ export default function SetPasswordPage() {
       const workspaceJoin = queryParameters.get("workspace_join") === "1";
 
       let sessionEstablished = false;
+      let accessToken = "";
 
-      if (accessToken && refreshToken) {
+      if (hashAccessToken && refreshToken) {
         const { data } = await supabase.auth.setSession({
-          access_token: accessToken,
+          access_token: hashAccessToken,
           refresh_token: refreshToken
         });
         sessionEstablished = Boolean(data.session);
+        accessToken = data.session?.access_token ?? "";
       } else if (authorizationCode) {
         const { data } = await supabase.auth.exchangeCodeForSession(authorizationCode);
         sessionEstablished = Boolean(data.session);
+        accessToken = data.session?.access_token ?? "";
       } else if (tokenHash && invitationType === "invite") {
         const { data } = await supabase.auth.verifyOtp({
           token_hash: tokenHash,
           type: "invite"
         });
         sessionEstablished = Boolean(data.session);
+        accessToken = data.session?.access_token ?? "";
       } else {
         const { data } = await supabase.auth.getSession();
         sessionEstablished = Boolean(data.session);
+        accessToken = data.session?.access_token ?? "";
       }
 
       if (sessionEstablished) {
         if (workspaceInvitation) {
           const response = await fetch("/api/invitations/accept", {
             body: JSON.stringify({ token: workspaceInvitation }),
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              "Content-Type": "application/json"
+            },
             method: "POST"
           });
           if (!response.ok) {
-            setError(((await response.json()) as { error?: string }).error || "Invitation could not be accepted.");
-            sessionEstablished = false;
+            setInvitationError(
+              ((await response.json()) as { error?: string }).error || "Invitation could not be accepted."
+            );
+            setIsReady(true);
+            setHasCheckedInvitation(true);
+            return;
           }
         }
         if (sessionEstablished) {
@@ -132,6 +145,8 @@ export default function SetPasswordPage() {
 
         {!hasCheckedInvitation ? (
           <p>Checking invitation...</p>
+        ) : invitationError ? (
+          <p className="login-error" role="alert">{invitationError}</p>
         ) : !isReady ? (
           <p className="login-error" role="alert">
             This invitation could not be verified. Request a fresh invitation and

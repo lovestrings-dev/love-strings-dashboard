@@ -981,3 +981,32 @@ Human-build detail:
 - This is a bridge from the earlier "one band, two logins" episode. First the
   people gained separate identities; now independent bands gain separate
   operating spaces, while future product features remain shared.
+
+### Reel: The First Real Invitation
+
+Core story:
+
+- A second workspace is only real when another person can enter it without
+  inheriting access to the first one. Test Band became the first full test of
+  that moment.
+- We replaced the overloaded workspace Owner label with three clear roles:
+  Admin, Member, and Viewer. Platform Operator stayed separate, so operating a
+  band never quietly grants the ability to create or inspect other workspaces.
+- The Admin can now manage a workspace's people and invitations, but the
+  database itself refuses to leave a band with no Admin.
+- The first real invitation email exposed a final seam: Supabase had completed
+  authentication, but the dashboard server had not yet received the browser's
+  matching auth cookie. The solution was not to loosen access; it was to verify
+  the freshly established session securely at the handoff.
+
+Short hooks:
+
+- "The first real invite found the last invisible gap."
+- "A role is not just a label when someone can lose access with one click."
+- "Authentication worked. The handoff did not. So we fixed the handoff."
+
+Series connection:
+
+- The second-band story moves from isolated data to real collaboration: one
+  shared dashboard, a clearly bounded Admin role, and an invitation path that
+  reaches the right workspace without exposing the first band's operations.

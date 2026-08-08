@@ -37,17 +37,29 @@ or workspace-name checks for product behavior. New functionality built while
 using Love Strings should be available to all workspaces by default unless an
 explicit, workspace-scoped feature flag intentionally controls rollout.
 
-## Current Multi-Workspace Boundary (Beta 1.14)
+## Current Multi-Workspace Boundary (Beta 1.15)
 
 - `app_workspaces`, workspace settings, memberships, and workspace-scoped
   operational rows form the tenant boundary. Love Strings is the reference
   workspace; Test Band is the first separately provisioned workspace.
-- Roles are Owner, Admin, Member, and Viewer. Owner and Admin can manage their
-  own workspace's branding and integrations; Admin may invite Member/Viewer
-  users, while promotion or invitation to Admin/Owner remains Owner-only.
-- Authentication creates an account/profile only. A pending invitation binds a
-  recipient, role, and `workspace_id`; server-side acceptance creates an
+- `platform_operator` is a platform-level privilege held only in
+  `app_platform_operators`; it is not a workspace role and does not grant
+  workspace membership or operational access.
+- Workspace roles are Admin, Member, and Viewer only. Admins can manage their
+  own workspace's settings, branding, integrations, invitations, and existing
+  memberships; Members edit normal operational data; Viewers are read-only.
+  Workspace Admin does not grant platform privileges. A database trigger
+  prevents a workspace from losing its last Admin during a demotion or removal.
+- Authentication creates an account/profile only. Invitations are scoped to a
+  recipient, role, and `workspace_id`, with pending, accepted, expired, and
+  revoked lifecycle states. Admins can update a pending role, resend (rotating
+  the token), or revoke only their active workspace's invitations. Server-side
+  acceptance validates the authenticated recipient and atomically creates an
   idempotent membership without changing memberships in other workspaces.
+- Invitation acceptance accepts a newly established Supabase session through a
+  verified same-origin bearer token when the browser's auth cookie is not yet
+  available to the server. The workspace token remains hash-only at rest and
+  is never returned by normal APIs.
 - The active workspace is the server-validated `ls_active_workspace`
   HTTP-only cookie. The app retains a valid selected membership, chooses the
   first membership by creation time when selection is absent/invalid, and
@@ -57,7 +69,7 @@ explicit, workspace-scoped feature flag intentionally controls rollout.
   slug, branding-path reference, and the member's role. Switching is validated
   on the server and hard-reloads client state.
 - Workspace provisioning is server-only and restricted to platform operators.
-  It atomically creates a workspace row, settings, initial Owner membership,
+  It atomically creates a workspace row, settings, initial Admin membership,
   and dashboard preference only; it must never copy operational data,
   integrations, analytics, CRM data, or branding from another workspace.
 - Workspace branding uses a UUID-scoped storage path. Storage and settings RLS
@@ -74,7 +86,7 @@ Current integration boundary:
   or other account content.
 - Google connection records belong to a workspace. Refresh tokens are encrypted
   server-side; normal clients receive status metadata, never reusable OAuth
-  credentials. Owner/Admin connection controls remain limited to their active
+  credentials. Admin connection controls remain limited to their active
   workspace.
 - The existing Google Analytics property preference and scheduled metric
   collector still target Love Strings operationally. Multi-workspace collection

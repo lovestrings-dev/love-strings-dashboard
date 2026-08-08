@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
     const tokenHash = createHash("sha256").update(payload.token).digest("hex");
     const { data: invitation, error } = await serviceClient
       .from("app_workspace_invitations")
-      .select("id, workspace_id, email, role, expires_at, accepted_at, accepted_by")
+      .select("id, workspace_id, email, role, expires_at, accepted_at, accepted_by, revoked_at")
       .eq("token_hash", tokenHash)
       .maybeSingle();
     if (error) throw error;
@@ -39,17 +39,27 @@ export async function POST(request: NextRequest) {
     if (new Date(invitation.expires_at).getTime() < Date.now()) {
       return NextResponse.json({ error: "This workspace invitation has expired." }, { status: 410 });
     }
+    if (invitation.revoked_at) {
+      return NextResponse.json({ error: "This workspace invitation has been revoked." }, { status: 410 });
+    }
     if (invitation.accepted_by && invitation.accepted_by !== user.id) {
       return NextResponse.json({ error: "This invitation has already been accepted." }, { status: 409 });
     }
 
     if (!invitation.accepted_at) {
-      const { error: acceptanceError } = await serviceClient
+      const { data: acceptedInvitation, error: acceptanceError } = await serviceClient
         .from("app_workspace_invitations")
         .update({ accepted_at: new Date().toISOString(), accepted_by: user.id })
         .eq("id", invitation.id)
-        .is("accepted_at", null);
+        .is("accepted_at", null)
+        .is("revoked_at", null)
+        .gt("expires_at", new Date().toISOString())
+        .select("id")
+        .maybeSingle();
       if (acceptanceError) throw acceptanceError;
+      if (!acceptedInvitation) {
+        return NextResponse.json({ error: "This workspace invitation is no longer pending." }, { status: 409 });
+      }
     }
 
     const { error: membershipError } = await serviceClient
@@ -92,9 +102,10 @@ async function getAuthenticatedUser(request: NextRequest) {
   const client = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: { getAll: () => request.cookies.getAll(), setAll: () => undefined }
   });
+  const bearerToken = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
   const {
     data: { user },
     error
-  } = await client.auth.getUser();
+  } = await client.auth.getUser(bearerToken);
   return error ? null : user;
 }

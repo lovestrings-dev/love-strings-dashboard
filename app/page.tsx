@@ -32,7 +32,23 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { AccountControl } from "./account-control";
 
 type Section = (typeof sections)[number];
-type WorkspaceRole = "admin" | "member" | "owner" | "viewer";
+type WorkspaceRole = "admin" | "member" | "viewer";
+type WorkspaceMember = {
+  avatarUrl: string | null;
+  displayName: string;
+  email: string;
+  role: WorkspaceRole;
+  userId: string;
+};
+type WorkspaceInvitation = {
+  createdAt: string;
+  email: string;
+  expiresAt: string;
+  id: string;
+  invitedBy: string;
+  role: WorkspaceRole;
+  status: "accepted" | "expired" | "pending" | "revoked";
+};
 type GoogleConnectionStatus = {
   accountEmail: string | null;
   analytics: {
@@ -612,7 +628,7 @@ const defaultQrCodeLinks: QrCodeLink[] = [
   }))
 ];
 
-const appVersionLabel = "Beta 1.14";
+const appVersionLabel = "Beta 1.15";
 const defaultAppLogoUrl = "/love-strings-logo.jpeg";
 
 const sections = [
@@ -5986,8 +6002,7 @@ export default function Home() {
 
       if (
         !isCancelled &&
-        (loadedRole === "owner" ||
-          loadedRole === "admin" ||
+        (loadedRole === "admin" ||
           loadedRole === "member" ||
           loadedRole === "viewer")
       ) {
@@ -7028,7 +7043,7 @@ export default function Home() {
           />
         ) : null}
         {settingsView === "general" &&
-        (workspaceRole === "owner" || workspaceRole === "admin") ? (
+        workspaceRole === "admin" ? (
           <GeneralSettingsView
             activeSection={activeSection}
             logoPath={appLogoPath}
@@ -7247,7 +7262,7 @@ function GeneralSettingsView({
   onBack: () => void;
   onLogoChange: (logoPath: string, logoUrl: string) => void;
   workspaceId: string;
-  workspaceRole: "admin" | "owner";
+  workspaceRole: "admin";
 }) {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [logoStatus, setLogoStatus] = useState<RefreshStatus>({
@@ -7259,6 +7274,17 @@ function GeneralSettingsView({
   const [invitationStatus, setInvitationStatus] = useState<RefreshStatus>({
     message: "",
     state: "idle"
+  });
+  const [workspaceInvitations, setWorkspaceInvitations] = useState<WorkspaceInvitation[]>([]);
+  const [invitationLifecycleStatus, setInvitationLifecycleStatus] = useState<RefreshStatus>({
+    message: "",
+    state: "loading"
+  });
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([]);
+  const [currentMemberId, setCurrentMemberId] = useState("");
+  const [membershipStatus, setMembershipStatus] = useState<RefreshStatus>({
+    message: "",
+    state: "loading"
   });
   const [googleConnection, setGoogleConnection] =
     useState<GoogleConnectionStatus | null>(null);
@@ -7313,6 +7339,89 @@ function GeneralSettingsView({
         });
       }
     }
+  }, []);
+
+  const refreshWorkspaceInvitations = useCallback(async () => {
+    try {
+      const response = await fetch("/api/admin/invitations", { cache: "no-store" });
+      const payload = (await response.json()) as { error?: string; invitations?: WorkspaceInvitation[] };
+      if (!response.ok || !payload.invitations) {
+        throw new Error(payload.error || "Invitations could not be loaded.");
+      }
+      setWorkspaceInvitations(payload.invitations);
+      setInvitationLifecycleStatus({ message: "", state: "idle" });
+    } catch (error) {
+      setInvitationLifecycleStatus({
+        message: error instanceof Error ? error.message : "Invitations could not be loaded.",
+        state: "error"
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadWorkspaceInvitations() {
+      try {
+        const response = await fetch("/api/admin/invitations", { cache: "no-store" });
+        const payload = (await response.json()) as { error?: string; invitations?: WorkspaceInvitation[] };
+        if (!response.ok || !payload.invitations) {
+          throw new Error(payload.error || "Invitations could not be loaded.");
+        }
+        if (!isCancelled) {
+          setWorkspaceInvitations(payload.invitations);
+          setInvitationLifecycleStatus({ message: "", state: "idle" });
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          setInvitationLifecycleStatus({
+            message: error instanceof Error ? error.message : "Invitations could not be loaded.",
+            state: "error"
+          });
+        }
+      }
+    }
+
+    void loadWorkspaceInvitations();
+    return () => {
+      isCancelled = true;
+    };
+  }, [refreshWorkspaceInvitations]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadWorkspaceMembers() {
+      try {
+        const response = await fetch("/api/admin/memberships", { cache: "no-store" });
+        const payload = (await response.json()) as {
+          currentUserId?: string;
+          error?: string;
+          members?: WorkspaceMember[];
+        };
+        if (!response.ok || !payload.members || !payload.currentUserId) {
+          throw new Error(payload.error || "Workspace members could not be loaded.");
+        }
+        if (!isCancelled) {
+          setCurrentMemberId(payload.currentUserId);
+          setWorkspaceMembers(payload.members);
+          setMembershipStatus({ message: "", state: "idle" });
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          setMembershipStatus({
+            message:
+              error instanceof Error ? error.message : "Workspace members could not be loaded.",
+            state: "error"
+          });
+        }
+      }
+    }
+
+    void loadWorkspaceMembers();
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   async function disconnectGoogleService(service: "analytics" | "youtube") {
@@ -7378,9 +7487,121 @@ function GeneralSettingsView({
         message: `Invitation sent to ${result.email ?? invitationEmail.trim()}.`,
         state: "success"
       });
+      void refreshWorkspaceInvitations();
     } catch (error) {
       setInvitationStatus({
         message: error instanceof Error ? error.message : "Invitation could not be sent.",
+        state: "error"
+      });
+    }
+  }
+
+  async function updatePendingInvitationRole(invitationId: string, role: WorkspaceRole) {
+    setInvitationLifecycleStatus({ message: "Updating invitation role...", state: "loading" });
+    try {
+      const response = await fetch("/api/admin/invitations", {
+        body: JSON.stringify({ action: "role", invitationId, role }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH"
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Invitation role could not be updated.");
+      await refreshWorkspaceInvitations();
+      setInvitationLifecycleStatus({ message: "Invitation role updated.", state: "success" });
+    } catch (error) {
+      setInvitationLifecycleStatus({
+        message: error instanceof Error ? error.message : "Invitation role could not be updated.",
+        state: "error"
+      });
+    }
+  }
+
+  async function resendInvitation(invitationId: string) {
+    setInvitationLifecycleStatus({ message: "Resending invitation...", state: "loading" });
+    try {
+      const response = await fetch("/api/admin/invitations", {
+        body: JSON.stringify({ action: "resend", invitationId }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH"
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Invitation could not be resent.");
+      await refreshWorkspaceInvitations();
+      setInvitationLifecycleStatus({ message: "Invitation resent with a new secure link.", state: "success" });
+    } catch (error) {
+      setInvitationLifecycleStatus({
+        message: error instanceof Error ? error.message : "Invitation could not be resent.",
+        state: "error"
+      });
+    }
+  }
+
+  async function revokeInvitation(invitation: WorkspaceInvitation) {
+    if (!window.confirm(`Revoke the invitation for ${invitation.email}? The invitation link will stop working immediately.`)) {
+      return;
+    }
+    setInvitationLifecycleStatus({ message: "Revoking invitation...", state: "loading" });
+    try {
+      const response = await fetch("/api/admin/invitations", {
+        body: JSON.stringify({ invitationId: invitation.id }),
+        headers: { "Content-Type": "application/json" },
+        method: "DELETE"
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Invitation could not be revoked.");
+      await refreshWorkspaceInvitations();
+      setInvitationLifecycleStatus({ message: "Invitation revoked.", state: "success" });
+    } catch (error) {
+      setInvitationLifecycleStatus({
+        message: error instanceof Error ? error.message : "Invitation could not be revoked.",
+        state: "error"
+      });
+    }
+  }
+
+  async function updateWorkspaceMemberRole(userId: string, role: WorkspaceRole) {
+    setMembershipStatus({ message: "Updating role...", state: "loading" });
+    try {
+      const response = await fetch("/api/admin/memberships", {
+        body: JSON.stringify({ role, userId }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH"
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Workspace role could not be updated.");
+      setWorkspaceMembers((members) =>
+        members.map((member) => (member.userId === userId ? { ...member, role } : member))
+      );
+      setMembershipStatus({ message: "Workspace role updated.", state: "success" });
+    } catch (error) {
+      setMembershipStatus({
+        message: error instanceof Error ? error.message : "Workspace role could not be updated.",
+        state: "error"
+      });
+    }
+  }
+
+  async function removeWorkspaceMember(member: WorkspaceMember) {
+    if (!window.confirm(`Remove ${member.displayName} from this workspace? Their account and other workspace memberships will remain.`)) {
+      return;
+    }
+
+    setMembershipStatus({ message: "Removing member...", state: "loading" });
+    try {
+      const response = await fetch("/api/admin/memberships", {
+        body: JSON.stringify({ userId: member.userId }),
+        headers: { "Content-Type": "application/json" },
+        method: "DELETE"
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Workspace member could not be removed.");
+      setWorkspaceMembers((members) =>
+        members.filter((candidate) => candidate.userId !== member.userId)
+      );
+      setMembershipStatus({ message: "Member removed from this workspace.", state: "success" });
+    } catch (error) {
+      setMembershipStatus({
+        message: error instanceof Error ? error.message : "Workspace member could not be removed.",
         state: "error"
       });
     }
@@ -7483,12 +7704,7 @@ function GeneralSettingsView({
               >
                 <option value="viewer">Viewer</option>
                 <option value="member">Member</option>
-                {workspaceRole === "owner" ? (
-                  <>
-                    <option value="admin">Admin</option>
-                    <option value="owner">Owner</option>
-                  </>
-                ) : null}
+                <option value="admin">Admin</option>
               </select>
             </label>
             <button disabled={invitationStatus.state === "loading"} type="submit">
@@ -7506,6 +7722,154 @@ function GeneralSettingsView({
               role={invitationStatus.state === "error" ? "alert" : "status"}
             >
               {invitationStatus.message}
+            </p>
+          ) : null}
+        </article>
+
+        <article className="general-settings-card">
+          <div className="general-settings-heading">
+            <div>
+              <p className="eyebrow">Workspace access</p>
+              <h2>Invitations</h2>
+            </div>
+          </div>
+          <div className="workspace-invitation-list">
+            {workspaceInvitations.map((invitation) => {
+              const isPending = invitation.status === "pending";
+              return (
+                <div className="workspace-invitation-row" key={invitation.id}>
+                  <div className="workspace-invitation-identity">
+                    <strong>{invitation.email}</strong>
+                    <span>
+                      Invited by {invitation.invitedBy} · {formatInvitationDate(invitation.createdAt)}
+                    </span>
+                  </div>
+                  <select
+                    aria-label={`Intended role for ${invitation.email}`}
+                    disabled={!isPending || invitationLifecycleStatus.state === "loading"}
+                    onChange={(event) =>
+                      void updatePendingInvitationRole(
+                        invitation.id,
+                        event.target.value as WorkspaceRole
+                      )
+                    }
+                    value={invitation.role}
+                  >
+                    <option value="admin">Admin</option>
+                    <option value="member">Member</option>
+                    <option value="viewer">Viewer</option>
+                  </select>
+                  <div className="workspace-invitation-meta">
+                    <span className={`workspace-invitation-state workspace-invitation-state-${invitation.status}`}>
+                      {invitation.status}
+                    </span>
+                    <span>Expires {formatInvitationDate(invitation.expiresAt)}</span>
+                  </div>
+                  {isPending ? (
+                    <div className="workspace-invitation-actions">
+                      <button
+                        disabled={invitationLifecycleStatus.state === "loading"}
+                        onClick={() => void resendInvitation(invitation.id)}
+                        type="button"
+                      >
+                        Resend
+                      </button>
+                      <button
+                        className="workspace-member-remove"
+                        disabled={invitationLifecycleStatus.state === "loading"}
+                        onClick={() => void revokeInvitation(invitation)}
+                        type="button"
+                      >
+                        Revoke
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+          {workspaceInvitations.length === 0 && invitationLifecycleStatus.state !== "loading" ? (
+            <p className="settings-description">No invitations have been sent for this workspace.</p>
+          ) : null}
+          {invitationLifecycleStatus.message ? (
+            <p
+              className={invitationLifecycleStatus.state === "error" ? "settings-error" : "settings-status"}
+              role={invitationLifecycleStatus.state === "error" ? "alert" : "status"}
+            >
+              {invitationLifecycleStatus.message}
+            </p>
+          ) : null}
+        </article>
+
+        <article className="general-settings-card">
+          <div className="general-settings-heading">
+            <div>
+              <p className="eyebrow">Workspace access</p>
+              <h2>Current members</h2>
+            </div>
+          </div>
+          <p className="settings-description">
+            Role changes and removals apply only to this workspace. Your own Admin role is protected here.
+          </p>
+          <div className="workspace-member-list">
+            {workspaceMembers.map((member) => {
+              const isCurrentUser = member.userId === currentMemberId;
+              return (
+                <div className="workspace-member-row" key={member.userId}>
+                  {member.avatarUrl ? (
+                    <Image
+                      alt=""
+                      className="workspace-member-avatar"
+                      height={40}
+                      src={member.avatarUrl}
+                      unoptimized
+                      width={40}
+                    />
+                  ) : (
+                    <span aria-hidden className="workspace-member-avatar workspace-member-avatar-fallback">
+                      {member.displayName.slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                  <div className="workspace-member-identity">
+                    <strong>{member.displayName}</strong>
+                    <span>{member.email}</span>
+                  </div>
+                  <select
+                    aria-label={`Role for ${member.displayName}`}
+                    disabled={isCurrentUser || membershipStatus.state === "loading"}
+                    onChange={(event) =>
+                      void updateWorkspaceMemberRole(member.userId, event.target.value as WorkspaceRole)
+                    }
+                    value={member.role}
+                  >
+                    <option value="admin">Admin</option>
+                    <option value="member">Member</option>
+                    <option value="viewer">Viewer</option>
+                  </select>
+                  {isCurrentUser ? (
+                    <span className="workspace-member-self">You</span>
+                  ) : (
+                    <button
+                      aria-label={`Remove ${member.displayName} from this workspace`}
+                      className="workspace-member-remove"
+                      disabled={membershipStatus.state === "loading"}
+                      onClick={() => void removeWorkspaceMember(member)}
+                      type="button"
+                    >
+                      <Trash2 aria-hidden size={16} />
+                      <span>Remove</span>
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {membershipStatus.message ? (
+            <p
+              className={membershipStatus.state === "error" ? "settings-error" : "settings-status"}
+              role={membershipStatus.state === "error" ? "alert" : "status"}
+            >
+              {membershipStatus.message}
             </p>
           ) : null}
         </article>
@@ -7656,6 +8020,23 @@ function GeneralSettingsView({
       </div>
     </section>
   );
+}
+
+function formatInvitationDate(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown date";
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Vienna",
+  }).format(date);
 }
 
 function PlatformAdministrationView({
