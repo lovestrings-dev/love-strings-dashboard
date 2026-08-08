@@ -27,59 +27,45 @@ export async function POST(request: NextRequest) {
 
     const serviceClient = createServiceSupabaseClient();
     const tokenHash = createHash("sha256").update(payload.token).digest("hex");
-    const { data: invitation, error } = await serviceClient
-      .from("app_workspace_invitations")
-      .select("id, workspace_id, email, role, expires_at, accepted_at, accepted_by, revoked_at")
-      .eq("token_hash", tokenHash)
-      .maybeSingle();
-    if (error) throw error;
-    if (!invitation || invitation.email !== user.email.toLowerCase()) {
+    const { data: acceptanceRows, error: acceptanceError } = await serviceClient.rpc(
+      "accept_workspace_invitation",
+      {
+        p_email: user.email,
+        p_token_hash: tokenHash,
+        p_user_id: user.id
+      }
+    );
+    if (acceptanceError) {
+      return NextResponse.json(
+        { error: "Workspace membership could not be created. Please try again." },
+        { status: 500 }
+      );
+    }
+
+    const acceptance = acceptanceRows?.[0];
+    if (!acceptance || acceptance.outcome === "invalid") {
       return NextResponse.json({ error: "This invitation is not valid for this account." }, { status: 403 });
     }
-    if (new Date(invitation.expires_at).getTime() < Date.now()) {
+    if (acceptance.outcome === "expired") {
       return NextResponse.json({ error: "This workspace invitation has expired." }, { status: 410 });
     }
-    if (invitation.revoked_at) {
+    if (acceptance.outcome === "revoked") {
       return NextResponse.json({ error: "This workspace invitation has been revoked." }, { status: 410 });
     }
-    if (invitation.accepted_by && invitation.accepted_by !== user.id) {
+    if (acceptance.outcome === "already_accepted") {
       return NextResponse.json({ error: "This invitation has already been accepted." }, { status: 409 });
     }
 
-    if (!invitation.accepted_at) {
-      const { data: acceptedInvitation, error: acceptanceError } = await serviceClient
-        .from("app_workspace_invitations")
-        .update({ accepted_at: new Date().toISOString(), accepted_by: user.id })
-        .eq("id", invitation.id)
-        .is("accepted_at", null)
-        .is("revoked_at", null)
-        .gt("expires_at", new Date().toISOString())
-        .select("id")
-        .maybeSingle();
-      if (acceptanceError) throw acceptanceError;
-      if (!acceptedInvitation) {
-        return NextResponse.json({ error: "This workspace invitation is no longer pending." }, { status: 409 });
-      }
+    const workspaceId = parseWorkspaceId(acceptance.workspace_id);
+    if (!workspaceId) {
+      return NextResponse.json(
+        { error: "Workspace access could not be established. Please try again." },
+        { status: 500 }
+      );
     }
 
-    const { error: membershipError } = await serviceClient
-      .from("app_workspace_members")
-      .upsert(
-        { workspace_id: invitation.workspace_id, user_id: user.id, role: invitation.role },
-        { onConflict: "workspace_id,user_id", ignoreDuplicates: true }
-      );
-    if (membershipError) throw membershipError;
-
-    const { error: preferencesError } = await serviceClient
-      .from("dashboard_preferences")
-      .upsert(
-        { workspace_id: invitation.workspace_id, user_id: user.id },
-        { onConflict: "workspace_id,user_id", ignoreDuplicates: true }
-      );
-    if (preferencesError) throw preferencesError;
-
-    const response = NextResponse.json({ status: "accepted", workspaceId: invitation.workspace_id });
-    response.cookies.set(activeWorkspaceCookieName, parseWorkspaceId(invitation.workspace_id)!, {
+    const response = NextResponse.json({ status: "accepted", workspaceId });
+    response.cookies.set(activeWorkspaceCookieName, workspaceId, {
       httpOnly: true,
       path: "/",
       sameSite: "lax",

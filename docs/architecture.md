@@ -59,7 +59,10 @@ explicit, workspace-scoped feature flag intentionally controls rollout.
 - Invitation acceptance accepts a newly established Supabase session through a
   verified same-origin bearer token when the browser's auth cookie is not yet
   available to the server. The workspace token remains hash-only at rest and
-  is never returned by normal APIs.
+  is never returned by normal APIs. The proxy lets only this route reach its
+  own authentication boundary before first membership; acceptance then creates
+  membership/preferences and its audit state atomically before setting the
+  active-workspace cookie.
 - The active workspace is the server-validated `ls_active_workspace`
   HTTP-only cookie. The app retains a valid selected membership, chooses the
   first membership by creation time when selection is absent/invalid, and

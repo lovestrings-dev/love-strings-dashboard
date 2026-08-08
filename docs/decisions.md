@@ -990,3 +990,7 @@ Reason:
 - Membership and invitation administration are operational workspace powers,
   not platform powers, and therefore must remain scoped to an Admin's active
   workspace.
+- The membership-enforcing proxy must not block the single route that creates a
+  recipient's first membership. That route remains independently authenticated
+  and performs all invitation checks before an atomic database transaction and
+  active-workspace cookie response.

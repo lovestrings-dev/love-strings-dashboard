@@ -591,6 +591,7 @@ button {
 
 .workspace-invitation-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -611,6 +612,17 @@ button {
 .workspace-invitation-row select:disabled {
   cursor: default;
   opacity: 0.55;
+}
+
+.workspace-invitation-feedback {
+  color: #2f7d61;
+  flex-basis: 100%;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.workspace-invitation-feedback-error {
+  color: var(--danger);
 }
 
 .google-account-summary {

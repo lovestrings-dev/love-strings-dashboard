@@ -102,7 +102,12 @@ export async function proxy(request: NextRequest) {
 }
 
 function isPublicPath(pathname: string) {
-  return pathname === "/login" || pathname === "/no-workspace" || pathname === "/set-password";
+  return (
+    pathname === "/login" ||
+    pathname === "/no-workspace" ||
+    pathname === "/set-password" ||
+    pathname === "/api/invitations/accept"
+  );
 }
 
 function isAuthorizedCronRefreshRequest(request: NextRequest) {

@@ -542,6 +542,12 @@ Includes:
 - Fixed the real first-invitation handoff: a browser-established Supabase
   session is verified through a same-origin bearer token when a matching server
   auth cookie is not yet available.
+- Fixed the first-membership ordering fault found in production onboarding:
+  invitation acceptance now bypasses the membership-enforcing proxy only to
+  reach its own authenticated route, which atomically creates the membership
+  and marks the invitation accepted before setting the active-workspace cookie.
+- Made invitation resend visibly single-flight, with an in-row loading state,
+  a newest-link confirmation, and a useful failure message.
 - Included the multi-workspace QA fixes already in the unreleased batch,
   including safe empty-workspace behavior and platform/workspace separation.
 
@@ -551,10 +557,12 @@ Database changes:
 - `202608080002_remove_legacy_workspace_owner_helper.sql`
 - `202608080003_enforce_workspace_admin_membership_invariant.sql`
 - `202608080004_add_workspace_invitation_lifecycle.sql`
+- `202608080005_make_workspace_invitation_acceptance_atomic.sql`
+- `202608080006_fix_workspace_invitation_acceptance_function.sql`
 
 Release checks:
 
-- Linked migrations are synchronized through `202608080004`.
+- Linked migrations are synchronized through `202608080006`.
 - Rollback-only database tests covered Admin-role safety, workspace-scoped
   removal, invitation rotation/revocation/expiry behavior, and no persistent
   test rows.

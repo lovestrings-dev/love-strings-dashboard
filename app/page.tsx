@@ -7280,6 +7280,9 @@ function GeneralSettingsView({
     message: "",
     state: "loading"
   });
+  const [resendingInvitationId, setResendingInvitationId] = useState<string | null>(null);
+  const [resentInvitationId, setResentInvitationId] = useState<string | null>(null);
+  const [resendErrorInvitationId, setResendErrorInvitationId] = useState<string | null>(null);
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([]);
   const [currentMemberId, setCurrentMemberId] = useState("");
   const [membershipStatus, setMembershipStatus] = useState<RefreshStatus>({
@@ -7517,6 +7520,13 @@ function GeneralSettingsView({
   }
 
   async function resendInvitation(invitationId: string) {
+    if (resendingInvitationId || invitationLifecycleStatus.state === "loading") {
+      return;
+    }
+
+    setResendingInvitationId(invitationId);
+    setResentInvitationId(null);
+    setResendErrorInvitationId(null);
     setInvitationLifecycleStatus({ message: "Resending invitation...", state: "loading" });
     try {
       const response = await fetch("/api/admin/invitations", {
@@ -7527,12 +7537,16 @@ function GeneralSettingsView({
       const payload = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(payload.error || "Invitation could not be resent.");
       await refreshWorkspaceInvitations();
-      setInvitationLifecycleStatus({ message: "Invitation resent with a new secure link.", state: "success" });
+      setResentInvitationId(invitationId);
+      setInvitationLifecycleStatus({ message: "Invitation resent. Use the newest email link.", state: "success" });
     } catch (error) {
+      setResendErrorInvitationId(invitationId);
       setInvitationLifecycleStatus({
         message: error instanceof Error ? error.message : "Invitation could not be resent.",
         state: "error"
       });
+    } finally {
+      setResendingInvitationId(null);
     }
   }
 
@@ -7768,20 +7782,30 @@ function GeneralSettingsView({
                   {isPending ? (
                     <div className="workspace-invitation-actions">
                       <button
-                        disabled={invitationLifecycleStatus.state === "loading"}
+                        disabled={Boolean(resendingInvitationId) || invitationLifecycleStatus.state === "loading"}
                         onClick={() => void resendInvitation(invitation.id)}
                         type="button"
                       >
-                        Resend
+                        {resendingInvitationId === invitation.id ? "Resending..." : "Resend"}
                       </button>
                       <button
                         className="workspace-member-remove"
-                        disabled={invitationLifecycleStatus.state === "loading"}
+                        disabled={Boolean(resendingInvitationId) || invitationLifecycleStatus.state === "loading"}
                         onClick={() => void revokeInvitation(invitation)}
                         type="button"
                       >
                         Revoke
                       </button>
+                      {resentInvitationId === invitation.id ? (
+                        <span className="workspace-invitation-feedback" role="status">
+                          Invitation resent. Use the newest email link.
+                        </span>
+                      ) : null}
+                      {resendErrorInvitationId === invitation.id ? (
+                        <span className="workspace-invitation-feedback workspace-invitation-feedback-error" role="alert">
+                          {invitationLifecycleStatus.message || "Invitation could not be resent."}
+                        </span>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
