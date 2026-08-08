@@ -579,3 +579,83 @@ Still deferred:
 - Multi-workspace scheduled metrics refresh, workspace-specific Analytics/
   YouTube collection, Gmail/CRM, Spotify, Deezer, Amazon, and workspace
   archive/delete workflows.
+
+## Beta 1.16 (Release Candidate)
+
+Headline: **The shared dashboard is prepared for its first real external artist workspace.**
+
+This release was shaped through controlled real-world onboarding with the
+second workspace, renamed from `Test Band` to `BIOGLYCERIN`. It does not add a
+broad new platform catalogue. Its purpose is to make the existing Platforms
+foundation safe and understandable when a workspace has no Love Strings data,
+connections, or history.
+
+Includes:
+
+- Added a collector safety boundary: a metric collector now runs only when the
+  active workspace has the configuration required for that collector. An
+  Apple import, unrelated platform account, or Google connection can no longer
+  cause Love Strings-configured YouTube, Instagram, Spotify, or Topic data to
+  be written into another workspace.
+- Kept the remaining legacy global collectors restricted to the legacy Love
+  Strings workspace while preserving its existing operation. The new focused
+  eligibility test covers empty, unrelated-account, configured, and legacy
+  cases.
+- Made the connected workspace's stored Google/YouTube channel ID the
+  authoritative identity for normal YouTube collection. The app still has one
+  shared Google OAuth application and connect/callback flow; each workspace
+  stores its own encrypted authorization and connected identity.
+- Made active Dashboard and Platforms cards configuration-driven. Disconnecting
+  YouTube, Google Analytics/Website, or Topic hides the active card without
+  deleting its historical metric snapshots. Historical rows alone no longer
+  make a disconnected service appear connected.
+- Correctly reclassified the previous product-facing “YouTube Music” collector
+  as **YouTube Topic**. Its existing internal `youtube-music` identifier is
+  retained so subscriber, total-play, current-release-play, and evolution
+  history remain compatible. Actual YouTube Music remains a future music
+  platform integration.
+- Added workspace-owned Topic channel ID/title storage and an Admin-only Topic
+  onboarding flow. Admins can enter a channel URL or ID, inspect the resolved
+  public channel, explicitly confirm it, or replace it. The flow
+  rejects use of the connected main channel as Topic and flags a likely artist
+  name mismatch before confirmation.
+- Improved the General Settings Topic UI into a responsive, vertical
+  configuration sequence with plain-language Topic/Official Artist Channel
+  guidance, a compact resolved-channel result, and separate caution/info
+  states.
+- Added Workspace Admin workspace rename in General Settings. The name changes
+  in place and updates the active workspace display without changing its ID,
+  memberships, integrations, or operational data. Platform Operator rename was
+  not added because the existing administration surface has no workspace-edit
+  view.
+- Repaired a second real first-load invitation/session race. A newly invited
+  Viewer now waits for the Supabase browser session, resumes acceptance
+  automatically, and reaches password setup/joining without a manual refresh;
+  in-flight and completed guards keep repeated auth events idempotent.
+
+Database change:
+
+- `202608080007_add_workspace_youtube_topic.sql` adds
+  `youtube_topic_channel_id` and `youtube_topic_channel_title` to the existing
+  workspace Google-connection record. The migration initially existed only
+  locally; real localhost testing exposed the missing remote schema through
+  failing Google-status and Topic requests, and the existing migration was then
+  applied through the normal Supabase workflow.
+
+Release checks:
+
+- Focused collector-eligibility tests pass, including external workspaces with
+  no configuration or only an unrelated platform account.
+- TypeScript, lint, and `git diff --check` pass after the implementation
+  slices.
+- Manual real-user testing covered Google reconnect, Topic resolution and
+  confirmation, the Official Artist Channel/consolidated-channel edge case,
+  workspace rename, and a first-time Viewer invitation.
+
+Deliberately not included:
+
+- A new Spotify, Deezer, Amazon, Instagram, or actual YouTube Music onboarding
+  flow.
+- A broad Platforms or General Settings redesign.
+- Conversion of scheduled refresh architecture beyond the manual-refresh safety
+  boundary; its wider multi-workspace rollout remains a separate task.

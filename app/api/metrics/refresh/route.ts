@@ -17,25 +17,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  const { serviceClient, workspaceId } = await requireWorkspaceAccess(request);
-  const { data: configuredAccount, error: accountError } = await serviceClient
-    .from("platform_accounts")
-    .select("id")
-    .eq("workspace_id", workspaceId)
-    .limit(1)
-    .maybeSingle();
-  if (accountError) {
-    return NextResponse.json({ error: "Metric configuration check failed." }, { status: 500 });
-  }
-  if (!configuredAccount) {
-    return NextResponse.json({
-      results: [],
-      skipped: true,
-      status: "ok"
-    });
-  }
+  const { workspaceId } = await requireWorkspaceAccess(request);
   const result = await refreshAllMetricCollectors(workspaceId);
-  return NextResponse.json({ ...result, status: "ok" });
+  const skipped = result.results.every((collector) => collector.status === "skipped");
+  return NextResponse.json({ ...result, skipped, status: "ok" });
 }
 
 function isAuthorizedRefreshRequest(request: NextRequest) {

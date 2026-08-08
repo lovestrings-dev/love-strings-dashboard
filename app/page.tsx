@@ -61,6 +61,7 @@ type GoogleConnectionStatus = {
     channelTitle: string | null;
     enabled: boolean;
   };
+  youtubeTopic: { channelId: string | null; channelTitle: string | null; enabled: boolean };
 };
 type MarketingStatus = "not-started" | "in-progress" | "done" | "irrelevant";
 type CampaignDayProgressStatus = "empty" | "partial" | "complete";
@@ -494,12 +495,12 @@ const platformStats = [
     ]
   },
   {
-    platform: "YouTube Music",
+    platform: "YouTube Topic",
     slug: "youtube-music",
     profileUrl:
-      "https://music.youtube.com/channel/UCKlfg9lYKyMOg_Oiz-Zb1Fg?si=E-Vckp5-kB98MZKy",
+      "https://www.youtube.com/",
     icon: Headphones,
-    dashboard: true,
+    dashboard: false,
     metrics: [
       { label: "Subscribers", metricName: "subscribers", value: "11" },
       { label: "Total Plays", metricName: "total_plays", value: "75" },
@@ -628,7 +629,7 @@ const defaultQrCodeLinks: QrCodeLink[] = [
   }))
 ];
 
-const appVersionLabel = "Beta 1.15";
+const appVersionLabel = "Beta 1.16";
 const defaultAppLogoUrl = "/love-strings-logo.jpeg";
 
 const sections = [
@@ -4893,6 +4894,8 @@ export default function Home() {
     useState("");
   const [platformStatsData, setPlatformStatsData] = useState<typeof platformStats>([]);
   const [platformMetricRows, setPlatformMetricRows] = useState<MetricRow[]>([]);
+  const [workspaceGoogleConnection, setWorkspaceGoogleConnection] =
+    useState<GoogleConnectionStatus | null>(null);
   const [refreshStatus, setRefreshStatus] = useState<RefreshStatus>({
     message: "",
     state: "idle"
@@ -4946,7 +4949,11 @@ export default function Home() {
   const [hasLoadedBudgetSupabaseSnapshot, setHasLoadedBudgetSupabaseSnapshot] =
     useState(false);
   const hasCheckedOpeningMetricRefresh = useRef(false);
-  const dashboardPlatformStats = getDashboardPlatformStats(platformStatsData);
+  const activePlatformStats = getActivePlatformStats(
+    platformStatsData,
+    workspaceGoogleConnection
+  );
+  const dashboardPlatformStats = getDashboardPlatformStats(activePlatformStats);
   const budgetEntriesWithForecast = getBudgetEntriesWithForecast(
     budgetEntryDrafts,
     eventEntryDrafts,
@@ -5941,6 +5948,27 @@ export default function Home() {
       isCancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    let isCancelled = false;
+    const loadGoogleConnection = async () => {
+      try {
+        const response = await fetch("/api/integrations/google/status", { cache: "no-store" });
+        if (!response.ok) throw new Error("Google connection status failed.");
+        const connection = (await response.json()) as GoogleConnectionStatus;
+        if (!isCancelled) setWorkspaceGoogleConnection(connection);
+      } catch {
+        if (!isCancelled) setWorkspaceGoogleConnection(null);
+      }
+    };
+    void loadGoogleConnection();
+    window.addEventListener("workspace-google-connection-changed", loadGoogleConnection);
+    return () => {
+      isCancelled = true;
+      window.removeEventListener("workspace-google-connection-changed", loadGoogleConnection);
+    };
+  }, [activeWorkspaceId]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -6990,6 +7018,7 @@ export default function Home() {
               <strong>{activeWorkspaceName}</strong>
               <span>Sprint Dashboard</span>
             </div>
+
             <Image
               alt=""
               aria-hidden
@@ -7053,6 +7082,8 @@ export default function Home() {
               setAppLogoPath(logoPath);
               setAppLogoUrl(logoUrl);
             }}
+            onWorkspaceNameChange={setActiveWorkspaceName}
+            workspaceName={activeWorkspaceName}
             workspaceId={activeWorkspaceId}
             workspaceRole={workspaceRole}
           />
@@ -7102,7 +7133,7 @@ export default function Home() {
             onQrCodeChange={updateQrCodeLink}
             onRefreshPlatformStats={refreshPlatformStats}
             platformMetricRows={platformMetricRows}
-            platformStatsData={platformStatsData}
+            platformStatsData={activePlatformStats}
             qrCodeLinks={qrCodeLinks}
             refreshStatus={refreshStatus}
           />
@@ -7253,6 +7284,8 @@ function GeneralSettingsView({
   logoUrl,
   onBack,
   onLogoChange,
+  onWorkspaceNameChange,
+  workspaceName,
   workspaceId,
   workspaceRole
 }: {
@@ -7261,6 +7294,8 @@ function GeneralSettingsView({
   logoUrl: string;
   onBack: () => void;
   onLogoChange: (logoPath: string, logoUrl: string) => void;
+  onWorkspaceNameChange: (name: string) => void;
+  workspaceName: string;
   workspaceId: string;
   workspaceRole: "admin";
 }) {
@@ -7295,6 +7330,27 @@ function GeneralSettingsView({
     message: "",
     state: "loading"
   });
+  const [topicChannel, setTopicChannel] = useState("");
+  const [workspaceNameDraft, setWorkspaceNameDraft] = useState(workspaceName);
+  const [topicCandidate, setTopicCandidate] = useState<{ channelId: string; channelTitle: string; caution: boolean; sameAsMain: boolean } | null>(null);
+
+  async function saveWorkspaceName() {
+    setGoogleStatus({ message: "Saving workspace name...", state: "loading" });
+    try { const response = await fetch("/api/workspace/name", { body: JSON.stringify({ name: workspaceNameDraft }), headers: { "Content-Type": "application/json" }, method: "PATCH" }); const payload = (await response.json()) as { name?: string; error?: string }; if (!response.ok) throw new Error(payload.error || "Workspace rename failed."); onWorkspaceNameChange(payload.name!); setWorkspaceNameDraft(payload.name!); setGoogleStatus({ message: "Workspace name saved.", state: "success" }); } catch (error) { setGoogleStatus({ message: error instanceof Error ? error.message : "Workspace rename failed.", state: "error" }); }
+  }
+
+  async function checkTopicChannel() {
+    setGoogleStatus({ message: "Validating Topic channel...", state: "loading" });
+    try {
+      const response = await fetch("/api/integrations/youtube-topic", { body: JSON.stringify({ action: "check", topicChannel }), headers: { "Content-Type": "application/json" }, method: "POST" });
+      const payload = (await response.json()) as { channelId?: string; channelTitle?: string; caution?: boolean; sameAsMain?: boolean; error?: string };
+      if (!response.ok) throw new Error(payload.error || "Topic configuration failed.");
+      setTopicCandidate({ channelId: payload.channelId!, channelTitle: payload.channelTitle!, caution: Boolean(payload.caution), sameAsMain: Boolean(payload.sameAsMain) });
+      setGoogleStatus({ message: "", state: "idle" });
+    } catch (error) { setGoogleStatus({ message: error instanceof Error ? error.message : "Topic configuration failed.", state: "error" }); }
+  }
+
+  async function confirmTopicChannel() { if (!topicCandidate) return; setGoogleStatus({ message: "Saving Topic channel...", state: "loading" }); try { const response=await fetch("/api/integrations/youtube-topic",{body:JSON.stringify({action:"confirm",candidate:topicCandidate}),headers:{"Content-Type":"application/json"},method:"POST"}); const payload=await response.json() as {error?:string}; if(!response.ok) throw new Error(payload.error||"Topic configuration failed."); setGoogleConnection((current)=>current?{...current,youtubeTopic:{channelId:topicCandidate.channelId,channelTitle:topicCandidate.channelTitle,enabled:true}}:current); setTopicCandidate(null); window.dispatchEvent(new Event("workspace-google-connection-changed")); setGoogleStatus({message:"YouTube Topic configured.",state:"success"}); } catch(error){setGoogleStatus({message:error instanceof Error?error.message:"Topic configuration failed.",state:"error"});} }
 
   useEffect(() => {
     const parameters = new URLSearchParams(window.location.search);
@@ -7460,6 +7516,7 @@ function GeneralSettingsView({
             }
           : current
       );
+      window.dispatchEvent(new Event("workspace-google-connection-changed"));
       setGoogleStatus({ message: "Google service disconnected.", state: "success" });
     } catch (error) {
       setGoogleStatus({
@@ -7898,6 +7955,11 @@ function GeneralSettingsView({
           ) : null}
         </article>
 
+        <article className="general-settings-card">
+          <div className="general-settings-heading"><div><p className="eyebrow">Workspace identity</p><h2>Workspace name</h2></div></div>
+          <div className="google-topic-config"><input aria-label="Workspace name" onChange={(event) => setWorkspaceNameDraft(event.target.value)} value={workspaceNameDraft} /><button disabled={googleStatus.state === "loading"} onClick={() => void saveWorkspaceName()} type="button">Save</button></div>
+        </article>
+
         <article className="general-settings-card google-services-card">
           <div className="general-settings-heading">
             <div>
@@ -7944,6 +8006,19 @@ function GeneralSettingsView({
                 </button>
               )}
             </div>
+
+            <section className="google-topic-section">
+              <div className="google-topic-heading"><strong>YouTube Topic</strong><span>Optional</span></div>
+              {googleConnection?.youtubeTopic.enabled ? <p className="google-topic-current">Configured: {googleConnection.youtubeTopic.channelTitle || googleConnection.youtubeTopic.channelId}</p> : null}
+              <p className="google-topic-helper">Add a separate “Artist Name - Topic” channel if YouTube created one for your distributed music.</p>
+              <p className="google-topic-helper">If your main channel is already an Official Artist Channel, you may not need a separate Topic connection.</p>
+              <div className="google-topic-config">
+                <input onChange={(event) => { setTopicChannel(event.target.value); setTopicCandidate(null); }} placeholder="Topic channel URL or ID" value={topicChannel} />
+                <button disabled={googleStatus.state === "loading" || !topicChannel.trim()} onClick={() => void checkTopicChannel()} type="button">Check Topic</button>
+              </div>
+              {topicCandidate ? topicCandidate.sameAsMain ? <p className="google-topic-callout">This is the same channel as your connected YouTube channel. Your artist presence may already be consolidated, so a separate Topic connection is probably not needed.</p> : <div className="google-topic-result"><span>Found channel</span><strong>{topicCandidate.channelTitle}</strong><code>{topicCandidate.channelId}</code>{topicCandidate.caution ? <p className="google-topic-callout google-topic-caution">This channel name does not appear to match your workspace or connected YouTube channel. Please confirm that you selected the correct artist Topic channel.</p> : null}<div className="google-topic-actions"><button onClick={() => void confirmTopicChannel()} type="button">Use this Topic</button><button onClick={() => setTopicCandidate(null)} type="button">Cancel</button></div></div> : null}
+              <p className="google-topic-help">Not sure? Search YouTube for “Your Artist Name - Topic”. If there is no separate channel, leave this unconfigured. Ask your distributor or label about Official Artist Channel eligibility.</p>
+            </section>
 
             <div className="google-service-row">
               <div>
@@ -15490,6 +15565,20 @@ function getDashboardPlatformStats(stats: typeof platformStats) {
   return dashboardOrder
     .map((slug) => stats.find((platform) => platform.slug === slug))
     .filter((platform): platform is (typeof platformStats)[number] => Boolean(platform));
+}
+
+function getActivePlatformStats(
+  stats: typeof platformStats,
+  connection: GoogleConnectionStatus | null
+) {
+  return stats.filter((platform) => {
+    if (platform.slug === "youtube") return Boolean(connection?.youtube.enabled);
+    if (platform.slug === "google-analytics") return Boolean(connection?.analytics.enabled);
+    // Topic metrics require their own workspace configuration. Historical rows
+    // remain intact, but cannot make an unconfigured source appear active.
+    if (platform.slug === "youtube-music") return Boolean(connection?.youtubeTopic.enabled);
+    return true;
+  });
 }
 
 function getPlatformMetric(stats: typeof platformStats, platformSlug: string, metricName: string) {

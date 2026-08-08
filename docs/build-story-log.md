@@ -1010,3 +1010,149 @@ Series connection:
 - The second-band story moves from isolated data to real collaboration: one
   shared dashboard, a clearly bounded Admin role, and an invitation path that
   reaches the right workspace without exposing the first band's operations.
+
+### Reel: The Dashboard Was Multi-Workspace — Until It Wasn't
+
+Core story:
+
+- Beta 1.15 proved that Love Strings and a clean second workspace could share
+  one app without sharing everyday records. That was the expected finish line.
+  Preparing the first external artist showed it was only the first proof.
+- We used `Test Band`, later renamed `BIOGLYCERIN`, as a controlled real artist
+  workspace: no platform accounts, no releases, no metrics, no inherited Love
+  Strings history. That empty starting point made assumptions visible.
+- The manual refresh route correctly knew which workspace had asked for data.
+  But some collectors still got their artist identity from Love Strings
+  deployment settings. An unrelated platform account in a second workspace
+  could therefore have triggered a Love Strings collector and written its
+  results into the wrong workspace.
+- This was not a cosmetic empty-state issue. It was the point where “one
+  codebase” needed a stricter rule: a collector cannot run unless that specific
+  workspace has the configuration needed to identify its own artist.
+- The correction was deliberately small. We did not build every music-service
+  integration. We put a safety gate in front of the existing collectors, so
+  missing configuration means “not configured,” never “use Love Strings.”
+- The same lesson changed card visibility: history is useful, but it is not a
+  live connection. Disconnecting YouTube, Website Analytics, or Topic should
+  not leave a card looking active just because old snapshots are still stored.
+
+Short hooks:
+
+- "Multi-workspace worked — until we gave the second band a real empty start."
+- "A route can know the right workspace while a collector still knows the wrong artist."
+- "No configuration must mean no collection. Not a Love Strings fallback."
+- "Historical data is history. It is not proof that a service is connected."
+
+Visual sequence:
+
+1. Show Love Strings with live platform cards beside an intentionally empty
+   BIOGLYCERIN workspace.
+2. Show the harmless-looking Refresh action and explain the hidden global
+   artist assumption.
+3. Cut to the safety rule: workspace configuration → eligible collector →
+   workspace metric rows.
+4. Disconnect a service while retaining its graph history, then show the active
+   card disappear honestly.
+5. End on the product principle: an empty artist workspace should be quiet,
+   not accidentally look like Love Strings.
+
+Human-build detail:
+
+- The useful part of the story is that the defect was found before an external
+  artist could receive incorrect data. A clean test workspace was not merely a
+  demo environment; it was a way to discover assumptions the flagship
+  workspace could never reveal.
+
+### Reel: We Thought It Was YouTube Music
+
+Core story:
+
+- The dashboard already had a separate card labelled “YouTube Music.” Its
+  graphs and history were useful, so the easy move would have been to call it
+  finished.
+- Real external-workspace onboarding forced a closer look. The collector was
+  following a public `Artist Name - Topic` channel, not a future YouTube Music
+  service integration.
+- That distinction matters for artists. There are three different ideas:
+  their normal managed YouTube Channel, a separate auto-generated YouTube Topic
+  channel, and an eventual actual YouTube Music platform integration.
+- We kept the useful historical collector identity (`youtube-music`) in place,
+  but changed the product language to YouTube Topic. Nothing had to be deleted,
+  duplicated, or reseeded to tell the truth about the data.
+- The Google architecture also became clearer: there is one shared LS Dashboard
+  Google OAuth application, not one OAuth app per band. Each workspace Admin
+  authorizes their own Google account through that shared flow, and the
+  resulting encrypted authorization, channel identity, scopes, and Analytics
+  settings belong to that workspace.
+- A Topic channel is public, so it can be easy to paste the wrong URL. The
+  first real checks found the Official Artist Channel edge case too: an artist's
+  main channel may already be consolidated, so there may be no separate Topic
+  channel to connect. The UI now resolves first, shows the found channel,
+  warns about a likely name mismatch, explains the consolidated-channel case,
+  and waits for an explicit confirmation.
+- The work briefly appeared to fail for an unglamorous reason: the new Topic
+  migration was present locally but not remotely. Google status and Topic save
+  requests failed because their new workspace columns did not exist in the
+  active database. Applying the existing migration fixed the real schema gap;
+  it did not need a second workaround migration.
+
+Short hooks:
+
+- "The card had years of useful history — and the wrong name."
+- "A Topic channel is not YouTube Music. That tiny distinction changes onboarding."
+- "One OAuth app. Different artists. Different stored channel identities."
+- "Before connecting a public channel, let the artist see exactly what was found."
+- "Sometimes an integration bug is not OAuth. It is one migration that never reached the database."
+
+Visual sequence:
+
+1. Open the old “YouTube Music” card and its existing evolution graph.
+2. Show a real `Artist Name - Topic` search result beside the normal channel.
+3. Draw the simple three-part distinction: YouTube Channel / YouTube Topic /
+   future YouTube Music.
+4. Show the Topic input, Check Topic, resolved title/ID, caution, and explicit
+   Use this Topic action.
+5. Show the same-channel informational message for an Official Artist Channel.
+6. End by renaming the card to YouTube Topic while its graph remains intact.
+
+Human-build detail:
+
+- This is a good “we learned in public” episode. The existing implementation
+  was not thrown away; the team followed the evidence, named the data honestly,
+  and protected the artist from silently connecting somebody else’s channel.
+
+### Reel: The Refresh Button That Became an Invitation Test
+
+Core story:
+
+- External onboarding did not only test platform connections. It tested the
+  smallest human moments: a temporary workspace name and the first invitation
+  a real Viewer opens.
+- `Test Band` became `BIOGLYCERIN` in place. The workspace kept its ID,
+  members, metrics, YouTube/Analytics settings, and history; only the artist
+  name changed. That is what “your own workspace” should feel like.
+- Then a real Viewer invitation got stuck on “Joining workspace…” until the
+  browser was manually refreshed. Authentication had started correctly, but
+  the page's one-time initialization had checked before the Supabase browser
+  session was ready and did not resume at the right moment.
+- The fix was not to weaken invitation checks or store a password. The page now
+  waits, listens for the established session, continues automatically, and
+  guards the acceptance request so repeated auth events cannot create duplicate
+  membership work.
+- A browser offered a different strong password after refresh during testing.
+  That was the browser/password manager doing its job, not LS Dashboard
+  generating, caching, or reusing passwords.
+
+Short hooks:
+
+- "A workspace becomes real when it can change its name without losing itself."
+- "The first Viewer invitation found a race condition no checklist could see."
+- "The page was waiting for a session it had already checked too early."
+- "The password suggestion came from the browser — not from the app."
+
+Series connection:
+
+- The second-band arc now moves beyond database isolation: real artists need
+  their own name, their own platform identity, and an invitation that works on
+  the first click. Beta 1.16 was built by following those real moments rather
+  than designing an abstract onboarding flow in advance.

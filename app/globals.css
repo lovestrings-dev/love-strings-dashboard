@@ -698,6 +698,24 @@ button {
   opacity: 0.55;
 }
 
+.google-topic-section { border-top: 1px solid var(--line); display: grid; gap: 10px; padding: 16px 18px; }
+.google-topic-heading { align-items: baseline; display: flex; gap: 8px; }
+.google-topic-heading span, .google-topic-help, .google-topic-helper, .google-topic-current { color: var(--muted); font-size: 13px; line-height: 1.45; margin: 0; }
+.google-topic-helper { max-width: 680px; }
+.google-topic-config { display: flex; gap: 10px; max-width: 680px; }
+.google-topic-config input { border: 1px solid var(--line); border-radius: 8px; font: inherit; min-width: 0; padding: 9px 10px; flex: 1; }
+.google-topic-result, .google-topic-callout { background: var(--background); border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 4px; max-width: 680px; padding: 12px; }
+.google-topic-result > span, .google-topic-result code { color: var(--muted); font-size: 12px; }
+.google-topic-callout { color: var(--muted); font-size: 13px; line-height: 1.45; }
+.google-topic-caution { border-color: #c79522; color: #735719; margin: 6px 0; }
+.google-topic-actions { display: flex; gap: 8px; margin-top: 6px; }
+.google-topic-actions button:last-child { border-color: var(--line); color: var(--ink); }
+
+@media (max-width: 640px) {
+  .google-topic-config, .google-topic-actions { align-items: stretch; flex-direction: column; }
+  .google-topic-config button, .google-topic-actions button { width: 100%; }
+}
+
 .about-dashboard-card h2 {
   font-size: 24px;
   margin: 4px 0 18px;

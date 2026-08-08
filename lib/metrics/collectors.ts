@@ -5,6 +5,10 @@ import {
   fetchGoogleJson,
   refreshGoogleAccessToken
 } from "@/lib/google/oauth";
+import {
+  getWorkspaceEnabledCollectors,
+  type MetricCollectorName
+} from "@/lib/metrics/collector-eligibility";
 import { defaultWorkspaceId } from "@/lib/workspace";
 
 type CollectorStatus = "fulfilled" | "rejected" | "skipped";
@@ -69,8 +73,9 @@ const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 export async function refreshAllMetricCollectors(workspaceId = defaultWorkspaceId) {
   const startedAt = new Date().toISOString();
+  const enabledCollectors = await getEnabledCollectorsForWorkspace(workspaceId);
   const collectors: Array<{
-    name: MetricCollectorResult["name"];
+    name: MetricCollectorName;
     refresh: () => Promise<MetricCollectorResult>;
   }> = [
     { name: "google-analytics", refresh: () => refreshGoogleAnalyticsMetrics(workspaceId) },
@@ -79,7 +84,17 @@ export async function refreshAllMetricCollectors(workspaceId = defaultWorkspaceI
     { name: "youtube-music", refresh: () => refreshYouTubeMusicMetrics(workspaceId) },
     { name: "spotify", refresh: () => refreshSpotifyMetrics(workspaceId) }
   ];
-  const results = await Promise.allSettled(collectors.map((collector) => collector.refresh()));
+  const results = await Promise.allSettled(
+    collectors.map((collector) =>
+      enabledCollectors.has(collector.name)
+        ? collector.refresh()
+        : Promise.resolve({
+            name: collector.name,
+            reason: "Not configured for this workspace.",
+            status: "skipped" as const
+          })
+    )
+  );
 
   return {
     finishedAt: new Date().toISOString(),
@@ -96,6 +111,28 @@ export async function refreshAllMetricCollectors(workspaceId = defaultWorkspaceI
     }),
     startedAt
   };
+}
+
+async function getEnabledCollectorsForWorkspace(workspaceId: string) {
+  const supabase = createServiceSupabaseClient();
+  const { data: connection, error } = await supabase
+    .from("app_google_connections")
+    .select(
+      "analytics_enabled, analytics_property_id, youtube_enabled, youtube_channel_id, youtube_topic_channel_id"
+    )
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  return getWorkspaceEnabledCollectors({
+    analyticsConfigured: Boolean(
+      connection?.analytics_enabled && connection.analytics_property_id
+    ),
+    isLegacyWorkspace: workspaceId === defaultWorkspaceId,
+    youtubeConfigured: Boolean(connection?.youtube_enabled && connection.youtube_channel_id),
+    youtubeTopicConfigured: Boolean(connection?.youtube_topic_channel_id)
+  });
 }
 
 async function refreshGoogleAnalyticsMetrics(workspaceId: string): Promise<MetricCollectorResult> {
@@ -269,22 +306,30 @@ async function refreshSpotifyMetrics(workspaceId: string): Promise<MetricCollect
 }
 
 async function refreshYouTubeMusicMetrics(workspaceId: string): Promise<MetricCollectorResult> {
+  const supabase = createServiceSupabaseClient();
+  const { data: connection, error: connectionError } = await supabase
+    .from("app_google_connections")
+    .select("youtube_topic_channel_id, youtube_topic_channel_title")
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (connectionError) throw connectionError;
+  if (!connection?.youtube_topic_channel_id) {
+    return { name: "youtube-music", reason: "YouTube Topic is not configured for this workspace.", status: "skipped" };
+  }
   const youtubeApiKey = process.env.YOUTUBE_API_KEY;
-  const youtubeMusicChannelId =
-    process.env.YOUTUBE_MUSIC_CHANNEL_ID ?? "UCKlfg9lYKyMOg_Oiz-Zb1Fg";
 
   if (!youtubeApiKey) {
     return { name: "youtube-music", reason: "Missing YOUTUBE_API_KEY.", status: "skipped" };
   }
 
   const channel = await fetchYouTubeJson(youtubeApiKey, "channels", {
-    id: youtubeMusicChannelId,
+    id: connection.youtube_topic_channel_id,
     part: "id,snippet,statistics,contentDetails"
   });
   const channelItem = channel.items?.[0];
 
   if (!channelItem) {
-    throw new Error(`No YouTube Music channel found for id ${youtubeMusicChannelId}.`);
+    throw new Error("The configured YouTube Topic channel could not be found.");
   }
 
   const tracks = await discoverYouTubeMusicTracks(youtubeApiKey, channelItem);
@@ -292,12 +337,12 @@ async function refreshYouTubeMusicMetrics(workspaceId: string): Promise<MetricCo
 
   await upsertPlatformMetricSnapshots(
     {
-      accountName: cleanAsciiTitle(channelItem.snippet?.title ?? "Love Strings - Topic"),
+      accountName: cleanAsciiTitle(channelItem.snippet?.title ?? connection.youtube_topic_channel_title ?? "YouTube Topic"),
       category: "music",
       externalId: channelItem.id,
-      platformName: "YouTube Music",
+      platformName: "YouTube Topic",
       platformSlug: "youtube-music",
-      url: `https://music.youtube.com/channel/${channelItem.id}`
+      url: `https://www.youtube.com/channel/${channelItem.id}`
     },
     [
       {
@@ -342,24 +387,39 @@ async function refreshYouTubeMusicMetrics(workspaceId: string): Promise<MetricCo
 }
 
 async function refreshYouTubeMetrics(workspaceId: string): Promise<MetricCollectorResult> {
+  const supabase = createServiceSupabaseClient();
+  const { data: connection, error: connectionError } = await supabase
+    .from("app_google_connections")
+    .select("youtube_enabled, youtube_channel_id, youtube_channel_title")
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+
+  if (connectionError) throw connectionError;
+  if (!connection?.youtube_enabled || !connection.youtube_channel_id) {
+    return {
+      name: "youtube",
+      reason: "YouTube is not connected for this workspace.",
+      status: "skipped"
+    };
+  }
+
   const youtubeApiKey = process.env.YOUTUBE_API_KEY;
 
   if (!youtubeApiKey) {
     return { name: "youtube", reason: "Missing YOUTUBE_API_KEY.", status: "skipped" };
   }
 
-  const channelHandle = process.env.YOUTUBE_CHANNEL_HANDLE ?? "@LoveStringsBand";
   const maxUploadsToInspect = Number(process.env.YOUTUBE_UPLOADS_TO_INSPECT ?? 25);
   const maxShortDurationSeconds = Number(process.env.YOUTUBE_SHORT_MAX_SECONDS ?? 180);
 
   const channel = await fetchYouTubeJson(youtubeApiKey, "channels", {
-    forHandle: channelHandle,
+    id: connection.youtube_channel_id,
     part: "id,snippet,statistics,contentDetails"
   });
   const channelItem = channel.items?.[0];
 
   if (!channelItem) {
-    throw new Error(`No YouTube channel found for handle ${channelHandle}.`);
+    throw new Error("The configured YouTube channel could not be found.");
   }
 
   const uploads = await discoverLatestYouTubeUploads(
@@ -388,12 +448,14 @@ async function refreshYouTubeMetrics(workspaceId: string): Promise<MetricCollect
 
   await upsertPlatformMetricSnapshots(
     {
-      accountName: "Love Strings YouTube Channel",
+      accountName: cleanAsciiTitle(
+        channelItem.snippet?.title ?? connection.youtube_channel_title ?? "YouTube channel"
+      ),
       category: "video",
       externalId: channelItem.id,
       platformName: "YouTube",
       platformSlug: "youtube",
-      url: "https://www.youtube.com/@LoveStringsBand"
+      url: `https://www.youtube.com/channel/${channelItem.id}`
     },
     [
       {

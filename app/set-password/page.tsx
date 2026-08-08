@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 export default function SetPasswordPage() {
@@ -15,16 +15,20 @@ export default function SetPasswordPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [invitationError, setInvitationError] = useState("");
   const [error, setError] = useState("");
+  const acceptanceInFlight = useRef(false);
+  const acceptanceComplete = useRef(false);
 
   useEffect(() => {
     const supabase = createBrowserSupabaseClient();
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setIsReady(Boolean(session));
+      if (session && !acceptanceComplete.current) void establishInvitationSession(session);
     });
 
     void establishInvitationSession();
 
-    async function establishInvitationSession() {
+    async function establishInvitationSession(existingSession?: { access_token: string } | null) {
+      if (acceptanceInFlight.current || acceptanceComplete.current) return;
       const hashParameters = new URLSearchParams(window.location.hash.slice(1));
       const queryParameters = new URLSearchParams(window.location.search);
       const hashAccessToken = hashParameters.get("access_token");
@@ -39,7 +43,7 @@ export default function SetPasswordPage() {
       // when it is constructed. Wait for that initialization before attempting a
       // manual handoff so this page never treats an in-flight sign-in as invalid.
       const { data: initialSession } = await supabase.auth.getSession();
-      let session = initialSession.session;
+      let session = existingSession ?? initialSession.session;
 
       if (!session && hashAccessToken && refreshToken) {
         const { data } = await supabase.auth.setSession({
@@ -58,6 +62,7 @@ export default function SetPasswordPage() {
       }
 
       if (session) {
+        acceptanceInFlight.current = true;
         if (workspaceInvitation) {
           const response = await fetch("/api/invitations/accept", {
             body: JSON.stringify({ token: workspaceInvitation }),
@@ -73,19 +78,25 @@ export default function SetPasswordPage() {
             );
             setIsReady(true);
             setHasCheckedInvitation(true);
+            acceptanceInFlight.current = false;
             return;
           }
         }
+        acceptanceComplete.current = true;
         setIsWorkspaceJoin(workspaceJoin);
         window.history.replaceState({}, "", "/set-password");
         if (workspaceJoin) {
-          router.replace("/");
-          router.refresh();
+          window.location.assign("/");
+          return;
         }
+        acceptanceInFlight.current = false;
+        setIsReady(true);
+        setHasCheckedInvitation(true);
+        return;
       }
-
-      setIsReady(Boolean(session));
-      setHasCheckedInvitation(true);
+      // Session restoration may complete after the initial getSession call.
+      // Keep the loading state until the auth listener resumes this flow.
+      setIsReady(false);
     }
 
     return () => listener.subscription.unsubscribe();
