@@ -35,39 +35,34 @@ export default function SetPasswordPage() {
       const workspaceInvitation = queryParameters.get("workspace_invitation");
       const workspaceJoin = queryParameters.get("workspace_join") === "1";
 
-      let sessionEstablished = false;
-      let accessToken = "";
+      // createBrowserClient restores or exchanges an auth session asynchronously
+      // when it is constructed. Wait for that initialization before attempting a
+      // manual handoff so this page never treats an in-flight sign-in as invalid.
+      const { data: initialSession } = await supabase.auth.getSession();
+      let session = initialSession.session;
 
-      if (hashAccessToken && refreshToken) {
+      if (!session && hashAccessToken && refreshToken) {
         const { data } = await supabase.auth.setSession({
           access_token: hashAccessToken,
           refresh_token: refreshToken
         });
-        sessionEstablished = Boolean(data.session);
-        accessToken = data.session?.access_token ?? "";
-      } else if (authorizationCode) {
+        session = data.session;
+      } else if (!session && authorizationCode) {
         const { data } = await supabase.auth.exchangeCodeForSession(authorizationCode);
-        sessionEstablished = Boolean(data.session);
-        accessToken = data.session?.access_token ?? "";
-      } else if (tokenHash && invitationType === "invite") {
+        session = data.session;
+      } else if (!session && tokenHash && invitationType === "invite") {
         const { data } = await supabase.auth.verifyOtp({
           token_hash: tokenHash,
           type: "invite"
         });
-        sessionEstablished = Boolean(data.session);
-        accessToken = data.session?.access_token ?? "";
-      } else {
-        const { data } = await supabase.auth.getSession();
-        sessionEstablished = Boolean(data.session);
-        accessToken = data.session?.access_token ?? "";
       }
 
-      if (sessionEstablished) {
+      if (session) {
         if (workspaceInvitation) {
           const response = await fetch("/api/invitations/accept", {
             body: JSON.stringify({ token: workspaceInvitation }),
             headers: {
-              Authorization: `Bearer ${accessToken}`,
+              Authorization: `Bearer ${session.access_token}`,
               "Content-Type": "application/json"
             },
             method: "POST"
@@ -81,17 +76,15 @@ export default function SetPasswordPage() {
             return;
           }
         }
-        if (sessionEstablished) {
-          setIsWorkspaceJoin(workspaceJoin);
-          window.history.replaceState({}, "", "/set-password");
-          if (workspaceJoin) {
-            router.replace("/");
-            router.refresh();
-          }
+        setIsWorkspaceJoin(workspaceJoin);
+        window.history.replaceState({}, "", "/set-password");
+        if (workspaceJoin) {
+          router.replace("/");
+          router.refresh();
         }
       }
 
-      setIsReady(sessionEstablished);
+      setIsReady(Boolean(session));
       setHasCheckedInvitation(true);
     }
 

@@ -548,6 +548,9 @@ Includes:
   and marks the invitation accepted before setting the active-workspace cookie.
 - Made invitation resend visibly single-flight, with an in-row loading state,
   a newest-link confirmation, and a useful failure message.
+- Fixed a first-load `/set-password` race: the page now waits for Supabase's
+  browser session initialization before falling back to manual link handling,
+  so an in-flight invitation sign-in is not incorrectly shown as unverified.
 - Included the multi-workspace QA fixes already in the unreleased batch,
   including safe empty-workspace behavior and platform/workspace separation.
 
