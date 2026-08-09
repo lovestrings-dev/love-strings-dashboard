@@ -1156,3 +1156,20 @@ Series connection:
   their own name, their own platform identity, and an invitation that works on
   the first click. Beta 1.16 was built by following those real moments rather
   than designing an abstract onboarding flow in advance.
+
+### Beta 1.16 release close: a dashboard that reads at a glance
+
+The external-artist safety work made the dashboard trustworthy; the final
+Viewer Showroom & UI Polish pass made that trust easier to read. Rather than
+redesigning the product, the app adopted one quiet visual grammar: each module
+keeps its own restrained left-edge identity, parent surfaces carry the stronger
+signal, and child cards use a thinner one. Budget keeps its own identity even
+inside a campaign, song, or event because the financial meaning travels with
+the record.
+
+The release close also turned General Settings into three understandable areas
+for an external artist: identity, members, and connections. Future providers
+are shown honestly as onboarding placeholders, while working Google services
+remain separate. The next product chapter is intentionally not an extension of
+this polish: Viewer Playground will introduce sandboxed Viewer interaction and
+needs its own data-ownership and permission design.

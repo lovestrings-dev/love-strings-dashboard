@@ -580,7 +580,7 @@ Still deferred:
   YouTube collection, Gmail/CRM, Spotify, Deezer, Amazon, and workspace
   archive/delete workflows.
 
-## Beta 1.16 (Release Candidate)
+## Beta 1.16 — Viewer Showroom & UI Polish (Prepared for deployment)
 
 Headline: **The shared dashboard is prepared for its first real external artist workspace.**
 
@@ -659,3 +659,54 @@ Deliberately not included:
 - A broad Platforms or General Settings redesign.
 - Conversion of scheduled refresh architecture beyond the manual-refresh safety
   boundary; its wider multi-workspace rollout remains a separate task.
+
+Final polish included before deployment:
+
+- Established restrained, reusable module color identity across Marketing,
+  Production, Platforms, Events, Budget, and Roadmap: persistent sidebar
+  cues, strong parent stripes, thin child stripes, and neutral card bodies.
+- Polished the Dashboard into a clearer viewer showroom: grouped module
+  previews, compact neutral Platform metrics, aligned platform headings,
+  neutral Spotify historical/manual-data messaging, and a three-segment Focus
+  Queue that retains its one-module reading.
+- Refined Marketing, Production, Platforms, Events, Budget, and Roadmap with
+  consistent parent/child hierarchy. Cross-module Budget child cards retain
+  Budget identity wherever they appear.
+- Reorganized General Settings into Artist app identity, Member management,
+  and Connections. Google services now include plainly non-interactive
+  YouTube Music and Gmail onboarding placeholders; Meta, Spotify, Deezer, and
+  Amazon Music placeholders remain clearly unavailable.
+- Harmonized semantic actions: teal primary actions, neutral utilities, and
+  neutral-first/two-step tap-away confirmation for destructive interactions
+  where implemented (including member/invitation removal, disconnects,
+  module deletes, and QR links).
+- Added the protected, workspace-scoped Roadmap phase delete action. The
+  existing `ON DELETE SET NULL` production-song relationship leaves songs
+  intact and unassigns them from the deleted phase.
+- Improved Budget ledger readability: source/type row identity, recurring
+  source inheritance, wrapped long descriptions in both visible ledger
+  sections, and restrained graph-card accents.
+- Corrected User Settings to respect the active workspace context in the
+  multi-workspace flow, while keeping product-facing errors safe.
+- Fixed external-workspace Viewer avatar previews by replacing the legacy
+  Love Strings-only avatar read policy with an authenticated self-folder read
+  policy. Personal avatars remain private to their owner; workspace branding
+  and administration permissions are unchanged.
+- Added a final 10px sidebar separation between the personal avatar/name
+  control and the workspace identity block.
+
+Release verification:
+
+- TypeScript, lint, production build, and `git diff --check` pass.
+- Two migrations exist since the Beta 1.15 hot-fix baseline and both are
+  applied to the remote Supabase project used by localhost:
+  `202608080007_add_workspace_youtube_topic.sql` and
+  `202608090001_fix_avatar_self_read_policy.sql`. The latter replaces only
+  avatar `SELECT` with a self-folder policy; avatar write policies and all
+  workspace-level permissions remain unchanged.
+
+Next planned phase:
+
+- **Viewer Playground / sandboxed Viewer interaction**: separately design
+  viewer-created demo records, ownership/permission boundaries, sandbox
+  calculations, and isolation. It is explicitly not part of Beta 1.16.

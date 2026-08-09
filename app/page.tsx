@@ -477,24 +477,6 @@ const platformStats = [
     ]
   },
   {
-    platform: "Website Analytics",
-    slug: "google-analytics",
-    profileUrl: "https://analytics.google.com/",
-    icon: BarChart3,
-    dashboard: false,
-    metrics: [
-      { label: "Active Users, Last 30 Days", metricName: "active_users_30d", value: "0" },
-      { label: "Sessions, Last 30 Days", metricName: "sessions_30d", value: "0" },
-      { label: "Page Views, Last 30 Days", metricName: "page_views_30d", value: "0" },
-      {
-        label: "Top Traffic Source, Last 30 Days",
-        metricName: "top_traffic_source_sessions_30d",
-        value: "0",
-        context: "No traffic yet"
-      }
-    ]
-  },
-  {
     platform: "YouTube Topic",
     slug: "youtube-music",
     profileUrl:
@@ -509,6 +491,24 @@ const platformStats = [
         metricName: "current_release_plays",
         value: "15",
         context: "Flowers"
+      }
+    ]
+  },
+  {
+    platform: "Website Analytics",
+    slug: "google-analytics",
+    profileUrl: "https://analytics.google.com/",
+    icon: BarChart3,
+    dashboard: false,
+    metrics: [
+      { label: "Active Users, Last 30 Days", metricName: "active_users_30d", value: "0" },
+      { label: "Sessions, Last 30 Days", metricName: "sessions_30d", value: "0" },
+      { label: "Page Views, Last 30 Days", metricName: "page_views_30d", value: "0" },
+      {
+        label: "Top Traffic Source, Last 30 Days",
+        metricName: "top_traffic_source_sessions_30d",
+        value: "0",
+        context: "No traffic yet"
       }
     ]
   },
@@ -3179,6 +3179,40 @@ function getBudgetSourceBucket(entry: BudgetEntry): BudgetSourceBucket {
   }
 
   return inferBudgetSourceBucket(entry.description);
+}
+
+function getBudgetRowStripeFamily(
+  entry: BudgetEntry,
+  entriesById: Map<string, BudgetEntry>,
+  visitedEntryIds = new Set<string>()
+) {
+  if (entry.bucket === "marketing") return "marketing";
+  if (entry.bucket === "production") return "production";
+  if (entry.bucket === "events") return "events";
+  if (entry.bucket === "other") return "budget";
+
+  if (entry.sourceMarketingCampaignId) return "marketing";
+  if (entry.sourceProductionItemId) return "production";
+  if (entry.sourceEventEntryId) return "events";
+
+  if (
+    entry.sourceRecurringEntryId &&
+    !visitedEntryIds.has(entry.sourceRecurringEntryId)
+  ) {
+    const parentEntry = entriesById.get(entry.sourceRecurringEntryId);
+
+    if (parentEntry) {
+      const nextVisitedEntryIds = new Set(visitedEntryIds);
+      nextVisitedEntryIds.add(entry.id);
+      return getBudgetRowStripeFamily(
+        parentEntry,
+        entriesById,
+        nextVisitedEntryIds
+      );
+    }
+  }
+
+  return "budget";
 }
 
 function inferBudgetSourceBucket(description: string): BudgetSourceBucket {
@@ -7003,6 +7037,32 @@ export default function Home() {
     setRoadmapPhaseDrafts(normalizeRoadmapPhases(result.phases));
   }
 
+  async function deleteRoadmapPhase(phaseId: string) {
+    const response = await fetch("/api/roadmap/phases", {
+      body: JSON.stringify({ id: phaseId }),
+      headers: {
+        "content-type": "application/json",
+        "x-love-strings-roadmap": "write"
+      },
+      method: "DELETE"
+    });
+    const result = (await response.json()) as {
+      error?: string;
+      phases?: Array<Partial<RoadmapPhase>>;
+    };
+    if (!response.ok || !result.phases) {
+      throw new Error(result.error ?? "Roadmap phase deletion failed.");
+    }
+    setRoadmapPhaseDrafts(normalizeRoadmapPhases(result.phases));
+    setProductionSongDrafts((currentSongs) =>
+      currentSongs.map((song) =>
+        song.roadmapPhaseId === phaseId
+          ? { ...song, roadmapPhaseId: null }
+          : song
+      )
+    );
+  }
+
   return (
     <main className="dashboard-shell">
       <aside className="sidebar" aria-label="Primary">
@@ -7035,6 +7095,7 @@ export default function Home() {
           {sections.map((section) => (
             <button
               aria-current={activeSection === section ? "page" : undefined}
+              className={`nav-module-${section.toLowerCase().replaceAll(" ", "-")}`}
               key={section}
               onClick={() => {
                 setActiveSection(section);
@@ -7100,6 +7161,7 @@ export default function Home() {
             onCreatePhase={createRoadmapPhase}
             onOpenMarketing={openRoadmapMarketingCampaign}
             onOpenProduction={openRoadmapProductionSong}
+            onDeletePhase={deleteRoadmapPhase}
             onSavePhase={saveRoadmapPhase}
             onSongChange={updateProductionSong}
             phases={roadmapPhaseDrafts}
@@ -7333,6 +7395,21 @@ function GeneralSettingsView({
   const [topicChannel, setTopicChannel] = useState("");
   const [workspaceNameDraft, setWorkspaceNameDraft] = useState(workspaceName);
   const [topicCandidate, setTopicCandidate] = useState<{ channelId: string; channelTitle: string; caution: boolean; sameAsMain: boolean } | null>(null);
+  const [armedSettingsAction, setArmedSettingsAction] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!armedSettingsAction) return;
+
+    function cancelArmedAction(event: PointerEvent) {
+      if (event.target instanceof Element && event.target.closest("[data-settings-destructive]")) {
+        return;
+      }
+      setArmedSettingsAction(null);
+    }
+
+    document.addEventListener("pointerdown", cancelArmedAction);
+    return () => document.removeEventListener("pointerdown", cancelArmedAction);
+  }, [armedSettingsAction]);
 
   async function saveWorkspaceName() {
     setGoogleStatus({ message: "Saving workspace name...", state: "loading" });
@@ -7608,9 +7685,6 @@ function GeneralSettingsView({
   }
 
   async function revokeInvitation(invitation: WorkspaceInvitation) {
-    if (!window.confirm(`Revoke the invitation for ${invitation.email}? The invitation link will stop working immediately.`)) {
-      return;
-    }
     setInvitationLifecycleStatus({ message: "Revoking invitation...", state: "loading" });
     try {
       const response = await fetch("/api/admin/invitations", {
@@ -7653,10 +7727,6 @@ function GeneralSettingsView({
   }
 
   async function removeWorkspaceMember(member: WorkspaceMember) {
-    if (!window.confirm(`Remove ${member.displayName} from this workspace? Their account and other workspace memberships will remain.`)) {
-      return;
-    }
-
     setMembershipStatus({ message: "Removing member...", state: "loading" });
     try {
       const response = await fetch("/api/admin/memberships", {
@@ -7676,6 +7746,16 @@ function GeneralSettingsView({
         state: "error"
       });
     }
+  }
+
+  function confirmSettingsAction(actionId: string, action: () => void) {
+    if (armedSettingsAction !== actionId) {
+      setArmedSettingsAction(actionId);
+      return;
+    }
+
+    setArmedSettingsAction(null);
+    action();
   }
 
   async function uploadLogo(file: File) {
@@ -7743,6 +7823,11 @@ function GeneralSettingsView({
       </header>
 
       <div className="user-settings-content">
+        <section className="settings-parent-card settings-parent-members">
+          <div className="settings-parent-heading">
+            <p className="eyebrow">Workspace access</p>
+            <h2>Member management</h2>
+          </div>
         <article className="general-settings-card general-settings-invitations">
           <div className="general-settings-heading">
             <div>
@@ -7846,12 +7931,22 @@ function GeneralSettingsView({
                         {resendingInvitationId === invitation.id ? "Resending..." : "Resend"}
                       </button>
                       <button
-                        className="workspace-member-remove"
+                        aria-label={
+                          armedSettingsAction === `revoke-invitation-${invitation.id}`
+                            ? `Confirm revoke invitation for ${invitation.email}`
+                            : `Revoke invitation for ${invitation.email}`
+                        }
+                        className={`workspace-member-remove settings-destructive-button${
+                          armedSettingsAction === `revoke-invitation-${invitation.id}` ? " is-armed" : ""
+                        }`}
+                        data-settings-destructive
                         disabled={Boolean(resendingInvitationId) || invitationLifecycleStatus.state === "loading"}
-                        onClick={() => void revokeInvitation(invitation)}
+                        onClick={() =>
+                          confirmSettingsAction(`revoke-invitation-${invitation.id}`, () => void revokeInvitation(invitation))
+                        }
                         type="button"
                       >
-                        Revoke
+                        {armedSettingsAction === `revoke-invitation-${invitation.id}` ? "Confirm revoke" : "Revoke"}
                       </button>
                       {resentInvitationId === invitation.id ? (
                         <span className="workspace-invitation-feedback" role="status">
@@ -7931,14 +8026,31 @@ function GeneralSettingsView({
                     <span className="workspace-member-self">You</span>
                   ) : (
                     <button
-                      aria-label={`Remove ${member.displayName} from this workspace`}
-                      className="workspace-member-remove"
+                      aria-label={
+                        armedSettingsAction === `remove-member-${member.userId}`
+                          ? `Confirm remove ${member.displayName} from this workspace`
+                          : `Remove ${member.displayName} from this workspace`
+                      }
+                      className={`workspace-member-remove settings-destructive-button${
+                        armedSettingsAction === `remove-member-${member.userId}`
+                          ? " is-armed"
+                          : ""
+                      }`}
+                      data-settings-destructive
                       disabled={membershipStatus.state === "loading"}
-                      onClick={() => void removeWorkspaceMember(member)}
+                      onClick={() =>
+                        confirmSettingsAction(`remove-member-${member.userId}`, () =>
+                          void removeWorkspaceMember(member)
+                        )
+                      }
                       type="button"
                     >
                       <Trash2 aria-hidden size={16} />
-                      <span>Remove</span>
+                      <span>
+                        {armedSettingsAction === `remove-member-${member.userId}`
+                          ? "Confirm remove"
+                          : "Remove"}
+                      </span>
                     </button>
                   )}
                 </div>
@@ -7955,12 +8067,51 @@ function GeneralSettingsView({
           ) : null}
         </article>
 
+        </section>
+
+        <section className="settings-parent-card settings-parent-identity">
+          <div className="settings-parent-heading">
+            <p className="eyebrow">Workspace identity</p>
+            <h2>Artist app identity</h2>
+          </div>
         <article className="general-settings-card">
           <div className="general-settings-heading"><div><p className="eyebrow">Workspace identity</p><h2>Workspace name</h2></div></div>
           <div className="google-topic-config"><input aria-label="Workspace name" onChange={(event) => setWorkspaceNameDraft(event.target.value)} value={workspaceNameDraft} /><button disabled={googleStatus.state === "loading"} onClick={() => void saveWorkspaceName()} type="button">Save</button></div>
         </article>
+        <article className="general-settings-card">
+          <div className="general-settings-heading">
+            <Image alt="Current app logo" className="general-settings-logo" height={72} src={logoUrl} unoptimized width={72} />
+            <div><p className="eyebrow">App identity</p><h2>App logo</h2></div>
+          </div>
+          <input
+            accept="image/jpeg,image/png,image/webp"
+            aria-label="Choose app logo image"
+            className="user-avatar-file-input"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) void uploadLogo(file);
+            }}
+            ref={logoInputRef}
+            type="file"
+          />
+          <div className="general-settings-actions">
+            <button disabled={logoStatus.state === "loading"} onClick={() => logoInputRef.current?.click()} type="button">
+              <Upload aria-hidden size={16} />
+              <span>{logoStatus.state === "loading" ? "Uploading..." : "Upload logo"}</span>
+            </button>
+            {logoStatus.message ? <p className={logoStatus.state === "error" ? "settings-error" : "settings-status"} role={logoStatus.state === "error" ? "alert" : "status"}>{logoStatus.message}</p> : null}
+          </div>
+        </article>
 
-        <article className="general-settings-card google-services-card">
+        </section>
+
+        <section className="settings-parent-card settings-parent-connections">
+          <div className="settings-parent-heading">
+            <p className="eyebrow">Integrations</p>
+            <h2>Connections</h2>
+          </div>
+        <article className="general-settings-card google-services-card settings-provider-card">
           <div className="general-settings-heading">
             <div>
               <p className="eyebrow">External services</p>
@@ -7985,11 +8136,21 @@ function GeneralSettingsView({
               </div>
               {googleConnection?.youtube.enabled ? (
                 <button
+                  className={`settings-destructive-button${
+                    armedSettingsAction === "disconnect-youtube" ? " is-armed" : ""
+                  }`}
+                  data-settings-destructive
                   disabled={googleStatus.state === "loading"}
-                  onClick={() => void disconnectGoogleService("youtube")}
+                  onClick={() =>
+                    confirmSettingsAction("disconnect-youtube", () =>
+                      void disconnectGoogleService("youtube")
+                    )
+                  }
                   type="button"
                 >
-                  Disconnect
+                  {armedSettingsAction === "disconnect-youtube"
+                    ? "Confirm disconnect"
+                    : "Disconnect"}
                 </button>
               ) : (
                 <button
@@ -8020,6 +8181,13 @@ function GeneralSettingsView({
               <p className="google-topic-help">Not sure? Search YouTube for “Your Artist Name - Topic”. If there is no separate channel, leave this unconfigured. Ask your distributor or label about Official Artist Channel eligibility.</p>
             </section>
 
+            <div className="google-service-row google-service-placeholder">
+              <div>
+                <strong>YouTube Music</strong>
+                <span>Connection onboarding is in development.</span>
+              </div>
+            </div>
+
             <div className="google-service-row">
               <div>
                 <strong>Google Analytics</strong>
@@ -8032,11 +8200,21 @@ function GeneralSettingsView({
               </div>
               {googleConnection?.analytics.enabled ? (
                 <button
+                  className={`settings-destructive-button${
+                    armedSettingsAction === "disconnect-analytics" ? " is-armed" : ""
+                  }`}
+                  data-settings-destructive
                   disabled={googleStatus.state === "loading"}
-                  onClick={() => void disconnectGoogleService("analytics")}
+                  onClick={() =>
+                    confirmSettingsAction("disconnect-analytics", () =>
+                      void disconnectGoogleService("analytics")
+                    )
+                  }
                   type="button"
                 >
-                  Disconnect
+                  {armedSettingsAction === "disconnect-analytics"
+                    ? "Confirm disconnect"
+                    : "Disconnect"}
                 </button>
               ) : (
                 <button
@@ -8053,6 +8231,13 @@ function GeneralSettingsView({
                 </button>
               )}
             </div>
+
+            <div className="google-service-row google-service-placeholder">
+              <div>
+                <strong>Gmail</strong>
+                <span>Connection onboarding is in development.</span>
+              </div>
+            </div>
           </div>
 
           {googleStatus.message ? (
@@ -8065,57 +8250,24 @@ function GeneralSettingsView({
           ) : null}
         </article>
 
-        <article className="general-settings-card">
-          <div className="general-settings-heading">
-            <Image
-              alt="Current app logo"
-              className="general-settings-logo"
-              height={72}
-              src={logoUrl}
-              unoptimized
-              width={72}
-            />
-            <div>
-              <p className="eyebrow">App identity</p>
-              <h2>App logo</h2>
-            </div>
-          </div>
-
-          <input
-            accept="image/jpeg,image/png,image/webp"
-            aria-label="Choose app logo image"
-            className="user-avatar-file-input"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = "";
-              if (file) {
-                void uploadLogo(file);
-              }
-            }}
-            ref={logoInputRef}
-            type="file"
-          />
-          <div className="general-settings-actions">
-            <button
-              disabled={logoStatus.state === "loading"}
-              onClick={() => logoInputRef.current?.click()}
-              type="button"
-            >
-              <Upload aria-hidden size={16} />
-              <span>
-                {logoStatus.state === "loading" ? "Uploading..." : "Upload logo"}
-              </span>
-            </button>
-            {logoStatus.message ? (
-              <p
-                className={logoStatus.state === "error" ? "settings-error" : "settings-status"}
-                role={logoStatus.state === "error" ? "alert" : "status"}
-              >
-                {logoStatus.message}
-              </p>
-            ) : null}
-          </div>
+        <article className="general-settings-card settings-provider-card settings-provider-placeholder">
+          <h3>Meta</h3>
+          <p>Instagram and Facebook onboarding is under construction.</p>
         </article>
+        <article className="general-settings-card settings-provider-card settings-provider-placeholder">
+          <h3>Spotify</h3>
+          <p>Connection onboarding is in development.</p>
+        </article>
+        <article className="general-settings-card settings-provider-card settings-provider-placeholder">
+          <h3>Deezer</h3>
+          <p>Connection onboarding is in development.</p>
+        </article>
+        <article className="general-settings-card settings-provider-card settings-provider-placeholder">
+          <h3>Amazon Music</h3>
+          <p>Connection onboarding is in development.</p>
+        </article>
+        </section>
+
       </div>
     </section>
   );
@@ -8351,32 +8503,46 @@ function UserSettingsView({
       const user = userData.user;
 
       if (userError || !user) {
+        console.error("Unable to load user settings account.", userError);
         setProfileStatus({
-          message: userError?.message ?? "Unable to load this account.",
+          message: "Your account could not be loaded. Please try again.",
           state: "error"
         });
         return;
       }
 
+      const activeWorkspaceResponse = await fetch("/api/workspace/active", {
+        cache: "no-store"
+      });
+      const activeWorkspace = (await activeWorkspaceResponse.json().catch(() => null)) as {
+        workspaceId?: string;
+      } | null;
+      const workspaceId = activeWorkspaceResponse.ok
+        ? activeWorkspace?.workspaceId
+        : undefined;
       const [profileResult, membershipResult] = await Promise.all([
         supabase
           .from("app_profiles")
           .select("avatar_path, display_name")
           .eq("id", user.id)
           .maybeSingle(),
-        supabase
-          .from("app_workspace_members")
-          .select("role")
-          .eq("user_id", user.id)
-          .maybeSingle()
+        workspaceId
+          ? supabase
+              .from("app_workspace_members")
+              .select("role")
+              .eq("workspace_id", workspaceId)
+              .eq("user_id", user.id)
+              .maybeSingle()
+          : Promise.resolve({ data: null, error: null })
       ]);
 
       if (profileResult.error || membershipResult.error) {
+        console.error("Unable to load user settings.", {
+          membershipError: membershipResult.error,
+          profileError: profileResult.error
+        });
         setProfileStatus({
-          message:
-            profileResult.error?.message ??
-            membershipResult.error?.message ??
-            "Unable to load profile settings.",
+          message: "Profile settings could not be loaded. Please try again.",
           state: "error"
         });
         return;
@@ -8422,7 +8588,11 @@ function UserSettingsView({
       .eq("id", userId);
 
     if (profileError) {
-      setProfileStatus({ message: profileError.message, state: "error" });
+      console.error("Unable to save profile settings.", profileError);
+      setProfileStatus({
+        message: "Profile settings could not be saved. Please try again.",
+        state: "error"
+      });
       return;
     }
 
@@ -8431,7 +8601,11 @@ function UserSettingsView({
     });
 
     if (authError) {
-      setProfileStatus({ message: authError.message, state: "error" });
+      console.error("Unable to update account profile metadata.", authError);
+      setProfileStatus({
+        message: "Profile settings could not be saved. Please try again.",
+        state: "error"
+      });
       return;
     }
 
@@ -8508,8 +8682,9 @@ function UserSettingsView({
         })
       );
     } catch (error) {
+      console.error("Unable to update avatar.", error);
       setAvatarStatus({
-        message: error instanceof Error ? error.message : "Avatar upload failed.",
+        message: "Avatar could not be updated. Please try again.",
         state: "error"
       });
     }
@@ -8724,7 +8899,7 @@ function EventsView({
       </header>
 
       <section className="events-summary-grid" aria-label="Events summary">
-        <article className="metric-card event-summary-card">
+        <article className="metric-card event-summary-card module-accent module-accent-events">
           <div className="event-summary-card-title">
             <MapPin size={18} aria-hidden />
             <span>Next event</span>
@@ -8744,7 +8919,7 @@ function EventsView({
             <p className="event-summary-empty">No upcoming events planned yet</p>
           )}
         </article>
-        <article className="metric-card event-summary-card">
+        <article className="metric-card event-summary-card module-accent module-accent-events">
           <div className="event-summary-card-title">
             <CalendarDays size={18} aria-hidden />
             <span>Total events</span>
@@ -8762,7 +8937,7 @@ function EventsView({
         onLocationChange={onLocationChange}
       />
 
-      <section className="events-panel panel" aria-label="Events list">
+      <section className="events-panel panel module-accent module-accent-events" aria-label="Events list">
         <div className="events-header">
           <div>
             <p className="eyebrow">Archive</p>
@@ -8815,7 +8990,7 @@ function LocationAddressBook({
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <section className="location-address-book" aria-label="Location address book">
+    <section className="location-address-book module-accent module-accent-events" aria-label="Location address book">
       <button
         aria-expanded={isOpen}
         className="location-address-book-toggle"
@@ -8871,13 +9046,59 @@ function LocationAddressBookCard({
   ) => void;
 }) {
   const pastEvents = getPastEventsForLocation(location, events);
-  const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
+  const [isDeleteArmed, setIsDeleteArmed] = useState(false);
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!isDeleteArmed) {
+      return;
+    }
+
+    function cancelDelete(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        deleteButtonRef.current?.contains(event.target)
+      ) {
+        return;
+      }
+
+      setIsDeleteArmed(false);
+    }
+
+    window.addEventListener("pointerdown", cancelDelete);
+    return () => window.removeEventListener("pointerdown", cancelDelete);
+  }, [isDeleteArmed]);
+
+  function handleDeleteLocation() {
+    if (!isDeleteArmed) {
+      setIsDeleteArmed(true);
+      return;
+    }
+
+    onDeleteLocation(location.id);
+  }
 
   return (
-    <article className="location-address-book-card">
+    <article className="location-address-book-card module-subtle-events module-accent-thin module-accent-events">
       <div className="location-address-book-card-header">
         <strong>{location.locationName || "Location name"}</strong>
         <span>{location.address || "Address"}</span>
+      </div>
+
+      <div className="location-event-history">
+        <strong>Past events here</strong>
+        {pastEvents.length > 0 ? (
+          <ul>
+            {pastEvents.map((event) => (
+              <li key={event.id}>
+                <span>{event.date}</span>
+                <EventMaybeLink label={event.name} url={event.nameUrl} />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>No past events linked yet.</p>
+        )}
       </div>
 
       <div className="location-address-book-fields">
@@ -8952,39 +9173,20 @@ function LocationAddressBookCard({
         </label>
       </div>
 
-      <div className="location-event-history">
-        <strong>Past events here</strong>
-        {pastEvents.length > 0 ? (
-          <ul>
-            {pastEvents.map((event) => (
-              <li key={event.id}>
-                <span>{event.date}</span>
-                <EventMaybeLink label={event.name} url={event.nameUrl} />
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p>No past events linked yet.</p>
-        )}
-      </div>
-
       <div className="location-delete-row">
-        <label>
-          <input
-            checked={isDeleteConfirmed}
-            onChange={(event) => setIsDeleteConfirmed(event.target.checked)}
-            type="checkbox"
-          />
-          Confirm delete
-        </label>
         <button
-          className="danger-action"
-          disabled={!isDeleteConfirmed}
-          onClick={() => onDeleteLocation(location.id)}
+          aria-label={
+            isDeleteArmed
+              ? `Confirm delete ${location.locationName || "location"}`
+              : `Delete ${location.locationName || "location"}`
+          }
+          className={`location-delete-button${isDeleteArmed ? " is-armed" : ""}`}
+          onClick={handleDeleteLocation}
+          ref={deleteButtonRef}
           type="button"
         >
           <Trash2 size={14} aria-hidden />
-          Delete location
+          {isDeleteArmed ? "Delete?" : "Delete location"}
         </button>
       </div>
     </article>
@@ -9006,8 +9208,9 @@ function EventCard({
   onEntryChange: (entryId: string, updates: Partial<EventEntry>) => void;
   refCallback: (element: HTMLElement | null) => void;
 }) {
-  const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
+  const [isDeleteArmed, setIsDeleteArmed] = useState(false);
   const [isEventOpen, setIsEventOpen] = useState(false);
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
   const selectedLocation = getMatchingLocationAddressBookEntry(entry, locations);
   const eventBudgetLines =
     entry.budgetLines && entry.budgetLines.length > 0
@@ -9028,6 +9231,35 @@ function EventCard({
 
     window.setTimeout(() => setIsEventOpen(true), 0);
   }, [focusToken]);
+
+  useEffect(() => {
+    if (!isDeleteArmed) {
+      return;
+    }
+
+    function cancelDelete(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        deleteButtonRef.current?.contains(event.target)
+      ) {
+        return;
+      }
+
+      setIsDeleteArmed(false);
+    }
+
+    window.addEventListener("pointerdown", cancelDelete);
+    return () => window.removeEventListener("pointerdown", cancelDelete);
+  }, [isDeleteArmed]);
+
+  function handleDeleteEvent() {
+    if (!isDeleteArmed) {
+      setIsDeleteArmed(true);
+      return;
+    }
+
+    onDelete(entry.id);
+  }
 
   function selectLocation(locationId: string) {
     const location = locations.find((candidate) => candidate.id === locationId);
@@ -9088,7 +9320,7 @@ function EventCard({
   }
 
   return (
-    <article className="event-card" ref={refCallback}>
+    <article className="event-card module-accent-thin module-accent-events" ref={refCallback}>
       <div className="event-card-header">
         <div className="event-card-main">
           {entry.posterUrl ? (
@@ -9127,7 +9359,10 @@ function EventCard({
           aria-expanded={isEventOpen}
           aria-label={isEventOpen ? "Hide event details" : "Show event details"}
           className="campaign-toggle"
-          onClick={() => setIsEventOpen((current) => !current)}
+          onClick={() => {
+            setIsEventOpen((current) => !current);
+            setIsDeleteArmed(false);
+          }}
           type="button"
         >
           <ChevronDown size={20} aria-hidden />
@@ -9139,6 +9374,31 @@ function EventCard({
         hidden={!isEventOpen}
         id={`${entry.id}-event-details`}
       >
+        <div className="event-budget-section">
+          <strong>Budget</strong>
+          <div className="event-budget-lines">
+            {eventBudgetLines.map((line, index) => (
+              <EventBudgetLineRow
+                defaultSign={index === 0 ? "positive" : "negative"}
+                key={line.id}
+                line={line}
+                onDelete={deleteEventBudgetLine}
+                onUpdate={updateEventBudgetLine}
+                showBucket
+                showSignToggle
+              />
+            ))}
+          </div>
+          <button
+            className="add-campaign-task-button production-budget-add-button"
+            onClick={addEventBudgetLine}
+            type="button"
+          >
+            <Plus size={16} aria-hidden />
+            Add new budget line
+          </button>
+        </div>
+
         <div className="event-poster-section">
           <label>
             Poster image URL
@@ -9228,48 +9488,16 @@ function EventCard({
           </label>
         </div>
 
-        <div className="event-budget-section">
-          <strong>Budget</strong>
-          <div className="event-budget-lines">
-            {eventBudgetLines.map((line, index) => (
-              <EventBudgetLineRow
-                defaultSign={index === 0 ? "positive" : "negative"}
-                key={line.id}
-                line={line}
-                onDelete={deleteEventBudgetLine}
-                onUpdate={updateEventBudgetLine}
-                showBucket
-                showSignToggle
-              />
-            ))}
-          </div>
-          <button
-            className="add-campaign-task-button production-budget-add-button"
-            onClick={addEventBudgetLine}
-            type="button"
-          >
-            <Plus size={16} aria-hidden />
-            Add new budget line
-          </button>
-        </div>
-
         <div className="event-danger-zone">
-          <label>
-            <input
-              checked={isDeleteConfirmed}
-              onChange={(event) => setIsDeleteConfirmed(event.target.checked)}
-              type="checkbox"
-            />
-            Enable delete for this event
-          </label>
           <button
-            className="delete-campaign-button"
-            disabled={!isDeleteConfirmed}
-            onClick={() => onDelete(entry.id)}
+            aria-label={isDeleteArmed ? `Confirm delete ${entry.name}` : `Delete ${entry.name}`}
+            className={`event-delete-button${isDeleteArmed ? " is-armed" : ""}`}
+            onClick={handleDeleteEvent}
+            ref={deleteButtonRef}
             type="button"
           >
             <Trash2 size={15} aria-hidden />
-            Delete event
+            {isDeleteArmed ? "Delete?" : "Delete event"}
           </button>
         </div>
       </div>
@@ -9422,6 +9650,10 @@ function BudgetView({
     () => getBudgetMonthlyIncomeSpend(entries),
     [entries]
   );
+  const budgetEntriesById = useMemo(
+    () => new Map(entries.map((entry) => [entry.id, entry])),
+    [entries]
+  );
   const [isHistoricalLedgerOpen, setIsHistoricalLedgerOpen] = useState(false);
   const [isMoreAnalyticsOpen, setIsMoreAnalyticsOpen] = useState(false);
   const [pendingEntryFocusId, setPendingEntryFocusId] = useState<string | null>(
@@ -9509,31 +9741,31 @@ function BudgetView({
       </header>
 
       <section className="budget-summary-grid" aria-label="Budget summary">
-        <article className="metric-card budget-metric-card">
+        <article className="metric-card budget-metric-card module-accent-thin module-accent-budget">
           <span>Total earned</span>
           <strong className="amount-positive">{formatCurrency(summary.totalEarned)}</strong>
         </article>
-        <article className="metric-card budget-metric-card">
+        <article className="metric-card budget-metric-card module-accent-thin module-accent-budget">
           <span>Total spent</span>
           <strong className="amount-expense">{formatSpentCurrency(summary.totalSpent)}</strong>
         </article>
-        <article className="metric-card budget-metric-card">
+        <article className="metric-card budget-metric-card module-accent-thin module-accent-budget">
           <span>Current Balance</span>
           <strong className={getAmountToneClass(summary.balance)}>
             {formatCurrency(summary.balance)}
           </strong>
         </article>
-        <article className="metric-card budget-metric-card">
+        <article className="metric-card budget-metric-card module-accent-thin module-accent-budget">
           <span>Projected earn month ahead</span>
           <strong className="amount-positive">{formatCurrency(summary.potentialEarn)}</strong>
         </article>
-        <article className="metric-card budget-metric-card">
+        <article className="metric-card budget-metric-card module-accent-thin module-accent-budget">
           <span>Projected spend month ahead</span>
           <strong className="amount-expense">
             {formatSpentCurrency(summary.upcomingSpend)}
           </strong>
         </article>
-        <article className="metric-card budget-metric-card">
+        <article className="metric-card budget-metric-card module-accent-thin module-accent-budget">
           <span>Projected balance month ahead</span>
           <strong className={getAmountToneClass(summary.upcomingBalance)}>
             {formatCurrency(summary.upcomingBalance)}
@@ -9544,7 +9776,7 @@ function BudgetView({
       <section className="budget-more-analytics" aria-label="More budget analytics">
         <button
           aria-expanded={isMoreAnalyticsOpen}
-          className="budget-more-analytics-button"
+          className="budget-more-analytics-button module-accent module-accent-budget"
           onClick={() => setIsMoreAnalyticsOpen((current) => !current)}
           type="button"
         >
@@ -9554,7 +9786,7 @@ function BudgetView({
         <div className="budget-more-analytics-panel" hidden={!isMoreAnalyticsOpen}>
           <section className="budget-bucket-grid" aria-label="Budget source buckets">
             {budgetSummaryBucketOptions.map((bucket) => (
-              <article className="metric-card budget-metric-card" key={`${bucket.value}-history`}>
+              <article className="metric-card budget-metric-card module-accent-thin module-accent-budget" key={`${bucket.value}-history`}>
                 <span>{bucket.label} since start</span>
                 <strong
                   className={getBudgetBucketToneClass(
@@ -9567,7 +9799,7 @@ function BudgetView({
               </article>
             ))}
             {budgetSummaryBucketOptions.map((bucket) => (
-              <article className="metric-card budget-metric-card" key={`${bucket.value}-upcoming`}>
+              <article className="metric-card budget-metric-card module-accent-thin module-accent-budget" key={`${bucket.value}-upcoming`}>
                 <span>{bucket.label} month ahead</span>
                 <strong
                   className={getBudgetBucketToneClass(
@@ -9581,14 +9813,14 @@ function BudgetView({
             ))}
           </section>
           <section className="budget-graph-placeholder-grid" aria-label="Future budget graphs">
-            <article className="budget-graph-placeholder">
+            <article className="budget-graph-placeholder module-accent-thin module-accent-budget">
               <span className="budget-graph-title-with-legend">
                 <i className="budget-legend-square budget-legend-square-income" aria-hidden />
                 Cashflow evolution
               </span>
               <BudgetCashflowChart points={cashflowPoints} />
             </article>
-            <article className="budget-graph-placeholder">
+            <article className="budget-graph-placeholder module-accent-thin module-accent-budget">
               <span className="budget-graph-title-with-legend">
                 <i className="budget-legend-square budget-legend-square-income" aria-hidden />
                 Income vs
@@ -9601,7 +9833,7 @@ function BudgetView({
         </div>
       </section>
 
-      <section className="budget-ledger panel" aria-label="Budget ledger">
+      <section className="budget-ledger panel module-accent module-accent-budget" aria-label="Budget ledger">
         <div className="budget-ledger-header">
           <div>
             <p className="eyebrow">Ledger</p>
@@ -9628,6 +9860,7 @@ function BudgetView({
           </div>
           <BudgetLedgerTable
             activeSort={ledgerSort}
+            entriesById={budgetEntriesById}
             entries={upcomingEntries}
             emptyMessage="No upcoming budget lines."
             onDeleteEntry={onDeleteEntry}
@@ -9648,24 +9881,24 @@ function BudgetView({
             <small>{historicalEntries.length} historical lines</small>
             <ChevronDown size={20} aria-hidden />
           </button>
-          <div
-            className="budget-historical-ledger-panel"
-            hidden={!isHistoricalLedgerOpen}
-          >
+          {isHistoricalLedgerOpen ? (
+            <div className="budget-historical-ledger-panel">
             <div className="budget-ledger-subheader">
               <span>Historical amounts</span>
               <small>{historicalEntries.length} lines</small>
             </div>
-            <BudgetLedgerTable
-              activeSort={ledgerSort}
-              entries={historicalEntries}
+              <BudgetLedgerTable
+                activeSort={ledgerSort}
+                entriesById={budgetEntriesById}
+                entries={historicalEntries}
               emptyMessage="No historical budget lines."
               onDeleteEntry={onDeleteEntry}
               onEntryChange={onEntryChange}
               onOpenEntrySource={onOpenEntrySource}
               onSort={updateLedgerSort}
-            />
-          </div>
+              />
+            </div>
+          ) : null}
         </div>
       </section>
     </>
@@ -9835,6 +10068,7 @@ function BudgetIncomeSpendChart({
 
 function BudgetLedgerTable({
   activeSort,
+  entriesById,
   emptyMessage,
   entries,
   onDeleteEntry,
@@ -9846,6 +10080,7 @@ function BudgetLedgerTable({
     direction: SortDirection;
     key: BudgetLedgerSortKey;
   };
+  entriesById: Map<string, BudgetEntry>;
   emptyMessage: string;
   entries: BudgetEntry[];
   onDeleteEntry: (entryId: string) => void;
@@ -9896,6 +10131,7 @@ function BudgetLedgerTable({
             entries.map((entry) => (
               <BudgetEntryRow
                 entry={entry}
+                entriesById={entriesById}
                 key={entry.id}
                 onDelete={onDeleteEntry}
                 onEntryChange={onEntryChange}
@@ -9968,11 +10204,13 @@ function getBudgetEntryElementId(entryId: string) {
 
 function BudgetEntryRow({
   entry,
+  entriesById,
   onDelete,
   onEntryChange,
   onOpenSource
 }: {
   entry: BudgetEntry;
+  entriesById: Map<string, BudgetEntry>;
   onDelete: (entryId: string) => void;
   onEntryChange: (entryId: string, updates: Partial<BudgetEntry>) => void;
   onOpenSource: (entry: BudgetEntry) => void;
@@ -9990,6 +10228,7 @@ function BudgetEntryRow({
   const isAutoRecurringEntry = Boolean(entry.generated && entry.sourceRecurringEntryId);
   const generatedSourceLabel = getBudgetGeneratedSourceLabel(entry);
   const canUseLedgerActions = canDeleteBudgetEntryFromLedger(entry);
+  const stripeFamily = getBudgetRowStripeFamily(entry, entriesById);
 
   useEffect(() => {
     const input = descriptionInputRef.current;
@@ -10050,13 +10289,17 @@ function BudgetEntryRow({
   return (
     <>
     <tr
-      className={
-        entry.generated
-          ? "budget-generated-row"
-          : isRecurringEntry
-            ? "budget-recurring-parent-row"
-            : undefined
-      }
+      className={[
+        "budget-ledger-row",
+        `budget-ledger-row-${stripeFamily}`,
+        isRecurringEntry
+          ? "budget-ledger-row-recurring"
+          : "budget-ledger-row-one-off",
+        entry.generated ? "budget-generated-row" : "",
+        isRecurringEntry ? "budget-recurring-parent-row" : ""
+      ]
+        .filter(Boolean)
+        .join(" ")}
       id={getBudgetEntryElementId(entry.id)}
     >
       <td className="budget-date-cell" data-label="Date">
@@ -10265,7 +10508,9 @@ function BudgetEntryRow({
       </td>
     </tr>
     {isRecurringEntry && !isAutoRecurringEntry ? (
-      <tr className="budget-recurring-detail-row">
+      <tr
+        className={`budget-recurring-detail-row budget-ledger-row budget-ledger-row-${stripeFamily} budget-ledger-row-recurring`}
+      >
         <td className="budget-date-cell">
           <input
             aria-label={`${entry.description} payment plan end date`}
@@ -10409,7 +10654,7 @@ function ProductionSongBoard({
   const [isReleaseDateEditing, setIsReleaseDateEditing] = useState(false);
   const [isSongOpen, setIsSongOpen] = useState(false);
   const [isSongTitleEditorOpen, setIsSongTitleEditorOpen] = useState(false);
-  const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
+  const [isSongDeleteArmed, setIsSongDeleteArmed] = useState(false);
   const releaseDate = parseCampaignDate(appliedDeadlineInput);
   const releaseDateDisplay = releaseDate ? formatCampaignDate(releaseDate) : null;
   const productionDeadlineDate = releaseDate ? addUtcDays(releaseDate, -14) : null;
@@ -10486,6 +10731,26 @@ function ProductionSongBoard({
     return () => window.removeEventListener("pointerdown", cancelReleaseDateEdit);
   }, [appliedDeadlineInput, isReleaseDateEditing]);
 
+  useEffect(() => {
+    if (!isSongDeleteArmed) {
+      return;
+    }
+
+    function cancelSongDelete(event: PointerEvent) {
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-production-song-delete-control]")
+      ) {
+        return;
+      }
+
+      setIsSongDeleteArmed(false);
+    }
+
+    document.addEventListener("pointerdown", cancelSongDelete);
+    return () => document.removeEventListener("pointerdown", cancelSongDelete);
+  }, [isSongDeleteArmed]);
+
   function saveSongTitle() {
     if (!canSaveSongTitle) {
       return;
@@ -10515,6 +10780,21 @@ function ProductionSongBoard({
   function beginDeadlineEdit() {
     setDeadlineInput(appliedDeadlineInput);
     setIsReleaseDateEditing(true);
+  }
+
+  function toggleSongDetails() {
+    setIsSongDeleteArmed(false);
+    setIsSongOpen((current) => !current);
+  }
+
+  function requestSongDelete() {
+    if (!isSongDeleteArmed) {
+      setIsSongDeleteArmed(true);
+      return;
+    }
+
+    setIsSongDeleteArmed(false);
+    onDelete(song.id);
   }
 
   function updateSteps(updater: (currentSteps: ProductionStep[]) => ProductionStep[]) {
@@ -10633,7 +10913,7 @@ function ProductionSongBoard({
 
   return (
     <section
-      className={`campaign-board production-song-board${
+      className={`campaign-board production-song-board module-accent module-accent-production${
         isFocusHighlighted ? " production-song-board-focused" : ""
       }`}
       aria-label={`${songTitle} production plan`}
@@ -10675,7 +10955,7 @@ function ProductionSongBoard({
           aria-expanded={isSongOpen}
           aria-label={isSongOpen ? "Hide production details" : "Show production details"}
           className="campaign-toggle"
-          onClick={() => setIsSongOpen((current) => !current)}
+          onClick={toggleSongDetails}
           type="button"
         >
           <ChevronDown size={20} aria-hidden />
@@ -10818,24 +11098,16 @@ function ProductionSongBoard({
                 ))}
               </select>
             </label>
-            <label>
-              <input
-                checked={isDeleteConfirmed}
-                onChange={(event) =>
-                  setIsDeleteConfirmed(event.target.checked)
-                }
-                type="checkbox"
-              />
-              Enable delete for this song
-            </label>
             <button
-              className="delete-campaign-button"
-              disabled={!isDeleteConfirmed}
-              onClick={() => onDelete(song.id)}
+              className={`delete-campaign-button production-song-delete-button${
+                isSongDeleteArmed ? " is-armed" : ""
+              }`}
+              data-production-song-delete-control
+              onClick={requestSongDelete}
               type="button"
             >
               <Trash2 size={15} aria-hidden />
-              Delete song
+              {isSongDeleteArmed ? "Confirm delete" : "Delete song"}
             </button>
           </div>
         </details>
@@ -10938,6 +11210,9 @@ function ProductionStepRow({
   const canDeleteStep =
     !step.isDefaultStep ||
     deletableProductionStepLabels.has(step.label.trim().toLowerCase());
+  const formattedDeadline = formatCampaignDateKey(
+    formatInputDateForDatabase(step.deadline) ?? ""
+  );
   const [isDeleteArmed, setIsDeleteArmed] = useState(false);
   const deleteButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -10971,13 +11246,12 @@ function ProductionStepRow({
   }
 
   return (
-    <tr id={getProductionStepElementId(songId, step.id)}>
+    <tr className="production-step-row" id={getProductionStepElementId(songId, step.id)}>
       <td className="production-step-content-cell" colSpan={2}>
         <div className="campaign-cell">
           <div className="production-step-details-section">
             <div className="production-step-task-row">
               <label className="clip-name-field">
-                <span>Production step</span>
                 <input
                   aria-label={`${step.label} production step name`}
                   disabled={step.isDefaultStep}
@@ -11004,24 +11278,19 @@ function ProductionStepRow({
               </select>
             </div>
             <label className="clip-name-field production-step-notes-field">
-              <strong>Notes</strong>
               <input
                 aria-label={`${step.label} notes`}
                 onChange={(event) =>
                   onStepChange(step.id, { notes: event.target.value })
                 }
+                placeholder="Take a note"
                 value={step.notes}
               />
             </label>
           </div>
           <div className="production-step-deadline-section">
-            <strong>Deadline</strong>
+            <strong>{formattedDeadline ? `Deadline, ${formattedDeadline}` : "Deadline"}</strong>
             <label className="production-step-date-field">
-              <span>
-                {formatCampaignDateKey(
-                  formatInputDateForDatabase(step.deadline) ?? ""
-                )}
-              </span>
               <input
                 aria-label={`${step.label} deadline`}
                 inputMode="numeric"
@@ -11751,7 +12020,7 @@ function MarketingCampaignBoard({
   );
   const [isCampaignOpen, setIsCampaignOpen] = useState(false);
   const [isFocusHighlighted, setIsFocusHighlighted] = useState(false);
-  const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
+  const [isCampaignDeleteArmed, setIsCampaignDeleteArmed] = useState(false);
   const [isBudgetDeleteArmed, setIsBudgetDeleteArmed] = useState(false);
   const [armedCampaignDayNumber, setArmedCampaignDayNumber] = useState<
     number | null
@@ -11895,6 +12164,26 @@ function MarketingCampaignBoard({
     window.addEventListener("pointerdown", cancelBudgetDelete);
     return () => window.removeEventListener("pointerdown", cancelBudgetDelete);
   }, [isBudgetDeleteArmed]);
+
+  useEffect(() => {
+    if (!isCampaignDeleteArmed) {
+      return;
+    }
+
+    function cancelCampaignDelete(event: PointerEvent) {
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-marketing-campaign-delete-control]")
+      ) {
+        return;
+      }
+
+      setIsCampaignDeleteArmed(false);
+    }
+
+    document.addEventListener("pointerdown", cancelCampaignDelete);
+    return () => document.removeEventListener("pointerdown", cancelCampaignDelete);
+  }, [isCampaignDeleteArmed]);
 
   useEffect(() => {
     if (armedCampaignDayNumber === null) {
@@ -12063,6 +12352,7 @@ function MarketingCampaignBoard({
   }
 
   function toggleCampaignDetails() {
+    setIsCampaignDeleteArmed(false);
     setIsCampaignOpen((current) => {
       const nextIsOpen = !current;
 
@@ -12402,6 +12692,16 @@ function MarketingCampaignBoard({
     deleteCampaignDay(dayNumber);
   }
 
+  function requestCampaignDelete() {
+    if (!isCampaignDeleteArmed) {
+      setIsCampaignDeleteArmed(true);
+      return;
+    }
+
+    setIsCampaignDeleteArmed(false);
+    onDelete(campaign.id);
+  }
+
   function resetGeneralCampaignOptions() {
     setGeneralTitleInput(appliedGeneralTitleInput);
     setGeneralAlbumArtUrlInput(appliedGeneralAlbumArtUrlInput);
@@ -12410,7 +12710,7 @@ function MarketingCampaignBoard({
     setIsGeneralSettingsEditing(false);
     setIsBudgetDeleteArmed(false);
     setArmedCampaignDayNumber(null);
-    setIsDeleteConfirmed(false);
+    setIsCampaignDeleteArmed(false);
   }
 
   const campaignBudgetSection = (
@@ -12460,7 +12760,7 @@ function MarketingCampaignBoard({
 
   return (
       <section
-        className={`campaign-board marketing-campaign-board${
+        className={`campaign-board marketing-campaign-board module-accent module-accent-marketing${
           isFocusHighlighted ? " production-song-board-focused" : ""
         }`}
         aria-label={`${displayedCampaignTitle} marketing campaign`}
@@ -12629,26 +12929,17 @@ function MarketingCampaignBoard({
                   />
                   Show progress bar
                 </label>
-                {campaignBudgetSection}
                 <div className="campaign-delete-controls">
-                  <label>
-                    <input
-                      checked={isDeleteConfirmed}
-                      onChange={(event) =>
-                        setIsDeleteConfirmed(event.target.checked)
-                      }
-                      type="checkbox"
-                    />
-                    Enable delete for this campaign
-                  </label>
                   <button
-                    className="delete-campaign-button"
-                    disabled={!isDeleteConfirmed}
-                    onClick={() => onDelete(campaign.id)}
+                    className={`delete-campaign-button marketing-campaign-delete-button${
+                      isCampaignDeleteArmed ? " is-armed" : ""
+                    }`}
+                    data-marketing-campaign-delete-control
+                    onClick={requestCampaignDelete}
                     type="button"
                   >
                     <Trash2 size={15} aria-hidden />
-                    Delete campaign
+                    {isCampaignDeleteArmed ? "Confirm delete" : "Delete campaign"}
                   </button>
                 </div>
               </section>
@@ -12700,40 +12991,26 @@ function MarketingCampaignBoard({
                     </span>
                   ) : null}
                 </label>
-                <label>
-                  <input
-                    checked={isDeleteConfirmed}
-                    onChange={(event) =>
-                      setIsDeleteConfirmed(event.target.checked)
-                    }
-                    type="checkbox"
-                  />
-                  Enable delete for this campaign
-                </label>
                 <button
-                  className="delete-campaign-button"
-                  disabled={!isDeleteConfirmed}
-                  onClick={() => onDelete(campaign.id)}
+                  className={`delete-campaign-button marketing-campaign-delete-button${
+                    isCampaignDeleteArmed ? " is-armed" : ""
+                  }`}
+                  data-marketing-campaign-delete-control
+                  onClick={requestCampaignDelete}
                   type="button"
                 >
                   <Trash2 size={15} aria-hidden />
-                  Delete campaign
+                  {isCampaignDeleteArmed ? "Confirm delete" : "Delete campaign"}
                 </button>
               </div>
             </details>
           ) : null}
-          {!isGeneralCampaign ? campaignBudgetSection : null}
+          {campaignBudgetSection}
           <div className="campaign-table-wrap">
             <table className="campaign-table">
-              <thead>
-                <tr>
-                  <th scope="col">Date</th>
-                  <th scope="col">Campaign tasks</th>
-                </tr>
-              </thead>
               <tbody>
                 {campaignDays.map((day) => (
-                  <tr
+                  <tr className="marketing-campaign-day-row"
                     id={getMarketingCampaignDayElementId(campaign.id, day.dayNumber)}
                     key={day.dayNumber}
                   >
@@ -13014,10 +13291,12 @@ function ExtraCampaignTaskRow({
   return (
     <div className="extra-campaign-task" id={elementId}>
       <label className="extra-campaign-task-name">
-        <span>
-          <StatusDot status={task.status} label={statusLabels[task.status]} />
-          Extra task
-        </span>
+        {dayNumber === 0 ? null : (
+          <span>
+            <StatusDot status={task.status} label={statusLabels[task.status]} />
+            Extra task
+          </span>
+        )}
         <input
           aria-label={`Extra task name ${task.id}`}
           onChange={(event) =>
@@ -13401,7 +13680,7 @@ function DashboardCampaignPreview({
   productionSongs: ProductionSongConfig[];
 }) {
   return (
-    <section className="dashboard-campaigns" aria-label="Campaign preview">
+    <section className="dashboard-campaigns module-accent module-accent-marketing" aria-label="Campaign preview">
       <div className="dashboard-campaign-grid">
         <DashboardCampaignCard
           campaign={preview.benchmark}
@@ -13448,7 +13727,7 @@ function DashboardCampaignCard({
   if (!campaign) {
     return (
       <article
-        className={`dashboard-campaign-card dashboard-campaign-card-empty${
+        className={`dashboard-campaign-card module-accent module-accent-marketing dashboard-campaign-card-empty${
           label === "Next" ? " dashboard-campaign-card-empty-next" : ""
         }${
           label === "Current" ? " dashboard-campaign-card-empty-current" : ""
@@ -13479,8 +13758,8 @@ function DashboardCampaignCard({
     <article
       className={
         showTasks
-          ? "dashboard-campaign-card"
-          : "dashboard-campaign-card dashboard-campaign-card-compact"
+          ? "dashboard-campaign-card module-accent module-accent-marketing"
+          : "dashboard-campaign-card dashboard-campaign-card-compact module-accent module-accent-marketing"
       }
     >
       <div className="dashboard-campaign-card-header">
@@ -13550,7 +13829,7 @@ function DashboardNextEventCard({
 
   return (
     <section className="dashboard-latest-event" aria-label="Next event">
-      <article className="metric-card event-summary-card dashboard-event-card">
+      <article className="metric-card event-summary-card dashboard-event-card module-accent module-accent-events">
         <div className="event-summary-card-title">
           <MapPin size={18} aria-hidden />
           <span>Next event</span>
@@ -13660,10 +13939,19 @@ function DashboardFocusQueueCard({
     task.source === "Other" && task.id.startsWith("other-other-task-")
       ? task.id.replace(/^other-/, "")
       : null;
+  const isCompletedSegmentVisible =
+    isTaskListOpen && completedOtherTasks.length > 0 && showCompletedOtherTasks;
+  const mainSegmentClass = `fq-segment ${
+    isTaskListOpen ? "fq-segment-first" : "fq-segment-only"
+  }`;
+  const detailsSegmentClass = `fq-segment ${
+    isCompletedSegmentVisible ? "fq-segment-middle" : "fq-segment-last"
+  }`;
 
   return (
     <section className="dashboard-focus" aria-label="Focus queue">
-      <article className="dashboard-focus-card">
+      <article className="dashboard-focus-segments">
+        <div className={mainSegmentClass}>
         <div className="dashboard-focus-card-header">
           <Clock3 size={18} aria-hidden />
           <h2>Focus Queue</h2>
@@ -13829,8 +14117,9 @@ function DashboardFocusQueueCard({
             Other task
           </button>
         </div>
+        </div>
         {isTaskListOpen ? (
-          <div className="dashboard-other-tasks">
+          <div className={detailsSegmentClass}>
             <OtherTaskList
               editingTaskId={editingOtherTaskId}
               emptyText={
@@ -13854,18 +14143,20 @@ function DashboardFocusQueueCard({
                     ? "Hide completed other tasks"
                     : `Show completed other tasks (${completedOtherTasks.length})`}
                 </button>
-                {showCompletedOtherTasks ? (
-                  <OtherTaskList
-                    editingTaskId={editingOtherTaskId}
-                    emptyText=""
-                    onDeleteTask={onDeleteOtherTask}
-                    onEditTask={setEditingOtherTaskId}
-                    onTaskChange={onOtherTaskChange}
-                    tasks={completedOtherTasks}
-                  />
-                ) : null}
               </>
             ) : null}
+          </div>
+        ) : null}
+        {isCompletedSegmentVisible ? (
+          <div className="fq-segment fq-segment-last">
+            <OtherTaskList
+              editingTaskId={editingOtherTaskId}
+              emptyText=""
+              onDeleteTask={onDeleteOtherTask}
+              onEditTask={setEditingOtherTaskId}
+              onTaskChange={onOtherTaskChange}
+              tasks={completedOtherTasks}
+            />
           </div>
         ) : null}
       </article>
@@ -13998,6 +14289,19 @@ const OtherTaskEditor = forwardRef<HTMLDivElement, {
   onTaskChange,
   task
 }, ref) {
+  const [isDeleteArmed, setIsDeleteArmed] = useState(false);
+  const deleteRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!isDeleteArmed) return;
+    function cancelDelete(event: PointerEvent) {
+      if (event.target instanceof Node && deleteRef.current?.contains(event.target)) return;
+      setIsDeleteArmed(false);
+    }
+    document.addEventListener("pointerdown", cancelDelete);
+    return () => document.removeEventListener("pointerdown", cancelDelete);
+  }, [isDeleteArmed]);
+
   return (
     <div className="dashboard-other-task-editor" ref={ref}>
       <label>
@@ -14050,10 +14354,11 @@ const OtherTaskEditor = forwardRef<HTMLDivElement, {
       </label>
       <div className="dashboard-other-task-editor-actions">
         <button
-          aria-label={`Delete ${task.title || "other task"}`}
-          className="icon-button danger ghost dashboard-other-task-delete"
-          onClick={() => onDeleteTask(task.id)}
-          title="Delete task"
+          aria-label={isDeleteArmed ? `Confirm delete ${task.title || "other task"}` : `Delete ${task.title || "other task"}`}
+          className={`icon-button danger ghost dashboard-other-task-delete${isDeleteArmed ? " is-armed" : ""}`}
+          onClick={() => isDeleteArmed ? onDeleteTask(task.id) : setIsDeleteArmed(true)}
+          ref={deleteRef}
+          title={isDeleteArmed ? "Confirm delete" : "Delete task"}
           type="button"
         >
           <Trash2 size={16} aria-hidden />
@@ -14084,7 +14389,7 @@ function DashboardProductionPreview({
   preview: ReturnType<typeof getDashboardProductionPreview>;
 }) {
   return (
-    <section className="dashboard-production" aria-label="Production preview">
+    <section className="dashboard-production module-accent module-accent-production" aria-label="Production preview">
       <div className="dashboard-production-grid">
         <DashboardProductionCard
           compact
@@ -14205,7 +14510,7 @@ function DashboardBudgetPreview({
   summary: ReturnType<typeof getBudgetSummary>;
 }) {
   return (
-    <section className="dashboard-budget" aria-label="Budget preview">
+    <section className="dashboard-budget module-accent module-accent-budget" aria-label="Budget preview">
       <div className="dashboard-budget-grid">
         <article className="metric-card budget-metric-card dashboard-budget-current">
           <span>Current balance</span>
@@ -14249,7 +14554,7 @@ function DashboardRoadmapPhasePreview({
 
   return (
     <section className="dashboard-roadmap" aria-label="Roadmap phase preview">
-      <article className={`roadmap-phase-card roadmap-phase-${phase.accent}`}>
+      <article className="roadmap-phase-card module-accent module-accent-roadmap">
         <div className="roadmap-phase-heading">
           <div className="roadmap-phase-kicker-row">
             <p className="eyebrow">Phase {phase.phaseNumber}</p>
@@ -14613,28 +14918,26 @@ function QrCodeLinksSection({
   onLinkChange: (linkId: string, updates: Partial<QrCodeLink>) => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [deleteConfirmations, setDeleteConfirmations] = useState<
-    Record<string, boolean>
-  >({});
+  const [expandedLinkIds, setExpandedLinkIds] = useState<Record<string, boolean>>({});
+  const [armedDeleteLinkId, setArmedDeleteLinkId] = useState<string | null>(null);
 
-  function setDeleteConfirmation(linkId: string, checked: boolean) {
-    setDeleteConfirmations((currentConfirmations) => ({
-      ...currentConfirmations,
-      [linkId]: checked
-    }));
-  }
+  useEffect(() => {
+    if (!armedDeleteLinkId) return;
+    function cancelDelete(event: PointerEvent) {
+      if (event.target instanceof Element && event.target.closest("[data-qr-delete-control]")) return;
+      setArmedDeleteLinkId(null);
+    }
+    document.addEventListener("pointerdown", cancelDelete);
+    return () => document.removeEventListener("pointerdown", cancelDelete);
+  }, [armedDeleteLinkId]);
 
   function deleteLink(linkId: string) {
     onDeleteLink(linkId);
-    setDeleteConfirmations((currentConfirmations) => {
-      const nextConfirmations = { ...currentConfirmations };
-      delete nextConfirmations[linkId];
-      return nextConfirmations;
-    });
+    setArmedDeleteLinkId(null);
   }
 
   return (
-    <section className="qr-links-section" aria-label="QR code links">
+    <section className="qr-links-section module-accent module-accent-platforms" aria-label="QR code links">
       <button
         aria-expanded={isOpen}
         className="qr-links-toggle"
@@ -14652,10 +14955,21 @@ function QrCodeLinksSection({
         <div className="qr-links-panel">
           <div className="qr-links-grid">
             {links.map((link) => {
-              const canDelete = Boolean(deleteConfirmations[link.id]);
+              const isExpanded = Boolean(expandedLinkIds[link.id]);
+              const isDeleteArmed = armedDeleteLinkId === link.id;
+              const QrIcon = getQrLinkIcon(link.name);
 
               return (
-                <article className="qr-link-card" key={link.id}>
+                <article className="qr-link-card module-accent-thin module-accent-platforms" key={link.id}>
+                  <button
+                    aria-expanded={isExpanded}
+                    className="qr-link-header"
+                    onClick={() => setExpandedLinkIds((current) => ({ ...current, [link.id]: !current[link.id] }))}
+                    type="button"
+                  >
+                    <span><QrIcon size={17} aria-hidden />{link.name || "QR code"}</span>
+                    <ChevronDown size={16} aria-hidden />
+                  </button>
                   {link.qrImageUrl ? (
                     <a
                       aria-label={`Open ${link.name || "QR code"} link`}
@@ -14672,6 +14986,7 @@ function QrCodeLinksSection({
                     </div>
                   )}
 
+                  {isExpanded ? <>
                   <div className="qr-link-fields">
                     <label>
                       Name
@@ -14709,39 +15024,39 @@ function QrCodeLinksSection({
                   </div>
 
                   <div className="qr-link-delete-row">
-                    <label>
-                      <input
-                        checked={canDelete}
-                        onChange={(event) =>
-                          setDeleteConfirmation(link.id, event.target.checked)
-                        }
-                        type="checkbox"
-                      />
-                      Confirm delete
-                    </label>
                     <button
-                      className="danger-action"
-                      disabled={!canDelete}
-                      onClick={() => deleteLink(link.id)}
+                      className={`danger-action qr-delete-button${isDeleteArmed ? " is-armed" : ""}`}
+                      data-qr-delete-control
+                      onClick={() => isDeleteArmed ? deleteLink(link.id) : setArmedDeleteLinkId(link.id)}
                       type="button"
                     >
                       <Trash2 size={14} aria-hidden />
-                      Delete
+                      {isDeleteArmed ? "Confirm delete" : "Delete"}
                     </button>
                   </div>
+                  </> : null}
                 </article>
               );
             })}
           </div>
 
-          <button className="add-task-button qr-add-button" onClick={onAddLink} type="button">
-            <Plus size={16} aria-hidden />
+          <button className="dashboard-other-add qr-add-button" onClick={onAddLink} type="button">
+            <Plus size={14} aria-hidden />
             Add QR code
           </button>
         </div>
       ) : null}
     </section>
   );
+}
+
+function getQrLinkIcon(name: string) {
+  const normalizedName = name.toLowerCase();
+  if (normalizedName.includes("instagram")) return Camera;
+  if (normalizedName.includes("youtube")) return Video;
+  if (normalizedName.includes("spotify") || normalizedName.includes("music")) return Headphones;
+  if (normalizedName.includes("dashboard")) return BarChart3;
+  return LinkIcon;
 }
 
 const instagramFollowerHistory: MetricTrendPoint[] = [
@@ -16133,7 +16448,7 @@ function PlatformStatsSection({
   variant: "dashboard" | "full";
 }) {
   return (
-    <section className="platform-section" aria-label={title}>
+    <section className={`platform-section${variant === "dashboard" ? " module-accent module-accent-platforms" : ""}`} aria-label={title}>
       {hideHeading ? null : (
         <div className="section-heading">
           <div>
@@ -16152,7 +16467,7 @@ function PlatformStatsSection({
 
           return (
             <article
-              className={`platform-card platform-card-${platform.slug}`}
+              className={`platform-card platform-card-${platform.slug}${variant === "full" ? " module-accent module-accent-platforms" : ""}`}
               id={`platform-card-${platform.slug}`}
               key={platform.platform}
             >
@@ -16215,7 +16530,19 @@ function PlatformStatsSection({
                       </div>
                     );
                   })}
+                {platform.slug === "spotify" && variant === "dashboard" ? (
+                  <div className="platform-metric-row platform-info-note">
+                    <strong>Historical / manually maintained data</strong>
+                    <span>Automatic Spotify API updates are in development.</span>
+                  </div>
+                ) : null}
               </dl>
+              {platform.slug === "spotify" && variant !== "dashboard" ? (
+                <p className="platform-info-note">
+                  <strong>Historical / manually maintained data</strong>
+                  <span>Automatic Spotify API updates are in development.</span>
+                </p>
+              ) : null}
               {cardAddon}
             </article>
           );
@@ -16228,6 +16555,7 @@ function PlatformStatsSection({
 function RoadmapView({
   campaigns,
   onCreatePhase,
+  onDeletePhase,
   onOpenMarketing,
   onOpenProduction,
   onSavePhase,
@@ -16237,6 +16565,7 @@ function RoadmapView({
 }: {
   campaigns: MarketingCampaignConfig[];
   onCreatePhase: () => Promise<void>;
+  onDeletePhase: (phaseId: string) => Promise<void>;
   onOpenMarketing: (song: ProductionSongConfig) => void;
   onOpenProduction: (songId: string) => void;
   onSavePhase: (phase: RoadmapPhase) => Promise<void>;
@@ -16261,7 +16590,7 @@ function RoadmapView({
         <ModuleHeaderDate />
       </header>
 
-      {firstPhase && lastPhase ? <section className="roadmap-overview panel" aria-label="General roadmap progress">
+      {firstPhase && lastPhase ? <section className="roadmap-overview panel module-accent module-accent-roadmap" aria-label="General roadmap progress">
         <div className="roadmap-overview-header">
           <p className="eyebrow">General Roadmap Progress</p>
           <div className="roadmap-overview-summary">
@@ -16272,7 +16601,7 @@ function RoadmapView({
           </div>
         </div>
 
-        <RoadmapMonthStrip months={months} />
+        <RoadmapMonthStrip months={months} phases={phases} />
         <div className="roadmap-overview-toggle-row">
           <button
             aria-expanded={openCardId === "general"}
@@ -16297,7 +16626,7 @@ function RoadmapView({
           />
         ) : null}
       </section> : (
-        <section className="roadmap-overview panel" aria-label="General roadmap progress">
+        <section className="roadmap-overview panel module-accent module-accent-roadmap" aria-label="General roadmap progress">
           <p className="eyebrow">General Roadmap Progress</p>
           <h2>No roadmap phases yet.</h2>
           <p>Create a phase when this workspace is ready to plan its release roadmap.</p>
@@ -16313,7 +16642,7 @@ function RoadmapView({
 
           return (
             <article
-              className={`roadmap-phase-card roadmap-phase-${phase.accent}`}
+              className="roadmap-phase-card module-accent module-accent-roadmap"
               key={phase.id}
             >
               <div className="roadmap-phase-heading">
@@ -16364,7 +16693,15 @@ function RoadmapView({
                     Phase settings
                   </button>
                   {settingsPhaseId === phase.id ? (
-                    <RoadmapPhaseSettings phase={phase} onSave={onSavePhase} />
+                    <RoadmapPhaseSettings
+                      onDelete={async (phaseId) => {
+                        await onDeletePhase(phaseId);
+                        setOpenCardId(null);
+                        setSettingsPhaseId(null);
+                      }}
+                      phase={phase}
+                      onSave={onSavePhase}
+                    />
                   ) : null}
                 </>
               ) : null}
@@ -16380,7 +16717,7 @@ function RoadmapView({
   );
 }
 
-function RoadmapMonthStrip({ months }: { months: RoadmapMonth[] }) {
+function RoadmapMonthStrip({ months, phases }: { months: RoadmapMonth[]; phases: RoadmapPhase[] }) {
   const currentMonthKey = getViennaDateKey().slice(0, 7);
   const phaseMonthGroups = months.reduce<Array<{
     months: RoadmapMonth[];
@@ -16400,10 +16737,10 @@ function RoadmapMonthStrip({ months }: { months: RoadmapMonth[] }) {
   return (
     <div className="roadmap-month-strip">
       {phaseMonthGroups.map((group) => (
-        <div
-          className="roadmap-month-phase-row"
-          key={`roadmap-month-phase-${group.phase}`}
-        >
+        <div className="roadmap-month-phase-row" key={`roadmap-month-phase-${group.phase}`}>
+          <p className="roadmap-month-phase-label">
+            Phase {group.phase}{phases.find((phase) => phase.phaseNumber === group.phase) ? ` — ${phases.find((phase) => phase.phaseNumber === group.phase)?.title}` : ""}
+          </p>
           {group.months.map((month) => {
             const status = getRoadmapMonthStatus(month);
 
@@ -16577,14 +16914,18 @@ function getRoadmapMarketingCampaign(
 }
 
 function RoadmapPhaseSettings({
+  onDelete,
   onSave,
   phase
 }: {
+  onDelete: (phaseId: string) => Promise<void>;
   onSave: (phase: RoadmapPhase) => Promise<void>;
   phase: RoadmapPhase;
 }) {
   const [draft, setDraft] = useState(phase);
+  const [isDeleteArmed, setIsDeleteArmed] = useState(false);
   const [saveStatus, setSaveStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
   const canSave = Boolean(
     draft.title.trim() &&
     /^\d{4}-\d{2}$/.test(draft.startMonth) &&
@@ -16606,8 +16947,47 @@ function RoadmapPhaseSettings({
     }
   }
 
+  useEffect(() => {
+    if (!isDeleteArmed) {
+      return;
+    }
+
+    function cancelDelete(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        deleteButtonRef.current?.contains(event.target)
+      ) {
+        return;
+      }
+
+      setIsDeleteArmed(false);
+    }
+
+    window.addEventListener("pointerdown", cancelDelete);
+    return () => window.removeEventListener("pointerdown", cancelDelete);
+  }, [isDeleteArmed]);
+
+  async function deletePhase() {
+    if (!isDeleteArmed) {
+      setIsDeleteArmed(true);
+      return;
+    }
+
+    setSaveStatus({ message: "Deleting phase...", state: "loading" });
+    try {
+      await onDelete(phase.id);
+    } catch (error) {
+      setSaveStatus({
+        message: error instanceof Error ? error.message : "Phase deletion failed.",
+        state: "error"
+      });
+      setIsDeleteArmed(false);
+    }
+  }
+
   return (
-    <section className="roadmap-phase-settings" aria-label={`Phase ${phase.phaseNumber} settings`}>
+    <section className="roadmap-phase-settings module-accent-thin module-accent-roadmap" aria-label={`Phase ${phase.phaseNumber} settings`}>
+      <p className="object-settings-label">Phase settings</p>
       <label>
         <span>Phase name</span>
         <input
@@ -16646,6 +17026,20 @@ function RoadmapPhaseSettings({
         <button disabled={!canSave} onClick={() => void saveSettings()} type="button">
           <Save size={15} aria-hidden />
           Save phase
+        </button>
+        <button
+          aria-label={
+            isDeleteArmed
+              ? `Confirm delete Phase ${phase.phaseNumber}`
+              : `Delete Phase ${phase.phaseNumber}`
+          }
+          className={`roadmap-phase-delete-button${isDeleteArmed ? " is-armed" : ""}`}
+          onClick={() => void deletePhase()}
+          ref={deleteButtonRef}
+          type="button"
+        >
+          <Trash2 size={15} aria-hidden />
+          {isDeleteArmed ? "Confirm delete" : "Delete phase"}
         </button>
       </div>
     </section>
@@ -16715,7 +17109,7 @@ function RoadmapSongRow({
   }
 
   return (
-    <div className="roadmap-song-row">
+    <div className="roadmap-song-row module-accent-thin module-accent-roadmap">
       <div className="roadmap-song-identity">
         <strong>{song.title}</strong>
         <button

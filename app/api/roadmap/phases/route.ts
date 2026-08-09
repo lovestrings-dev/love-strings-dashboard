@@ -94,6 +94,37 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
+export async function DELETE(request: NextRequest) {
+  if (!isAuthorizedRequest(request)) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+
+  try {
+    const { role, workspaceId } = await requireWorkspaceAccess(request);
+    if (role !== "admin") {
+      return NextResponse.json({ error: "Only a workspace Admin can delete phases." }, { status: 403 });
+    }
+
+    const payload = (await request.json()) as RoadmapPhasePayload;
+    const id = payload.id?.trim();
+    if (!id) {
+      return NextResponse.json({ error: "Invalid phase." }, { status: 400 });
+    }
+
+    const supabase = createServiceSupabaseClient();
+    const { error } = await supabase
+      .from("roadmap_phases")
+      .delete()
+      .eq("id", id)
+      .eq("workspace_id", workspaceId);
+    if (error) throw error;
+
+    return NextResponse.json({ phases: await loadPhases(workspaceId), status: "ok" });
+  } catch (error) {
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
+  }
+}
+
 async function loadPhases(workspaceId: string) {
   const supabase = createServiceSupabaseClient();
   const { data, error } = await supabase
