@@ -6,7 +6,6 @@ import { forwardRef } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUpRight,
-  ArrowUp,
   ArrowLeft,
   BarChart3,
   CalendarDays,
@@ -30,8 +29,38 @@ import {
 } from "lucide-react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { AccountControl } from "./account-control";
+import { DateInput } from "./date-input";
+import { toDisplayDate, toIsoDate } from "@/lib/date-input";
 
 type Section = (typeof sections)[number];
+type FocusQueueNavigationState = {
+  completedTasksOpen: boolean;
+  detailsOpen: boolean;
+};
+type MarketingNavigationContext = {
+  campaignId: string;
+  dayNumber?: number;
+};
+type ProductionNavigationContext = {
+  songId: string;
+  stepId?: string;
+};
+type EventsNavigationContext = { eventId: string };
+type BudgetNavigationContext = {
+  historicalLedgerOpen: boolean;
+  moreAnalyticsOpen: boolean;
+};
+type RoadmapNavigationContext = { openCardId: string };
+type AppNavigationSnapshot = {
+  budget?: BudgetNavigationContext;
+  events?: EventsNavigationContext;
+  focusQueue?: FocusQueueNavigationState;
+  marketing?: MarketingNavigationContext;
+  production?: ProductionNavigationContext;
+  roadmap?: RoadmapNavigationContext;
+  scrollY: number;
+  section: Section;
+};
 type WorkspaceRole = "admin" | "member" | "viewer";
 type WorkspaceMember = {
   avatarUrl: string | null;
@@ -99,6 +128,7 @@ type FocusQueueActionTarget =
     };
 type FocusQueueItem = CampaignTaskItem & {
   actionTarget?: FocusQueueActionTarget;
+  displayLabel?: { date?: string; song: string; task: string };
   dueDate?: string;
   notes?: string;
   source: "Marketing" | "Production" | "Other";
@@ -629,7 +659,7 @@ const defaultQrCodeLinks: QrCodeLink[] = [
   }))
 ];
 
-const appVersionLabel = "Beta 1.16";
+const appVersionLabel = "Beta 1.17";
 const defaultAppLogoUrl = "/love-strings-logo.jpeg";
 
 const sections = [
@@ -1709,8 +1739,8 @@ const roadmapPhases: RoadmapPhase[] = [
     summary:
       "Launch Love Strings, build the first English cover catalog, and make the release process repeatable.",
     milestones: [],
-    startMonth: "2026-04",
-    endMonth: "2027-07"
+    startMonth: "2026-04-01",
+    endMonth: "2027-07-01"
   },
   {
     id: "phase-2",
@@ -1724,8 +1754,8 @@ const roadmapPhases: RoadmapPhase[] = [
     summary:
       "Add Russian-language covers while English covers continue in parallel.",
     milestones: [],
-    startMonth: "2027-08",
-    endMonth: "2027-12"
+    startMonth: "2027-08-01",
+    endMonth: "2027-12-01"
   },
   {
     id: "phase-3",
@@ -1739,8 +1769,8 @@ const roadmapPhases: RoadmapPhase[] = [
     summary:
       "Start original Love Strings material and build long-term owned music assets.",
     milestones: [],
-    startMonth: "2028-01",
-    endMonth: "2028-12"
+    startMonth: "2028-01-01",
+    endMonth: "2028-12-01"
   }
 ];
 
@@ -1753,17 +1783,22 @@ function normalizeRoadmapPhases(phases: Array<Partial<RoadmapPhase>>) {
     .map((phase, index) => ({
       accent: accents[index % accents.length],
       activeCount: 0,
-      endMonth: phase.endMonth ?? "2028-12",
+      endMonth: normalizeRoadmapPhaseDate(phase.endMonth, "2028-12-01"),
       id: phase.id,
       milestones: [],
       period: "",
       phaseNumber: phase.phaseNumber,
       releasedCount: 0,
-      startMonth: phase.startMonth ?? "2028-01",
+      startMonth: normalizeRoadmapPhaseDate(phase.startMonth, "2028-01-01"),
       summary: phase.summary ?? "",
       targetCount: 0,
       title: phase.title ?? `Phase ${phase.phaseNumber}`
     })) satisfies RoadmapPhase[];
+}
+
+function normalizeRoadmapPhaseDate(value: string | undefined, fallback: string) {
+  if (!value) return fallback;
+  return /^\d{4}-\d{2}$/.test(value) ? `${value}-01` : value;
 }
 
 function sortCampaignsByReleaseDate(campaigns: MarketingCampaignConfig[]) {
@@ -3541,7 +3576,8 @@ function getDashboardFocusQueue(
         toFocusQueueItem(
           task,
           "Marketing",
-          getMarketingFocusActionTarget(selectedCampaign.id, task.id)
+          getMarketingFocusActionTarget(selectedCampaign.id, task.id),
+          selectedCampaign.releaseTitle
         )
       )
     : [];
@@ -3550,7 +3586,8 @@ function getDashboardFocusQueue(
         toFocusQueueItem(
           task,
           "Production",
-          getProductionFocusActionTarget(selectedSong, task.id)
+          getProductionFocusActionTarget(selectedSong, task.id),
+          selectedSong.title
         )
       )
     : [];
@@ -3569,6 +3606,9 @@ function getDashboardFocusQueue(
         firstTask.title.localeCompare(secondTask.title)
     )
     .map(toOtherFocusQueueItem);
+  const todayOtherTasks = activeOtherTasks.filter((task) =>
+    task.dueDate ? isOtherTaskDueToday(task.dueDate) : false
+  );
   const otherHistoryTasks = otherTasks
     .filter((task) => task.status === "done" || task.status === "irrelevant")
     .sort(
@@ -3578,6 +3618,13 @@ function getDashboardFocusQueue(
         firstTask.title.localeCompare(secondTask.title)
     )
     .map(toOtherFocusQueueItem);
+  const baselineTasks = [
+    primaryMarketingTask,
+    primaryProductionTask,
+    ...utilityTasks
+  ]
+    .filter((task): task is FocusQueueItem => Boolean(task))
+    .slice(0, 3);
 
   return {
     allTasks: [
@@ -3586,13 +3633,20 @@ function getDashboardFocusQueue(
       ...utilityTasks,
       ...activeOtherTasks
     ],
+    baselineTasks,
     visibleTasks: [
       primaryMarketingTask,
       primaryProductionTask,
       ...utilityTasks,
-      ...activeOtherTasks.slice(0, 3)
-    ].filter((task): task is FocusQueueItem => Boolean(task))
+      ...todayOtherTasks
+    ]
+      .filter((task): task is FocusQueueItem => Boolean(task))
+      .slice(0, 5)
   };
+}
+
+function isOtherTaskDueToday(dueDate: string) {
+  return dueDate === formatDateForInput(getTodayUtcDate());
 }
 
 function getCampaignDailyProgressItems(
@@ -3681,16 +3735,89 @@ function getChangedDailyProgressItems(
   );
 }
 
+function getDailyProgressItemForFocusTask(
+  task: FocusQueueItem,
+  status: MarketingStatus
+): Omit<DailyFocusProgressItem, "date"> | null {
+  if (task.id === "other-apple-music-csv-update") {
+    return {
+      label: task.label,
+      source: "Other",
+      status,
+      taskKey: "other:apple-music-csv-update"
+    };
+  }
+
+  if (task.source === "Other" && task.id.startsWith("other-other-task-")) {
+    return {
+      label: task.label,
+      source: "Other",
+      status,
+      taskKey: `other:${task.id.replace(/^other-/, "")}`
+    };
+  }
+
+  const target = task.actionTarget;
+  if (!target) return null;
+
+  if (target.kind === "marketing") {
+    const taskKeySuffix = target.taskKey
+      ? {
+          facebookPost: "facebook-post",
+          instagramUpload: "instagram",
+          production: "production",
+          websiteUpdate: "website-update",
+          youtubePost: "youtube-post",
+          youtubeUpload: "youtube"
+        }[target.taskKey]
+      : `extra:${target.extraTaskId}`;
+    return {
+      label: task.label,
+      source: "Marketing",
+      status,
+      taskKey: `marketing:${target.campaignId}:day:${target.dayNumber}:${taskKeySuffix}`
+    };
+  }
+
+  return {
+    label: task.label,
+    source: "Production",
+    status,
+    taskKey: `production:${target.songId}:step:${target.stepId}:${target.taskKey}${
+      target.taskKey === "extra" ? `:${target.extraTaskId}` : ""
+    }`
+  };
+}
+
 function toFocusQueueItem(
   task: CampaignTaskItem,
   source: FocusQueueItem["source"],
-  actionTarget?: FocusQueueActionTarget
+  actionTarget?: FocusQueueActionTarget,
+  songName?: string
 ): FocusQueueItem {
   return {
     ...task,
     actionTarget,
+    displayLabel: songName ? formatFocusQueueLabelParts(task.label, songName) : undefined,
     id: `${source.toLowerCase()}-${task.id}`,
     source
+  };
+}
+
+function formatFocusQueueLabelParts(label: string, song: string) {
+  const separatorIndex = label.indexOf(" - ");
+  const colonIndex = label.indexOf(": ");
+  const splitIndex = separatorIndex >= 0 ? separatorIndex : colonIndex;
+
+  if (splitIndex < 0) {
+    return { song, task: label };
+  }
+
+  const separatorLength = separatorIndex >= 0 ? 3 : 2;
+  return {
+    date: label.slice(0, splitIndex),
+    song,
+    task: label.slice(splitIndex + separatorLength)
   };
 }
 
@@ -4744,6 +4871,53 @@ async function saveDailyFocusProgress(item: DailyFocusProgressItem) {
   }
 }
 
+async function deleteDailyFocusProgress(taskKey: string) {
+  try {
+    const response = await fetch("/api/focus/daily-progress", {
+      body: JSON.stringify({ date: getViennaDateKey(), taskKey }),
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "x-love-strings-focus": "write"
+      },
+      method: "DELETE"
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(
+        body.error ?? `Daily focus progress delete failed with status ${response.status}.`
+      );
+    }
+  } catch (error) {
+    console.warn("Unable to delete daily focus progress from Supabase.", error);
+  }
+}
+
+async function resetDailyFocusProgress() {
+  try {
+    const response = await fetch("/api/focus/daily-progress", {
+      body: JSON.stringify({ date: getViennaDateKey() }),
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "x-love-strings-focus": "write"
+      },
+      method: "DELETE"
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error ?? `Daily focus reset failed with status ${response.status}.`);
+    }
+
+    return true;
+  } catch (error) {
+    console.warn("Unable to reset daily focus progress in Supabase.", error);
+    return false;
+  }
+}
+
 function normalizeQrCodeLinks(links: QrCodeLink[]) {
   return links.map((link, index) => ({
     id:
@@ -4913,6 +5087,42 @@ export default function Home() {
   const hasRequestedOtherTaskSupabaseLoad = useRef(false);
   const hasRequestedQrCodeSupabaseLoad = useRef(false);
   const [activeSection, setActiveSection] = useState<Section>("Dashboard");
+  const [focusQueueNavigationState, setFocusQueueNavigationState] = useState<FocusQueueNavigationState>({
+    completedTasksOpen: false,
+    detailsOpen: false
+  });
+  const [navigationStack, setNavigationStack] = useState<AppNavigationSnapshot[]>([]);
+  const [pendingScrollRestore, setPendingScrollRestore] = useState<{
+    scrollY: number;
+    section: Section;
+  } | null>(null);
+  const [marketingNavigationContext, setMarketingNavigationContext] =
+    useState<MarketingNavigationContext | null>(null);
+  const [productionNavigationContext, setProductionNavigationContext] =
+    useState<ProductionNavigationContext | null>(null);
+  const [marketingRestoreContext, setMarketingRestoreContext] = useState<{
+    context: MarketingNavigationContext;
+    token: number;
+  } | null>(null);
+  const [productionRestoreContext, setProductionRestoreContext] = useState<{
+    context: ProductionNavigationContext;
+    token: number;
+  } | null>(null);
+  const [eventsNavigationContext, setEventsNavigationContext] =
+    useState<EventsNavigationContext | null>(null);
+  const [budgetNavigationContext, setBudgetNavigationContext] =
+    useState<BudgetNavigationContext | null>(null);
+  const [roadmapNavigationContext, setRoadmapNavigationContext] =
+    useState<RoadmapNavigationContext | null>(null);
+  const [eventsRestoreContext, setEventsRestoreContext] = useState<{
+    context: EventsNavigationContext;
+    token: number;
+  } | null>(null);
+  const [budgetRestoreContext, setBudgetRestoreContext] = useState<BudgetNavigationContext | null>(null);
+  const [roadmapRestoreContext, setRoadmapRestoreContext] = useState<{
+    context: RoadmapNavigationContext;
+    token: number;
+  } | null>(null);
   const [settingsView, setSettingsView] = useState<
     "about" | "general" | "platform" | "user" | null
   >(null);
@@ -4945,12 +5155,14 @@ export default function Home() {
   });
   const [productionFocusTarget, setProductionFocusTarget] = useState<{
     elementId?: string;
+    inputId?: string;
     songId: string;
     token: number;
   } | null>(null);
   const [marketingFocusTarget, setMarketingFocusTarget] = useState<{
     campaignId: string;
     elementId?: string;
+    inputId?: string;
     token: number;
   } | null>(null);
   const [eventFocusTarget, setEventFocusTarget] = useState<{
@@ -4988,6 +5200,25 @@ export default function Home() {
     workspaceGoogleConnection
   );
   const dashboardPlatformStats = getDashboardPlatformStats(activePlatformStats);
+  const validDailyFocusProgressTaskKeys = useMemo(
+    () =>
+      new Set([
+        ...campaigns.flatMap((campaign) =>
+          getCampaignDailyProgressItems(campaign, getCampaignDays(campaign)).map(
+            (item) => item.taskKey
+          )
+        ),
+        ...productionSongDrafts.flatMap((song) =>
+          getProductionDailyProgressItems(song).map((item) => item.taskKey)
+        ),
+        ...otherTasks.map((task) => `other:${task.id}`),
+        "other:apple-music-csv-update"
+      ]),
+    [campaigns, otherTasks, productionSongDrafts]
+  );
+  const validDailyFocusProgress = dailyFocusProgress.filter((item) =>
+    validDailyFocusProgressTaskKeys.has(item.taskKey)
+  );
   const budgetEntriesWithForecast = getBudgetEntriesWithForecast(
     budgetEntryDrafts,
     eventEntryDrafts,
@@ -5872,7 +6103,7 @@ export default function Home() {
 
     const newTaskId = `other-task-${Date.now()}`;
     const newTask: OtherTask = {
-      dueDate: formatDateForInput(getTodayUtcDate()),
+      dueDate: "",
       id: newTaskId,
       notes: "",
       status: "not-started",
@@ -5882,7 +6113,6 @@ export default function Home() {
     setOtherTasks((currentTasks) => {
       return [newTask, ...currentTasks];
     });
-    queueOtherTaskSave(newTask);
 
     return newTaskId;
   }
@@ -5896,9 +6126,15 @@ export default function Home() {
     setOtherTasks((currentTasks) =>
       currentTasks.map((task) => (task.id === taskId ? updatedTask : task))
     );
-    queueOtherTaskSave(updatedTask);
+    if (toIsoDate(updatedTask.dueDate)) {
+      queueOtherTaskSave(updatedTask);
+    }
 
-    if (updates.status && previousTask.status !== updatedTask.status) {
+    if (
+      updates.status &&
+      previousTask.status !== updatedTask.status &&
+      toIsoDate(updatedTask.dueDate)
+    ) {
       recordDailyFocusStatus({
         label: updatedTask.title || "Untitled task",
         source: "Other",
@@ -5919,7 +6155,215 @@ export default function Home() {
     setOtherTasks((currentTasks) =>
       currentTasks.filter((task) => task.id !== taskId)
     );
+    setDailyFocusProgress((currentItems) =>
+      currentItems.filter((item) => item.taskKey !== `other:${taskId}`)
+    );
     void deleteOtherTaskFromSupabase(taskId);
+    void deleteDailyFocusProgress(`other:${taskId}`);
+  }
+
+  function resetFocusQueueProgress() {
+    const previousProgress = dailyFocusProgress;
+    setDailyFocusProgress([]);
+    void resetDailyFocusProgress().then((didReset) => {
+      if (!didReset) setDailyFocusProgress(previousProgress);
+    });
+  }
+
+  function reconfirmFocusTaskStatus(task: FocusQueueItem, status: MarketingStatus) {
+    const progressItem = getDailyProgressItemForFocusTask(task, status);
+    if (progressItem) recordDailyFocusStatus(progressItem);
+  }
+
+  function reconfirmOtherTaskStatus(task: OtherTask) {
+    recordDailyFocusStatus({
+      label: task.title || "Untitled task",
+      source: "Other",
+      status: task.status,
+      taskKey: `other:${task.id}`
+    });
+  }
+
+  function captureNavigationSnapshot(): AppNavigationSnapshot {
+    return {
+      ...(activeSection === "Dashboard"
+        ? { focusQueue: focusQueueNavigationState }
+        : {}),
+      ...(activeSection === "Marketing" && marketingNavigationContext
+        ? { marketing: marketingNavigationContext }
+        : {}),
+      ...(activeSection === "Production" && productionNavigationContext
+        ? { production: productionNavigationContext }
+        : {}),
+      ...(activeSection === "Events" && eventsNavigationContext
+        ? { events: eventsNavigationContext }
+        : {}),
+      ...(activeSection === "Budget" && budgetNavigationContext
+        ? { budget: budgetNavigationContext }
+        : {}),
+      ...(activeSection === "Roadmap" && roadmapNavigationContext
+        ? { roadmap: roadmapNavigationContext }
+        : {}),
+      scrollY: window.scrollY,
+      section: activeSection
+    };
+  }
+
+  function navigateWithHistory(navigate: () => void) {
+    const snapshot = captureNavigationSnapshot();
+    setNavigationStack((currentStack) => [...currentStack, snapshot].slice(-20));
+    setMarketingRestoreContext(null);
+    setProductionRestoreContext(null);
+    setEventsRestoreContext(null);
+    setBudgetRestoreContext(null);
+    setRoadmapRestoreContext(null);
+    navigate();
+  }
+
+  function goBackToPreviousAppState() {
+    const snapshot = navigationStack.at(-1);
+    if (!snapshot) return;
+
+    setNavigationStack((currentStack) => currentStack.slice(0, -1));
+    setActiveSection(snapshot.section);
+    if (snapshot.section === "Dashboard" && snapshot.focusQueue) {
+      setFocusQueueNavigationState(snapshot.focusQueue);
+    }
+    if (snapshot.section === "Marketing") {
+      const context = snapshot.marketing;
+      const campaign = context
+        ? campaigns.find((candidate) => candidate.id === context.campaignId)
+        : null;
+      const dayExists =
+        !context?.dayNumber ||
+        Boolean(campaign && getCampaignDays(campaign).some((day) => day.dayNumber === context.dayNumber));
+      setMarketingRestoreContext(
+        campaign && context && dayExists ? { context, token: Date.now() } : null
+      );
+    } else {
+      setMarketingRestoreContext(null);
+    }
+    if (snapshot.section === "Production") {
+      const context = snapshot.production;
+      const song = context
+        ? productionSongDrafts.find((candidate) => candidate.id === context.songId)
+        : null;
+      const stepExists = !context?.stepId || Boolean(song?.steps.some((step) => step.id === context.stepId));
+      setProductionRestoreContext(
+        song && context && stepExists ? { context, token: Date.now() } : null
+      );
+    } else {
+      setProductionRestoreContext(null);
+    }
+    if (snapshot.section === "Events") {
+      const context = snapshot.events;
+      setEventsRestoreContext(
+        context && eventEntryDrafts.some((entry) => entry.id === context.eventId)
+          ? { context, token: Date.now() }
+          : null
+      );
+    } else {
+      setEventsRestoreContext(null);
+    }
+    if (snapshot.section === "Budget") {
+      setBudgetRestoreContext(snapshot.budget ?? null);
+    } else {
+      setBudgetRestoreContext(null);
+    }
+    if (snapshot.section === "Roadmap") {
+      const context = snapshot.roadmap;
+      const isValidOpenCard =
+        context &&
+        (context.openCardId === "general" ||
+          roadmapPhaseDrafts.some((phase) => phase.id === context.openCardId));
+      setRoadmapRestoreContext(
+        context && isValidOpenCard ? { context, token: Date.now() } : null
+      );
+    } else {
+      setRoadmapRestoreContext(null);
+    }
+    setPendingScrollRestore({ scrollY: snapshot.scrollY, section: snapshot.section });
+  }
+
+  function navigateToSidebarSection(section: Section) {
+    if (section === activeSection) {
+      setSettingsView(null);
+      return;
+    }
+
+    navigateWithHistory(() => {
+      if (section === "Marketing") {
+        setMarketingNavigationContext(null);
+        setMarketingFocusTarget(null);
+      }
+      if (section === "Production") {
+        setProductionNavigationContext(null);
+        setProductionFocusTarget(null);
+      }
+      if (section === "Events") {
+        setEventsNavigationContext(null);
+        setEventFocusTarget(null);
+      }
+      if (section === "Budget") {
+        setBudgetNavigationContext(null);
+      }
+      if (section === "Roadmap") {
+        setRoadmapNavigationContext(null);
+      }
+      setActiveSection(section);
+      setSettingsView(null);
+    });
+  }
+
+  function openFocusQueueSourceTask(task: FocusQueueItem) {
+    const target = task.actionTarget;
+    if (!target) return;
+
+    if (target.kind === "marketing") {
+      const campaign = campaigns.find((candidate) => candidate.id === target.campaignId);
+      const day = campaign && getCampaignDays(campaign).find(
+        (candidate) => candidate.dayNumber === target.dayNumber
+      );
+      const sourceExists = target.taskKey
+        ? Boolean(day)
+        : Boolean(day?.extraTasks.some((extraTask) => extraTask.id === target.extraTaskId));
+      if (!campaign || !day || !sourceExists) return;
+
+      navigateWithHistory(() => setActiveSection("Marketing"));
+      setMarketingNavigationContext({
+        campaignId: campaign.id,
+        dayNumber: day.dayNumber
+      });
+      setMarketingFocusTarget({
+        campaignId: campaign.id,
+        elementId: getMarketingCampaignDayElementId(campaign.id, day.dayNumber),
+        inputId: getMarketingTaskInputElementId(
+          campaign.id,
+          day.dayNumber,
+          target.extraTaskId
+        ),
+        token: Date.now()
+      });
+      return;
+    }
+
+    const song = productionSongDrafts.find((candidate) => candidate.id === target.songId);
+    const step = song?.steps.find((candidate) => candidate.id === target.stepId);
+    const sourceExists = target.taskKey === "main"
+      ? Boolean(step)
+      : Boolean(step?.extraTasks.some((extraTask) => extraTask.id === target.extraTaskId));
+    if (!song || !step || !sourceExists) return;
+
+    navigateWithHistory(() => setActiveSection("Production"));
+    setProductionNavigationContext({ songId: song.id, stepId: step.id });
+    setProductionFocusTarget({
+      elementId: target.taskKey === "main"
+        ? getProductionStepElementId(song.id, step.id)
+        : getProductionTaskElementId(song.id, step.id, target.extraTaskId ?? ""),
+      inputId: getProductionTaskInputElementId(song.id, step.id, target),
+      songId: song.id,
+      token: Date.now()
+    });
   }
 
   function addQrCodeLink() {
@@ -5957,6 +6401,29 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (
+      !pendingScrollRestore ||
+      settingsView ||
+      activeSection !== pendingScrollRestore.section
+    ) {
+      return;
+    }
+
+    let secondFrame: number | null = null;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        window.scrollTo({ behavior: "auto", top: pendingScrollRestore.scrollY });
+        setPendingScrollRestore(null);
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame !== null) window.cancelAnimationFrame(secondFrame);
+    };
+  }, [activeSection, focusQueueNavigationState, pendingScrollRestore, settingsView]);
+
+  useEffect(() => {
     let isCancelled = false;
 
     async function loadActiveWorkspace() {
@@ -5965,6 +6432,8 @@ export default function Home() {
       if (!isCancelled && response.ok && payload.workspaceId) {
         setPlatformMetricRows([]);
         setPlatformStatsData([]);
+        setNavigationStack([]);
+        setPendingScrollRestore(null);
         setActiveWorkspaceId(payload.workspaceId);
         const workspacesResponse = await fetch("/api/workspaces", { cache: "no-store" });
         const workspacesPayload = (await workspacesResponse.json().catch(() => null)) as {
@@ -7097,10 +7566,7 @@ export default function Home() {
               aria-current={activeSection === section ? "page" : undefined}
               className={`nav-module-${section.toLowerCase().replaceAll(" ", "-")}`}
               key={section}
-              onClick={() => {
-                setActiveSection(section);
-                setSettingsView(null);
-              }}
+              onClick={() => navigateToSidebarSection(section)}
               type="button"
             >
               {section}
@@ -7158,9 +7624,11 @@ export default function Home() {
         {!settingsView && activeSection === "Roadmap" ? (
           <RoadmapView
             campaigns={campaigns}
+            restoreContext={roadmapRestoreContext}
             onCreatePhase={createRoadmapPhase}
             onOpenMarketing={openRoadmapMarketingCampaign}
             onOpenProduction={openRoadmapProductionSong}
+            onNavigationContextChange={setRoadmapNavigationContext}
             onDeletePhase={deleteRoadmapPhase}
             onSavePhase={saveRoadmapPhase}
             onSongChange={updateProductionSong}
@@ -7172,6 +7640,7 @@ export default function Home() {
           <MarketingView
             campaigns={campaigns}
             focusTarget={marketingFocusTarget}
+            restoreContext={marketingRestoreContext}
             onAddCampaign={addCampaign}
             onCampaignBudgetLinesChange={updateCampaignBudgetLines}
             onCampaignDaysChange={updateCampaignDays}
@@ -7179,6 +7648,7 @@ export default function Home() {
             onFocusCampaign={(campaignId, elementId) =>
               setMarketingFocusTarget({ campaignId, elementId, token: Date.now() })
             }
+            onNavigationContextChange={setMarketingNavigationContext}
             onReleaseDateSave={updateCampaignReleaseDate}
             onGeneralCampaignSettingsSave={updateGeneralCampaignSettings}
             onProgressVisibilityChange={updateCampaignProgressVisibility}
@@ -7203,11 +7673,13 @@ export default function Home() {
         {!settingsView && activeSection === "Production" ? (
           <ProductionView
             focusTarget={productionFocusTarget}
+            restoreContext={productionRestoreContext}
             onAddSong={addProductionSong}
             onDeleteSong={deleteProductionSong}
             onFocusSong={(songId, elementId) =>
               setProductionFocusTarget({ elementId, songId, token: Date.now() })
             }
+            onNavigationContextChange={setProductionNavigationContext}
             onSongChange={updateProductionSong}
             phaseOptions={roadmapPhaseDrafts.map((phase) => ({
               id: phase.id,
@@ -7220,16 +7692,19 @@ export default function Home() {
         {!settingsView && activeSection === "Budget" ? (
           <BudgetView
             entries={budgetEntriesWithForecast}
+            restoreContext={budgetRestoreContext}
             onAddEntry={addBudgetEntry}
             onDeleteEntry={deleteBudgetEntry}
             onEntryChange={updateBudgetEntry}
             onOpenEntrySource={openBudgetEntrySource}
+            onNavigationContextChange={setBudgetNavigationContext}
           />
         ) : null}
         {!settingsView && activeSection === "Events" ? (
           <EventsView
             entries={eventEntryDrafts}
             focusTarget={eventFocusTarget}
+            restoreContext={eventsRestoreContext}
             isLoaded={hasLoadedEventSupabaseSnapshot}
             locations={locationAddressBook}
             onAddEntry={addEventEntry}
@@ -7238,6 +7713,7 @@ export default function Home() {
             onDeleteLocation={deleteLocationAddressBookEntry}
             onEntryChange={updateEventEntry}
             onLocationChange={updateLocationAddressBookEntry}
+            onNavigationContextChange={setEventsNavigationContext}
           />
         ) : null}
         {!settingsView &&
@@ -7250,7 +7726,7 @@ export default function Home() {
           <DashboardView
             budgetEntries={budgetEntriesWithForecast}
             campaigns={campaigns}
-            dailyFocusProgress={dailyFocusProgress}
+            dailyFocusProgress={validDailyFocusProgress}
             dashboardPlatformStats={dashboardPlatformStats}
             eventEntries={eventEntryDrafts}
             eventsLoaded={hasLoadedEventSupabaseSnapshot}
@@ -7262,6 +7738,12 @@ export default function Home() {
             onDismissAppleMusicReminder={dismissAppleMusicReminderForToday}
             onOpenAppleMusicImport={openAppleMusicImport}
             onOtherTaskChange={updateOtherTask}
+            onOpenFocusTaskSource={openFocusQueueSourceTask}
+            focusQueueNavigationState={focusQueueNavigationState}
+            onFocusQueueNavigationStateChange={setFocusQueueNavigationState}
+            onReconfirmOtherTaskStatus={reconfirmOtherTaskStatus}
+            onReconfirmFocusTaskStatus={reconfirmFocusTaskStatus}
+            onResetFocusProgress={resetFocusQueueProgress}
             onProductionSongChange={updateProductionSong}
             onQrCodeChange={updateQrCodeLink}
             otherTasks={otherTasks}
@@ -7275,7 +7757,10 @@ export default function Home() {
         ) : null}
         </div>
       </section>
-      <ScrollAssistButton />
+      <FloatingNavigationBackButton
+        isVisible={!settingsView && navigationStack.length > 0}
+        onBack={goBackToPreviousAppState}
+      />
     </main>
   );
 }
@@ -8809,37 +9294,24 @@ function UserSettingsView({
   );
 }
 
-function ScrollAssistButton() {
-  function scrollToOpenCardOrTop() {
-    const scrollTargetTop = 96;
-    const openCards = Array.from(
-      document.querySelectorAll<HTMLElement>("[data-scroll-anchor='open-card']")
-    )
-      .filter((element) => !element.hidden && element.offsetParent !== null)
-      .map((element) => ({
-        element,
-        top: element.getBoundingClientRect().top
-      }))
-      .filter((candidate) => candidate.top <= scrollTargetTop + 16)
-      .sort((firstCandidate, secondCandidate) => secondCandidate.top - firstCandidate.top);
-    const target = openCards[0];
-
-    if (target && Math.abs(target.top - scrollTargetTop) > 18) {
-      target.element.scrollIntoView({ behavior: "smooth", block: "start" });
-      return;
-    }
-
-    window.scrollTo({ behavior: "smooth", top: 0 });
-  }
+function FloatingNavigationBackButton({
+  isVisible,
+  onBack
+}: {
+  isVisible: boolean;
+  onBack: () => void;
+}) {
+  if (!isVisible) return null;
 
   return (
     <button
-      aria-label="Scroll to open card or top"
-      className="scroll-assist-button"
-      onClick={scrollToOpenCardOrTop}
+      aria-label="Back to previous app state"
+      className="app-navigation-back-button-floating"
+      onClick={onBack}
+      title="Back"
       type="button"
     >
-      <ArrowUp size={20} aria-hidden />
+      <ArrowLeft size={20} aria-hidden />
     </button>
   );
 }
@@ -8854,7 +9326,9 @@ function EventsView({
   onDeleteEntry,
   onDeleteLocation,
   onEntryChange,
-  onLocationChange
+  onLocationChange,
+  onNavigationContextChange,
+  restoreContext
 }: {
   entries: EventEntry[];
   focusTarget: { entryId: string; token: number } | null;
@@ -8869,6 +9343,8 @@ function EventsView({
     locationId: string,
     updates: Partial<LocationAddressBookEntry>
   ) => void;
+  onNavigationContextChange: (context: EventsNavigationContext | null) => void;
+  restoreContext: { context: EventsNavigationContext; token: number } | null;
 }) {
   const nextEvent = getNextUpcomingEvent(entries);
   const nextEventDate = nextEvent ? parseFlexibleBudgetDate(nextEvent.date) : null;
@@ -8956,13 +9432,17 @@ function EventsView({
               focusToken={
                 focusTarget?.entryId === entry.id ? focusTarget.token : undefined
               }
-              key={entry.id}
+              key={`${entry.id}:${entry.date}`}
               locations={locations}
               onDelete={onDeleteEntry}
               onEntryChange={onEntryChange}
+              onNavigationContextChange={onNavigationContextChange}
               refCallback={(element) => {
                 eventElementRefs.current[entry.id] = element;
               }}
+              restoreContext={
+                restoreContext?.context.eventId === entry.id ? restoreContext : null
+              }
             />
           ))}
         </div>
@@ -9199,6 +9679,8 @@ function EventCard({
   locations,
   onDelete,
   onEntryChange,
+  onNavigationContextChange,
+  restoreContext,
   refCallback
 }: {
   entry: EventEntry;
@@ -9206,10 +9688,13 @@ function EventCard({
   locations: LocationAddressBookEntry[];
   onDelete: (entryId: string) => void;
   onEntryChange: (entryId: string, updates: Partial<EventEntry>) => void;
+  onNavigationContextChange: (context: EventsNavigationContext | null) => void;
   refCallback: (element: HTMLElement | null) => void;
+  restoreContext: { context: EventsNavigationContext; token: number } | null;
 }) {
   const [isDeleteArmed, setIsDeleteArmed] = useState(false);
-  const [isEventOpen, setIsEventOpen] = useState(false);
+  const [isEventOpen, setIsEventOpen] = useState(() => Boolean(restoreContext));
+  const [eventDateDraft, setEventDateDraft] = useState(entry.date);
   const deleteButtonRef = useRef<HTMLButtonElement>(null);
   const selectedLocation = getMatchingLocationAddressBookEntry(entry, locations);
   const eventBudgetLines =
@@ -9259,6 +9744,11 @@ function EventCard({
     }
 
     onDelete(entry.id);
+  }
+
+  function commitEventDate(nextDate = eventDateDraft) {
+    if (!toIsoDate(nextDate) || nextDate === entry.date) return;
+    onEntryChange(entry.id, { date: nextDate });
   }
 
   function selectLocation(locationId: string) {
@@ -9336,31 +9826,35 @@ function EventCard({
             </span>
           )}
           <div className="event-title-block">
-            <EventMaybeLink label={entry.name} url={entry.nameUrl} />
-            <span>
-              <MapPin size={14} aria-hidden />
-              <EventMaybeLink
-                label={entry.locationName || "Location name"}
-                url={entry.locationUrl}
-              />
-            </span>
-            <span>
-              <LinkIcon size={14} aria-hidden />
-              <EventMaybeLink
-                label={entry.address || "Address"}
-                url={entry.addressUrl}
-              />
-            </span>
+            <EventMaybeLink label={entry.name.trim() || "TBD"} url={entry.nameUrl} />
+            <strong className="event-date-display">{formatEventSummaryDate(entry.date)}</strong>
           </div>
         </div>
-        <strong className="event-date-display">{entry.date}</strong>
+        <div className="event-location-summary">
+          <span>
+            <MapPin size={14} aria-hidden />
+            <EventMaybeLink
+              label={entry.locationName || "Location name"}
+              url={entry.locationUrl}
+            />
+          </span>
+          <span>
+            <LinkIcon size={14} aria-hidden />
+            <EventMaybeLink
+              label={entry.address || "Address"}
+              url={entry.addressUrl}
+            />
+          </span>
+        </div>
         <button
           aria-controls={`${entry.id}-event-details`}
           aria-expanded={isEventOpen}
           aria-label={isEventOpen ? "Hide event details" : "Show event details"}
           className="campaign-toggle"
           onClick={() => {
-            setIsEventOpen((current) => !current);
+            const nextIsOpen = !isEventOpen;
+            onNavigationContextChange(nextIsOpen ? { eventId: entry.id } : null);
+            setIsEventOpen(nextIsOpen);
             setIsDeleteArmed(false);
           }}
           type="button"
@@ -9380,6 +9874,7 @@ function EventCard({
             {eventBudgetLines.map((line, index) => (
               <EventBudgetLineRow
                 defaultSign={index === 0 ? "positive" : "negative"}
+                hideVisibleLabels
                 key={line.id}
                 line={line}
                 onDelete={deleteEventBudgetLine}
@@ -9415,12 +9910,19 @@ function EventCard({
         <div className="event-edit-grid">
           <label>
             Date
-            <input
-              inputMode="numeric"
-              onChange={(event) =>
-                onEntryChange(entry.id, { date: event.target.value })
-              }
-              value={entry.date}
+            <DateInput
+              aria-label={`${entry.name} date`}
+              calendarLabel={`Choose ${entry.name} date`}
+              error={Boolean(eventDateDraft && !toIsoDate(eventDateDraft))}
+              onBlur={() => commitEventDate()}
+              onChange={setEventDateDraft}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return;
+                event.preventDefault();
+                commitEventDate();
+              }}
+              onPickerChange={(nextDate) => commitEventDate(nextDate)}
+              value={eventDateDraft}
             />
           </label>
           <label>
@@ -9508,6 +10010,7 @@ function EventCard({
 function EventBudgetLineRow({
   compactLabels = false,
   defaultSign = "negative",
+  hideVisibleLabels = false,
   line,
   onDelete,
   onUpdate,
@@ -9517,6 +10020,7 @@ function EventBudgetLineRow({
 }: {
   compactLabels?: boolean;
   defaultSign?: "negative" | "positive";
+  hideVisibleLabels?: boolean;
   line: ProductionBudgetLine;
   onDelete: (lineId: string) => void;
   onUpdate: (lineId: string, updates: Partial<ProductionBudgetLine>) => void;
@@ -9531,7 +10035,7 @@ function EventBudgetLineRow({
     <div className={showBucket ? "event-budget-line event-budget-line-with-bucket" : "event-budget-line"}>
       {showBucket ? (
         <label>
-          Bucket
+          <span className={hideVisibleLabels ? "visually-hidden" : undefined}>Bucket</span>
           <select
             aria-label="Event budget bucket"
             onChange={(event) =>
@@ -9550,10 +10054,11 @@ function EventBudgetLineRow({
         </label>
       ) : null}
       <label>
-        <span className={compactLabels ? "marketing-budget-field-label" : undefined}>
+        <span className={hideVisibleLabels ? "visually-hidden" : compactLabels ? "marketing-budget-field-label" : undefined}>
           Budget reason
         </span>
         <input
+          aria-label="Event budget reason"
           onChange={(event) =>
             onUpdate(line.id, {
               description: event.target.value
@@ -9564,7 +10069,7 @@ function EventBudgetLineRow({
         />
       </label>
       <label>
-        <span className={compactLabels ? "marketing-budget-field-label" : undefined}>
+        <span className={hideVisibleLabels ? "visually-hidden" : compactLabels ? "marketing-budget-field-label" : undefined}>
           Amount
         </span>
         {showSignToggle ? (
@@ -9631,18 +10136,33 @@ function EventMaybeLink({ label, url }: { label: string; url: string }) {
   );
 }
 
+function formatEventSummaryDate(value: string) {
+  const date = parseCampaignDate(value);
+  if (!date) return value;
+  return date.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    timeZone: "UTC",
+    weekday: "short"
+  });
+}
+
 function BudgetView({
   entries,
   onAddEntry,
   onDeleteEntry,
   onEntryChange,
-  onOpenEntrySource
+  onOpenEntrySource,
+  onNavigationContextChange,
+  restoreContext
 }: {
   entries: BudgetEntry[];
   onAddEntry: () => string;
   onDeleteEntry: (entryId: string) => void;
   onEntryChange: (entryId: string, updates: Partial<BudgetEntry>) => void;
   onOpenEntrySource: (entry: BudgetEntry) => void;
+  onNavigationContextChange: (context: BudgetNavigationContext | null) => void;
+  restoreContext: BudgetNavigationContext | null;
 }) {
   const summary = getBudgetSummary(entries);
   const cashflowPoints = useMemo(() => getBudgetCashflowPoints(entries), [entries]);
@@ -9654,8 +10174,12 @@ function BudgetView({
     () => new Map(entries.map((entry) => [entry.id, entry])),
     [entries]
   );
-  const [isHistoricalLedgerOpen, setIsHistoricalLedgerOpen] = useState(false);
-  const [isMoreAnalyticsOpen, setIsMoreAnalyticsOpen] = useState(false);
+  const [isHistoricalLedgerOpen, setIsHistoricalLedgerOpen] = useState(
+    () => restoreContext?.historicalLedgerOpen ?? false
+  );
+  const [isMoreAnalyticsOpen, setIsMoreAnalyticsOpen] = useState(
+    () => restoreContext?.moreAnalyticsOpen ?? false
+  );
   const [pendingEntryFocusId, setPendingEntryFocusId] = useState<string | null>(
     null
   );
@@ -9777,7 +10301,14 @@ function BudgetView({
         <button
           aria-expanded={isMoreAnalyticsOpen}
           className="budget-more-analytics-button module-accent module-accent-budget"
-          onClick={() => setIsMoreAnalyticsOpen((current) => !current)}
+          onClick={() => {
+            const nextIsOpen = !isMoreAnalyticsOpen;
+            onNavigationContextChange({
+              historicalLedgerOpen: isHistoricalLedgerOpen,
+              moreAnalyticsOpen: nextIsOpen
+            });
+            setIsMoreAnalyticsOpen(nextIsOpen);
+          }}
           type="button"
         >
           <span>More analytics</span>
@@ -9843,6 +10374,10 @@ function BudgetView({
             className="add-campaign-button"
             onClick={() => {
               const entryId = onAddEntry();
+              onNavigationContextChange({
+                historicalLedgerOpen: true,
+                moreAnalyticsOpen: isMoreAnalyticsOpen
+              });
               setIsHistoricalLedgerOpen(true);
               setPendingEntryFocusId(entryId);
             }}
@@ -9874,7 +10409,14 @@ function BudgetView({
           <button
             aria-expanded={isHistoricalLedgerOpen}
             className="budget-more-analytics-button budget-see-more-button"
-            onClick={() => setIsHistoricalLedgerOpen((current) => !current)}
+            onClick={() => {
+              const nextIsOpen = !isHistoricalLedgerOpen;
+              onNavigationContextChange({
+                historicalLedgerOpen: nextIsOpen,
+                moreAnalyticsOpen: isMoreAnalyticsOpen
+              });
+              setIsHistoricalLedgerOpen(nextIsOpen);
+            }}
             type="button"
           >
             <span>See more</span>
@@ -10126,26 +10668,26 @@ function BudgetLedgerTable({
             <th scope="col">Actions</th>
           </tr>
         </thead>
-        <tbody>
-          {entries.length > 0 ? (
-            entries.map((entry) => (
-              <BudgetEntryRow
-                entry={entry}
-                entriesById={entriesById}
-                key={entry.id}
-                onDelete={onDeleteEntry}
-                onEntryChange={onEntryChange}
-                onOpenSource={onOpenEntrySource}
-              />
-            ))
-          ) : (
+        {entries.length > 0 ? (
+          entries.map((entry) => (
+            <BudgetEntryRow
+              entry={entry}
+              entriesById={entriesById}
+              key={`${entry.id}:${entry.date}:${entry.paymentPlanEndDate ?? ""}`}
+              onDelete={onDeleteEntry}
+              onEntryChange={onEntryChange}
+              onOpenSource={onOpenEntrySource}
+            />
+          ))
+        ) : (
+          <tbody>
             <tr>
               <td className="budget-empty-row" colSpan={6}>
                 {emptyMessage}
               </td>
             </tr>
-          )}
-        </tbody>
+          </tbody>
+        )}
       </table>
     </div>
   );
@@ -10219,7 +10761,11 @@ function BudgetEntryRow({
   const [isActionsOpen, setIsActionsOpen] = useState(false);
   const [isSourceLinkOpen, setIsSourceLinkOpen] = useState(false);
   const [amountInput, setAmountInput] = useState(String(getBudgetSignedAmount(entry)));
-  const recurringActionRef = useRef<HTMLDivElement | null>(null);
+  const [entryDateDraft, setEntryDateDraft] = useState(entry.date);
+  const [paymentPlanEndDateDraft, setPaymentPlanEndDateDraft] = useState(
+    entry.paymentPlanEndDate ?? ""
+  );
+  const inlineDeleteActionRef = useRef<HTMLDivElement | null>(null);
   const descriptionInputRef = useRef<HTMLTextAreaElement | null>(null);
   const sourceActionRef = useRef<HTMLDivElement | null>(null);
   const signedAmount = getBudgetSignedAmount(entry);
@@ -10228,7 +10774,20 @@ function BudgetEntryRow({
   const isAutoRecurringEntry = Boolean(entry.generated && entry.sourceRecurringEntryId);
   const generatedSourceLabel = getBudgetGeneratedSourceLabel(entry);
   const canUseLedgerActions = canDeleteBudgetEntryFromLedger(entry);
+  const usesInlineDeleteAction =
+    isRecurringEntry || (!entry.generated && canUseLedgerActions);
   const stripeFamily = getBudgetRowStripeFamily(entry, entriesById);
+
+  function commitEntryDate(nextDate = entryDateDraft) {
+    if (!toIsoDate(nextDate) || nextDate === entry.date) return;
+    onEntryChange(entry.id, { date: nextDate });
+  }
+
+  function commitPaymentPlanEndDate(nextDate = paymentPlanEndDateDraft) {
+    if (nextDate && !toIsoDate(nextDate)) return;
+    if (nextDate === (entry.paymentPlanEndDate ?? "")) return;
+    onEntryChange(entry.id, { paymentPlanEndDate: nextDate });
+  }
 
   useEffect(() => {
     const input = descriptionInputRef.current;
@@ -10265,7 +10824,7 @@ function BudgetEntryRow({
   }, [isSourceLinkOpen]);
 
   useEffect(() => {
-    if (!isRecurringEntry || !isActionsOpen) {
+    if (!usesInlineDeleteAction || !isActionsOpen) {
       return;
     }
 
@@ -10274,7 +10833,7 @@ function BudgetEntryRow({
 
       if (
         target instanceof Node &&
-        recurringActionRef.current?.contains(target)
+        inlineDeleteActionRef.current?.contains(target)
       ) {
         return;
       }
@@ -10284,10 +10843,12 @@ function BudgetEntryRow({
 
     document.addEventListener("pointerdown", closeRecurringDelete);
     return () => document.removeEventListener("pointerdown", closeRecurringDelete);
-  }, [isActionsOpen, isRecurringEntry]);
+  }, [isActionsOpen, usesInlineDeleteAction]);
 
   return (
-    <>
+    <tbody
+      className={`budget-record${isRecurringEntry && !isAutoRecurringEntry ? " budget-record-recurring" : ""}`}
+    >
     <tr
       className={[
         "budget-ledger-row",
@@ -10303,14 +10864,20 @@ function BudgetEntryRow({
       id={getBudgetEntryElementId(entry.id)}
     >
       <td className="budget-date-cell" data-label="Date">
-        <input
+        <DateInput
           aria-label={`${entry.description} date`}
+          calendarLabel={`Choose ${entry.description} date`}
           disabled={entry.generated}
-          inputMode="numeric"
-          onChange={(event) =>
-            onEntryChange(entry.id, { date: event.target.value })
-          }
-          value={entry.date}
+          error={Boolean(entryDateDraft && !toIsoDate(entryDateDraft))}
+          onBlur={() => commitEntryDate()}
+          onChange={setEntryDateDraft}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            commitEntryDate();
+          }}
+          onPickerChange={(nextDate) => commitEntryDate(nextDate)}
+          value={entryDateDraft}
         />
       </td>
       <td className="budget-bucket-column" data-label="Bucket">
@@ -10407,8 +10974,8 @@ function BudgetEntryRow({
         </div>
       </td>
       <td className="budget-actions-column" data-label="Actions">
-        {isRecurringEntry ? (
-          <div className="budget-actions-cell" ref={recurringActionRef}>
+        {usesInlineDeleteAction ? (
+          <div className="budget-actions-cell" ref={inlineDeleteActionRef}>
             <button
               aria-label={
                 isActionsOpen
@@ -10512,16 +11079,19 @@ function BudgetEntryRow({
         className={`budget-recurring-detail-row budget-ledger-row budget-ledger-row-${stripeFamily} budget-ledger-row-recurring`}
       >
         <td className="budget-date-cell">
-          <input
+          <DateInput
             aria-label={`${entry.description} payment plan end date`}
-            inputMode="numeric"
-            onChange={(event) =>
-              onEntryChange(entry.id, {
-                paymentPlanEndDate: event.target.value
-              })
-            }
-            placeholder="End date"
-            value={entry.paymentPlanEndDate ?? ""}
+            calendarLabel={`Choose ${entry.description} payment plan end date`}
+            error={Boolean(paymentPlanEndDateDraft && !toIsoDate(paymentPlanEndDateDraft))}
+            onBlur={() => commitPaymentPlanEndDate()}
+            onChange={setPaymentPlanEndDateDraft}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              event.preventDefault();
+              commitPaymentPlanEndDate();
+            }}
+            onPickerChange={(nextDate) => commitPaymentPlanEndDate(nextDate)}
+            value={paymentPlanEndDateDraft}
           />
         </td>
         <td className="budget-bucket-column">
@@ -10541,7 +11111,7 @@ function BudgetEntryRow({
         <td aria-hidden colSpan={4} />
       </tr>
     ) : null}
-    </>
+    </tbody>
   );
 }
 
@@ -10550,19 +11120,23 @@ function ProductionView({
   onAddSong,
   onDeleteSong,
   onFocusSong,
+  onNavigationContextChange,
   onSongChange,
   phaseOptions,
   saveStatus,
-  songs
+  songs,
+  restoreContext
 }: {
-  focusTarget: { elementId?: string; songId: string; token: number } | null;
+  focusTarget: { elementId?: string; inputId?: string; songId: string; token: number } | null;
   onAddSong: () => void;
   onDeleteSong: (songId: string) => void;
   onFocusSong: (songId: string, elementId?: string) => void;
+  onNavigationContextChange: (context: ProductionNavigationContext | null) => void;
   onSongChange: (songId: string, updates: Partial<ProductionSongConfig>) => void;
   phaseOptions: Array<{ id: string; label: string }>;
   saveStatus: RefreshStatus;
   songs: ProductionSongConfig[];
+  restoreContext: { context: ProductionNavigationContext; token: number } | null;
 }) {
   const songElementRefs = useRef<Record<string, HTMLElement | null>>({});
 
@@ -10580,6 +11154,12 @@ function ProductionView({
         behavior: "smooth",
         block: "start"
       });
+      if (focusTarget.inputId) {
+        const inputId = focusTarget.inputId;
+        window.setTimeout(() => {
+          document.getElementById(inputId)?.focus({ preventScroll: true });
+        }, 140);
+      }
     }, 80);
   }, [focusTarget]);
 
@@ -10610,11 +11190,15 @@ function ProductionView({
             onChange={onSongChange}
             onDelete={onDeleteSong}
             onFocus={onFocusSong}
+            onNavigationContextChange={onNavigationContextChange}
             phaseOptions={phaseOptions}
             refCallback={(element) => {
               songElementRefs.current[song.id] = element;
             }}
             song={song}
+            restoreContext={
+              restoreContext?.context.songId === song.id ? restoreContext : null
+            }
           />
         ))}
 
@@ -10632,17 +11216,21 @@ function ProductionSongBoard({
   onChange,
   onDelete,
   onFocus,
+  onNavigationContextChange,
   phaseOptions,
   refCallback,
-  song
+  song,
+  restoreContext
 }: {
   focusToken?: number;
   onChange: (songId: string, updates: Partial<ProductionSongConfig>) => void;
   onDelete: (songId: string) => void;
   onFocus: (songId: string, elementId?: string) => void;
+  onNavigationContextChange: (context: ProductionNavigationContext | null) => void;
   phaseOptions: Array<{ id: string; label: string }>;
   refCallback: (element: HTMLElement | null) => void;
   song: ProductionSongConfig;
+  restoreContext: { context: ProductionNavigationContext; token: number } | null;
 }) {
   const [songTitle, setSongTitle] = useState(song.title);
   const [songTitleInput, setSongTitleInput] = useState(song.title);
@@ -10662,7 +11250,7 @@ function ProductionSongBoard({
     ? getDaysToRelease(productionDeadlineDate)
     : null;
   const nextTasks = getNextProductionTasks(song.steps).slice(0, 3);
-  const canUpdateDeadline = Boolean(parseCampaignDate(deadlineInput));
+  const canUpdateDeadline = Boolean(toIsoDate(deadlineInput));
   const canSaveSongTitle = songTitleInput.trim().length > 0;
 
   useEffect(() => {
@@ -10707,6 +11295,12 @@ function ProductionSongBoard({
       window.clearTimeout(highlightTimer);
     };
   }, [focusToken]);
+
+  useEffect(() => {
+    if (!restoreContext) return;
+    const restoreTimer = window.setTimeout(() => setIsSongOpen(true), 0);
+    return () => window.clearTimeout(restoreTimer);
+  }, [restoreContext]);
 
   useEffect(() => {
     if (!isReleaseDateEditing) {
@@ -10763,9 +11357,7 @@ function ProductionSongBoard({
   }
 
   function applyDeadlineUpdate() {
-    const nextDeadline = parseCampaignDate(deadlineInput);
-
-    if (!nextDeadline) {
+    if (!toIsoDate(deadlineInput)) {
       return;
     }
 
@@ -10784,7 +11376,14 @@ function ProductionSongBoard({
 
   function toggleSongDetails() {
     setIsSongDeleteArmed(false);
-    setIsSongOpen((current) => !current);
+    const nextIsOpen = !isSongOpen;
+    onNavigationContextChange(nextIsOpen ? { songId: song.id } : null);
+    setIsSongOpen(nextIsOpen);
+  }
+
+  function focusProductionStep(stepId: string) {
+    onNavigationContextChange({ songId: song.id, stepId });
+    onFocus(song.id, getProductionStepElementId(song.id, stepId));
   }
 
   function requestSongDelete() {
@@ -10804,10 +11403,18 @@ function ProductionSongBoard({
   }
 
   function updateStep(stepId: string, updates: Partial<ProductionStep>) {
-    onFocus(song.id, getProductionStepElementId(song.id, stepId));
+    focusProductionStep(stepId);
     updateSteps((currentSteps) =>
       currentSteps.map((step) =>
         step.id === stepId ? { ...step, ...updates } : step
+      )
+    );
+  }
+
+  function commitStepDeadline(stepId: string, deadline: string) {
+    updateSteps((currentSteps) =>
+      currentSteps.map((step) =>
+        step.id === stepId ? { ...step, deadline } : step
       )
     );
   }
@@ -10822,7 +11429,7 @@ function ProductionSongBoard({
       : parseCampaignDate(appliedDeadlineInput) ?? getTodayUtcDate();
 
     const newStepId = `extra-step-${Date.now()}`;
-    onFocus(song.id, getProductionStepElementId(song.id, newStepId));
+    focusProductionStep(newStepId);
     updateSteps((currentSteps) => [
       ...currentSteps,
       {
@@ -10857,7 +11464,7 @@ function ProductionSongBoard({
   function addStepTask(stepId: string) {
     const currentStep = song.steps.find((step) => step.id === stepId);
     const newTaskId = `${stepId}-extra-${(currentStep?.extraTasks.length ?? 0) + 1}`;
-    onFocus(song.id, getProductionTaskElementId(song.id, stepId, newTaskId));
+    focusProductionStep(stepId);
     updateSteps((currentSteps) =>
       currentSteps.map((step) =>
         step.id === stepId
@@ -10883,7 +11490,7 @@ function ProductionSongBoard({
     taskId: string,
     updates: Partial<Pick<ExtraCampaignTask, "budgetLines" | "status" | "title">>
   ) {
-    onFocus(song.id, getProductionTaskElementId(song.id, stepId, taskId));
+    focusProductionStep(stepId);
     updateSteps((currentSteps) =>
       currentSteps.map((step) =>
         step.id === stepId
@@ -10917,7 +11524,6 @@ function ProductionSongBoard({
         isFocusHighlighted ? " production-song-board-focused" : ""
       }`}
       aria-label={`${songTitle} production plan`}
-      data-scroll-anchor={isSongOpen ? "open-card" : undefined}
       ref={refCallback}
     >
       <div className="campaign-board-header production-board-header">
@@ -11051,12 +11657,16 @@ function ProductionSongBoard({
             <div className="song-release-options-field production-release-date-editor">
               <span className="song-option-field-heading">Release date</span>
               <div className="release-date-input-row">
-                <input
+                <DateInput
                   aria-label="Release date in dd/mm/yyyy format"
+                  calendarLabel="Choose release date"
                   disabled={!isReleaseDateEditing}
-                  inputMode="numeric"
-                  onChange={(event) => setDeadlineInput(event.target.value)}
-                  placeholder="dd/mm/yyyy"
+                  error={
+                    isReleaseDateEditing && deadlineInput && !canUpdateDeadline
+                      ? "Enter a valid date."
+                      : undefined
+                  }
+                  onChange={setDeadlineInput}
                   value={deadlineInput}
                 />
                 <button
@@ -11116,11 +11726,12 @@ function ProductionSongBoard({
             <tbody>
               {song.steps.map((step) => (
                 <ProductionStepRow
-                  key={step.id}
+                  key={`${step.id}:${step.deadline}`}
                   onAddTask={addStepTask}
                   onDeleteStep={deleteProductionStep}
                   onDeleteTask={deleteStepTask}
                   onStepChange={updateStep}
+                  onStepDeadlineCommit={commitStepDeadline}
                   onTaskChange={updateStepTask}
                   songId={song.id}
                   step={step}
@@ -11186,11 +11797,22 @@ function getProductionTaskElementId(
   return `production-task-${songId}-${stepId}-${taskId}`;
 }
 
+function getProductionTaskInputElementId(
+  songId: string,
+  stepId: string,
+  target: Extract<FocusQueueActionTarget, { kind: "production" }>
+) {
+  return target.taskKey === "main"
+    ? `production-task-input-${songId}-${stepId}-notes`
+    : `production-task-input-${songId}-${stepId}-${target.extraTaskId}`;
+}
+
 function ProductionStepRow({
   onAddTask,
   onDeleteStep,
   onDeleteTask,
   onStepChange,
+  onStepDeadlineCommit,
   onTaskChange,
   songId,
   step
@@ -11199,6 +11821,7 @@ function ProductionStepRow({
   onDeleteStep: (stepId: string) => void;
   onDeleteTask: (stepId: string, taskId: string) => void;
   onStepChange: (stepId: string, updates: Partial<ProductionStep>) => void;
+  onStepDeadlineCommit: (stepId: string, deadline: string) => void;
   onTaskChange: (
     stepId: string,
     taskId: string,
@@ -11214,6 +11837,7 @@ function ProductionStepRow({
     formatInputDateForDatabase(step.deadline) ?? ""
   );
   const [isDeleteArmed, setIsDeleteArmed] = useState(false);
+  const [deadlineDraft, setDeadlineDraft] = useState(step.deadline);
   const deleteButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -11245,16 +11869,54 @@ function ProductionStepRow({
     onDeleteStep(step.id);
   }
 
+  function commitDeadline(nextDeadline = deadlineDraft) {
+    if (!toIsoDate(nextDeadline)) return;
+
+    if (nextDeadline !== step.deadline) {
+      onStepDeadlineCommit(step.id, nextDeadline);
+    }
+  }
+
   return (
     <tr className="production-step-row" id={getProductionStepElementId(songId, step.id)}>
       <td className="production-step-content-cell" colSpan={2}>
         <div className="campaign-cell">
+          <div className="production-step-deadline-section">
+            <strong>{formattedDeadline ? `Deadline, ${formattedDeadline}` : "Deadline"}</strong>
+            <label className="production-step-date-field">
+              <DateInput
+                aria-label={`${step.label} deadline`}
+                calendarLabel={`Choose ${step.label} deadline`}
+                error={
+                  deadlineDraft && !toIsoDate(deadlineDraft)
+                    ? "Enter a valid date."
+                    : undefined
+                }
+                onBlur={() => commitDeadline()}
+                onChange={(nextDeadline) => {
+                  setDeadlineDraft(nextDeadline);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    commitDeadline();
+                  }
+                }}
+                onPickerChange={(nextDeadline) => {
+                  setDeadlineDraft(nextDeadline);
+                  commitDeadline(nextDeadline);
+                }}
+                value={deadlineDraft}
+              />
+            </label>
+          </div>
           <div className="production-step-details-section">
             <div className="production-step-task-row">
               <label className="clip-name-field">
                 <input
                   aria-label={`${step.label} production step name`}
                   disabled={step.isDefaultStep}
+                  id={`production-task-input-${songId}-${step.id}-main`}
                   onChange={(event) =>
                     onStepChange(step.id, { label: event.target.value })
                   }
@@ -11280,25 +11942,12 @@ function ProductionStepRow({
             <label className="clip-name-field production-step-notes-field">
               <input
                 aria-label={`${step.label} notes`}
+                id={`production-task-input-${songId}-${step.id}-notes`}
                 onChange={(event) =>
                   onStepChange(step.id, { notes: event.target.value })
                 }
                 placeholder="Take a note"
                 value={step.notes}
-              />
-            </label>
-          </div>
-          <div className="production-step-deadline-section">
-            <strong>{formattedDeadline ? `Deadline, ${formattedDeadline}` : "Deadline"}</strong>
-            <label className="production-step-date-field">
-              <input
-                aria-label={`${step.label} deadline`}
-                inputMode="numeric"
-                onChange={(event) =>
-                  onStepChange(step.id, { deadline: event.target.value })
-                }
-                placeholder="dd/mm/yyyy"
-                value={step.deadline}
               />
             </label>
           </div>
@@ -11739,14 +12388,16 @@ function MarketingView({
   onCampaignDaysChange,
   onDeleteCampaign,
   onFocusCampaign,
+  onNavigationContextChange,
   onGeneralCampaignSettingsSave,
   onProgressVisibilityChange,
   onReleaseDateSave,
   recentProductionSongId,
-  productionSongs
+  productionSongs,
+  restoreContext
 }: {
   campaigns: MarketingCampaignConfig[];
-  focusTarget: { campaignId: string; elementId?: string; token: number } | null;
+  focusTarget: { campaignId: string; elementId?: string; inputId?: string; token: number } | null;
   onAddCampaign: (input: NewMarketingCampaignInput) => void;
   onCampaignBudgetLinesChange: (
     campaignId: string,
@@ -11755,6 +12406,7 @@ function MarketingView({
   onCampaignDaysChange: (campaignId: string, campaignDays: CampaignDay[]) => void;
   onDeleteCampaign: (campaignId: string) => void;
   onFocusCampaign: (campaignId: string, elementId?: string) => void;
+  onNavigationContextChange: (context: MarketingNavigationContext | null) => void;
   onGeneralCampaignSettingsSave: (
     campaignId: string,
     updates: { albumArtUrl: string; releaseTitle: string; startDate: string },
@@ -11764,6 +12416,7 @@ function MarketingView({
   onReleaseDateSave: (campaignId: string, releaseDate: string) => void;
   recentProductionSongId?: string;
   productionSongs: ProductionSongConfig[];
+  restoreContext: { context: MarketingNavigationContext; token: number } | null;
 }) {
   const campaignElementRefs = useRef<Record<string, HTMLElement | null>>({});
   const [selectedProductionSongId, setSelectedProductionSongId] = useState(
@@ -11778,6 +12431,14 @@ function MarketingView({
     const today = parseCampaignDateKey(getViennaDateKey()) ?? getTodayUtcDate();
     return formatDateKeyForInput(addUtcDays(today, 13).toISOString().slice(0, 10));
   });
+  const generalCampaignStartDateIso = toIsoDate(generalCampaignStartDate);
+  const generalCampaignEndDateIso = toIsoDate(generalCampaignEndDate);
+  const canCreateGeneralCampaign = Boolean(
+    generalCampaignTitle.trim() &&
+      generalCampaignStartDateIso &&
+      generalCampaignEndDateIso &&
+      generalCampaignStartDateIso <= generalCampaignEndDateIso
+  );
   const recentProductionSong = productionSongs.find(
     (song) => song.id === recentProductionSongId
   );
@@ -11849,6 +12510,12 @@ function MarketingView({
         behavior: "smooth",
         block: "start"
       });
+      if (focusTarget.inputId) {
+        const inputId = focusTarget.inputId;
+        window.setTimeout(() => {
+          document.getElementById(inputId)?.focus({ preventScroll: true });
+        }, 140);
+      }
     }, 80);
   }, [focusTarget]);
 
@@ -11874,10 +12541,14 @@ function MarketingView({
             onDaysChange={onCampaignDaysChange}
             onDelete={onDeleteCampaign}
             onFocus={onFocusCampaign}
+            onNavigationContextChange={onNavigationContextChange}
             onGeneralCampaignSettingsSave={onGeneralCampaignSettingsSave}
             onProgressVisibilityChange={onProgressVisibilityChange}
             onReleaseDateSave={onReleaseDateSave}
             productionSongs={productionSongs}
+            restoreContext={
+              restoreContext?.context.campaignId === campaign.id ? restoreContext : null
+            }
             refCallback={(element) => {
               campaignElementRefs.current[campaign.id] = element;
             }}
@@ -11921,18 +12592,26 @@ function MarketingView({
                 placeholder="Campaign name"
                 value={generalCampaignTitle}
               />
-              <input
+              <DateInput
                 aria-label="General campaign start date"
-                inputMode="numeric"
-                onChange={(event) => setGeneralCampaignStartDate(event.target.value)}
-                placeholder="Start dd/mm/yyyy"
+                calendarLabel="Choose general campaign start date"
+                error={
+                  generalCampaignStartDate && !generalCampaignStartDateIso
+                    ? "Enter a valid date."
+                    : undefined
+                }
+                onChange={setGeneralCampaignStartDate}
                 value={generalCampaignStartDate}
               />
-              <input
+              <DateInput
                 aria-label="General campaign end date"
-                inputMode="numeric"
-                onChange={(event) => setGeneralCampaignEndDate(event.target.value)}
-                placeholder="End dd/mm/yyyy"
+                calendarLabel="Choose general campaign end date"
+                error={
+                  generalCampaignEndDate && !generalCampaignEndDateIso
+                    ? "Enter a valid date."
+                    : undefined
+                }
+                onChange={setGeneralCampaignEndDate}
                 value={generalCampaignEndDate}
               />
             </div>
@@ -11941,13 +12620,7 @@ function MarketingView({
             className="add-campaign-button"
             disabled={
               campaignSource === "general"
-                ? !generalCampaignTitle.trim() ||
-                  !parseCampaignDate(generalCampaignStartDate) ||
-                  !parseCampaignDate(generalCampaignEndDate) ||
-                  generalCampaignStartDate.length !== 10 ||
-                  generalCampaignEndDate.length !== 10 ||
-                  (parseCampaignDate(generalCampaignStartDate)?.getTime() ?? 0) >
-                    (parseCampaignDate(generalCampaignEndDate)?.getTime() ?? 0)
+                ? !canCreateGeneralCampaign
                 : !selectedProductionSong
             }
             onClick={() => {
@@ -11987,11 +12660,13 @@ function MarketingCampaignBoard({
   onDaysChange,
   onDelete,
   onFocus,
+  onNavigationContextChange,
   onGeneralCampaignSettingsSave,
   onProgressVisibilityChange,
   onReleaseDateSave,
   productionSongs,
-  refCallback
+  refCallback,
+  restoreContext
 }: {
   campaign: MarketingCampaignConfig;
   focusToken?: number;
@@ -12002,6 +12677,7 @@ function MarketingCampaignBoard({
   onDaysChange: (campaignId: string, campaignDays: CampaignDay[]) => void;
   onDelete: (campaignId: string) => void;
   onFocus: (campaignId: string, elementId?: string) => void;
+  onNavigationContextChange: (context: MarketingNavigationContext | null) => void;
   onGeneralCampaignSettingsSave: (
     campaignId: string,
     updates: { albumArtUrl: string; releaseTitle: string; startDate: string },
@@ -12011,6 +12687,7 @@ function MarketingCampaignBoard({
   onReleaseDateSave: (campaignId: string, releaseDate: string) => void;
   productionSongs: ProductionSongConfig[];
   refCallback: (element: HTMLElement | null) => void;
+  restoreContext: { context: MarketingNavigationContext; token: number } | null;
 }) {
   const [releaseDateInput, setReleaseDateInput] = useState(
     campaign.releaseDate
@@ -12078,13 +12755,14 @@ function MarketingCampaignBoard({
             id: `${campaign.id}-marketing-budget-line-1`
           }
         ];
-  const canUpdateReleaseDate = Boolean(parseCampaignDate(releaseDateInput));
+  const releaseDateIso = toIsoDate(releaseDateInput);
+  const generalStartDateIso = toIsoDate(generalStartDateInput);
+  const canUpdateReleaseDate = Boolean(releaseDateIso);
   const canSaveGeneralSettings = Boolean(
     generalTitleInput.trim() &&
-      parseCampaignDate(generalStartDateInput) &&
-      parseCampaignDate(releaseDateInput) &&
-      parseCampaignDate(generalStartDateInput)!.getTime() <=
-        (parseCampaignDate(releaseDateInput)?.getTime() ?? 0)
+      generalStartDateIso &&
+      releaseDateIso &&
+      generalStartDateIso <= releaseDateIso
   );
   const dateEditorLabel = "Release date";
   const dateChangeWarning =
@@ -12142,6 +12820,12 @@ function MarketingCampaignBoard({
       window.clearTimeout(highlightTimer);
     };
   }, [focusToken]);
+
+  useEffect(() => {
+    if (!restoreContext) return;
+    const restoreTimer = window.setTimeout(() => setIsCampaignOpen(true), 0);
+    return () => window.clearTimeout(restoreTimer);
+  }, [restoreContext]);
 
   useEffect(() => {
     if (!isBudgetDeleteArmed) {
@@ -12353,21 +13037,28 @@ function MarketingCampaignBoard({
 
   function toggleCampaignDetails() {
     setIsCampaignDeleteArmed(false);
-    setIsCampaignOpen((current) => {
-      const nextIsOpen = !current;
+    const nextIsOpen = !isCampaignOpen;
+    onNavigationContextChange(
+      nextIsOpen
+        ? {
+            campaignId: campaign.id,
+            dayNumber: getActiveCampaignDayNumber(campaignDays) ?? undefined
+          }
+        : null
+    );
+    setIsCampaignOpen(nextIsOpen);
+    if (nextIsOpen) scrollToCurrentCampaignDay();
+  }
 
-      if (nextIsOpen) {
-        scrollToCurrentCampaignDay();
-      }
-
-      return nextIsOpen;
-    });
+  function focusCampaignDay(dayNumber: number) {
+    onNavigationContextChange({ campaignId: campaign.id, dayNumber });
+    onFocus(campaign.id, getMarketingCampaignDayElementId(campaign.id, dayNumber));
   }
 
   function applyReleaseDateUpdate() {
     const nextReleaseDate = parseCampaignDate(releaseDateInput);
 
-    if (!nextReleaseDate) {
+    if (!releaseDateIso || !nextReleaseDate) {
       return;
     }
 
@@ -12454,7 +13145,7 @@ function MarketingCampaignBoard({
   }
 
   function updateClipName(dayNumber: number, clipName: string) {
-    onFocus(campaign.id, getMarketingCampaignDayElementId(campaign.id, dayNumber));
+    focusCampaignDay(dayNumber);
     updateCampaignDaysState((currentDays) =>
       currentDays.map((day) =>
         day.dayNumber === dayNumber ? { ...day, clipName } : day
@@ -12467,7 +13158,7 @@ function MarketingCampaignBoard({
     task: keyof CampaignDay["statuses"],
     status: MarketingStatus
   ) {
-    onFocus(campaign.id, getMarketingCampaignDayElementId(campaign.id, dayNumber));
+    focusCampaignDay(dayNumber);
     updateCampaignDaysState((currentDays) =>
       currentDays.map((day) =>
         day.dayNumber === dayNumber
@@ -12478,7 +13169,7 @@ function MarketingCampaignBoard({
   }
 
   function addExtraTask(dayNumber: number) {
-    onFocus(campaign.id, getMarketingCampaignDayElementId(campaign.id, dayNumber));
+    focusCampaignDay(dayNumber);
     updateCampaignDaysState((currentDays) =>
       currentDays.map((day) =>
         day.dayNumber === dayNumber
@@ -12503,7 +13194,7 @@ function MarketingCampaignBoard({
     taskId: string,
     updates: Partial<Pick<ExtraCampaignTask, "budgetLines" | "status" | "title">>
   ) {
-    onFocus(campaign.id, getMarketingCampaignDayElementId(campaign.id, dayNumber));
+    focusCampaignDay(dayNumber);
     updateCampaignDaysState((currentDays) =>
       currentDays.map((day) =>
         day.dayNumber === dayNumber
@@ -12519,7 +13210,7 @@ function MarketingCampaignBoard({
   }
 
   function deleteExtraTask(dayNumber: number, taskId: string) {
-    onFocus(campaign.id, getMarketingCampaignDayElementId(campaign.id, dayNumber));
+    focusCampaignDay(dayNumber);
     updateCampaignDaysState((currentDays) =>
       currentDays.map((day) =>
         day.dayNumber === dayNumber
@@ -12587,12 +13278,8 @@ function MarketingCampaignBoard({
             )
           }))
       );
-      window.setTimeout(
-        () =>
-          onFocus(
-            campaign.id,
-            getMarketingCampaignDayElementId(campaign.id, nextDayNumber)
-          ),
+    window.setTimeout(
+        () => focusCampaignDay(nextDayNumber),
         0
       );
       return;
@@ -12603,7 +13290,7 @@ function MarketingCampaignBoard({
       new Date(Date.UTC(2026, 6, 10));
 
     const nextDayNumber = campaignDays.length + 1;
-    onFocus(campaign.id, getMarketingCampaignDayElementId(campaign.id, nextDayNumber));
+    focusCampaignDay(nextDayNumber);
     updateCampaignDaysState((currentDays) => [
       ...currentDays,
       buildCampaignDay(releaseDate, currentDays.length)
@@ -12662,17 +13349,13 @@ function MarketingCampaignBoard({
       nextDays
     );
     window.setTimeout(
-      () =>
-        onFocus(
-          campaign.id,
-          getMarketingCampaignDayElementId(campaign.id, 1)
-        ),
+      () => focusCampaignDay(1),
       0
     );
   }
 
   function deleteCampaignDay(dayNumber: number) {
-    onFocus(campaign.id, getMarketingCampaignDayElementId(campaign.id, dayNumber));
+    focusCampaignDay(dayNumber);
     updateCampaignDaysState((currentDays) =>
       currentDays.filter((day) =>
         isGeneralCampaign
@@ -12764,7 +13447,6 @@ function MarketingCampaignBoard({
           isFocusHighlighted ? " production-song-board-focused" : ""
         }`}
         aria-label={`${displayedCampaignTitle} marketing campaign`}
-        data-scroll-anchor={isCampaignOpen ? "open-card" : undefined}
         ref={refCallback}
       >
         <div className="campaign-board-header">
@@ -12877,20 +13559,30 @@ function MarketingCampaignBoard({
                     placeholder="Album art image URL"
                     value={generalAlbumArtUrlInput}
                   />
-                  <input
+                  <DateInput
                     aria-label="General campaign start date"
+                    calendarLabel="Choose general campaign start date"
                     disabled={!isGeneralSettingsEditing}
-                    inputMode="numeric"
-                    onChange={(event) => setGeneralStartDateInput(event.target.value)}
-                    placeholder="dd/mm/yyyy"
+                    error={
+                      isGeneralSettingsEditing &&
+                      generalStartDateInput &&
+                      !generalStartDateIso
+                        ? "Enter a valid date."
+                        : undefined
+                    }
+                    onChange={setGeneralStartDateInput}
                     value={generalStartDateInput}
                   />
-                  <input
+                  <DateInput
                     aria-label="General campaign end date"
+                    calendarLabel="Choose general campaign end date"
                     disabled={!isGeneralSettingsEditing}
-                    inputMode="numeric"
-                    onChange={(event) => setReleaseDateInput(event.target.value)}
-                    placeholder="dd/mm/yyyy"
+                    error={
+                      isGeneralSettingsEditing && releaseDateInput && !releaseDateIso
+                        ? "Enter a valid date."
+                        : undefined
+                    }
+                    onChange={setReleaseDateInput}
                     value={releaseDateInput}
                   />
                   <button
@@ -12964,12 +13656,16 @@ function MarketingCampaignBoard({
                 <label className="release-date-field marketing-release-date-editor">
                   <span>{dateEditorLabel}</span>
                   <div className="release-date-input-row">
-                    <input
+                    <DateInput
                       aria-label="Release date in dd/mm/yyyy format"
+                      calendarLabel="Choose release date"
                       disabled={!isReleaseDateEditing}
-                      inputMode="numeric"
-                      onChange={(event) => updateReleaseDateInput(event.target.value)}
-                      placeholder="dd/mm/yyyy"
+                      error={
+                        isReleaseDateEditing && releaseDateInput && !releaseDateIso
+                          ? "Enter a valid date."
+                          : undefined
+                      }
+                      onChange={updateReleaseDateInput}
                       value={releaseDateInput}
                     />
                     <button
@@ -13036,6 +13732,7 @@ function MarketingCampaignBoard({
                       ) : null}
                     </td>
                     <MarketingCampaignTaskCell
+                      campaignId={campaign.id}
                       onAddTask={addExtraTask}
                       day={day}
                       onClipNameChange={updateClipName}
@@ -13127,7 +13824,18 @@ function getMarketingCampaignDayElementId(campaignId: string, dayNumber: number)
   return `marketing-campaign-day-${campaignId}-${dayNumber}`;
 }
 
+function getMarketingTaskInputElementId(
+  campaignId: string,
+  dayNumber: number,
+  extraTaskId?: string
+) {
+  return extraTaskId
+    ? `marketing-task-input-${campaignId}-${dayNumber}-${extraTaskId}`
+    : `marketing-task-input-${campaignId}-${dayNumber}-clip`;
+}
+
 function MarketingCampaignTaskCell({
+  campaignId,
   day,
   onAddTask,
   onClipNameChange,
@@ -13135,6 +13843,7 @@ function MarketingCampaignTaskCell({
   onExtraTaskDelete,
   onStatusChange
 }: {
+  campaignId: string;
   day: CampaignDay;
   onAddTask: (dayNumber: number) => void;
   onClipNameChange: (dayNumber: number, clipName: string) => void;
@@ -13157,6 +13866,7 @@ function MarketingCampaignTaskCell({
           <span>Clip name</span>
           <input
             aria-label={`Clip name for ${day.date}`}
+            id={getMarketingTaskInputElementId(campaignId, day.dayNumber)}
             onChange={(event) =>
               onClipNameChange(day.dayNumber, event.target.value)
             }
@@ -13214,6 +13924,7 @@ function MarketingCampaignTaskCell({
         {day.extraTasks.map((task) => (
           <ExtraCampaignTaskRow
             dayNumber={day.dayNumber}
+            elementId={`marketing-task-${campaignId}-${day.dayNumber}-${task.id}`}
             key={task.id}
             onChange={onExtraTaskChange}
             onDelete={onExtraTaskDelete}
@@ -13299,6 +14010,13 @@ function ExtraCampaignTaskRow({
         )}
         <input
           aria-label={`Extra task name ${task.id}`}
+          id={
+            elementId?.startsWith("production-task-")
+              ? `production-task-input-${elementId.replace(/^production-task-/, "")}`
+              : elementId?.startsWith("marketing-task-")
+                ? `marketing-task-input-${elementId.replace(/^marketing-task-/, "")}`
+                : undefined
+          }
           onChange={(event) =>
             onChange(dayNumber, task.id, { title: event.target.value })
           }
@@ -13389,6 +14107,23 @@ function StatusDot({
   return <span aria-label={label} className={`status-dot status-dot-${status}`} />;
 }
 
+function FocusQueueTaskLabel({ task }: { task: FocusQueueItem }) {
+  if (!task.displayLabel) {
+    return <span className="dashboard-focus-task-label">{task.label}</span>;
+  }
+
+  const { date, song, task: taskText } = task.displayLabel;
+  return (
+    <span className="dashboard-focus-task-label dashboard-focus-task-label-context" title={task.label}>
+      {date ? <span className="dashboard-focus-task-date">{date}</span> : null}
+      {date ? <span aria-hidden> - </span> : null}
+      <span className="dashboard-focus-task-song" title={song}>{song}</span>
+      <span aria-hidden> - </span>
+      <span className="dashboard-focus-task-text" title={taskText}>{taskText}</span>
+    </span>
+  );
+}
+
 function AppleMusicCsvImportControl({
   hideTitle = false,
   importStatus,
@@ -13456,14 +14191,20 @@ function DashboardView({
   dashboardPlatformStats,
   eventEntries,
   eventsLoaded,
+  focusQueueNavigationState,
   onAddQrCode,
   onAddOtherTask,
   onCampaignDaysChange,
   onDeleteQrCode,
   onDeleteOtherTask,
   onDismissAppleMusicReminder,
+  onFocusQueueNavigationStateChange,
   onOpenAppleMusicImport,
   onOtherTaskChange,
+  onOpenFocusTaskSource,
+  onReconfirmFocusTaskStatus,
+  onReconfirmOtherTaskStatus,
+  onResetFocusProgress,
   onProductionSongChange,
   onQrCodeChange,
   otherTasks,
@@ -13480,14 +14221,20 @@ function DashboardView({
   dashboardPlatformStats: typeof platformStats;
   eventEntries: EventEntry[];
   eventsLoaded: boolean;
+  focusQueueNavigationState: FocusQueueNavigationState;
   onAddQrCode: () => void;
   onAddOtherTask: () => string;
   onCampaignDaysChange: (campaignId: string, campaignDays: CampaignDay[]) => void;
   onDeleteQrCode: (linkId: string) => void;
   onDeleteOtherTask: (taskId: string) => void;
   onDismissAppleMusicReminder: () => void;
+  onFocusQueueNavigationStateChange: (state: FocusQueueNavigationState) => void;
   onOpenAppleMusicImport: () => void;
   onOtherTaskChange: (taskId: string, updates: Partial<OtherTask>) => void;
+  onOpenFocusTaskSource: (task: FocusQueueItem) => void;
+  onReconfirmFocusTaskStatus: (task: FocusQueueItem, status: MarketingStatus) => void;
+  onReconfirmOtherTaskStatus: (task: OtherTask) => void;
+  onResetFocusProgress: () => void;
   onProductionSongChange: (songId: string, updates: Partial<ProductionSongConfig>) => void;
   onQrCodeChange: (linkId: string, updates: Partial<QrCodeLink>) => void;
   otherTasks: OtherTask[];
@@ -13510,10 +14257,17 @@ function DashboardView({
     platformMetricRows
   );
   const isCampaignStartToday = isMarketingCampaignStartToday(campaigns);
+  const isAppleMusicUpdateCompletedToday = dailyFocusProgress.some(
+    (item) => item.taskKey === "other:apple-music-csv-update" && item.status === "done"
+  );
   const appleMusicUpdateTask =
     appleMusicReminderDismissedDate === getViennaDateKey()
       ? null
-      : getAppleMusicUpdateTask(appleMusicLastUpdate, isCampaignStartToday);
+      : getAppleMusicUpdateTask(
+          appleMusicLastUpdate,
+          isCampaignStartToday,
+          isAppleMusicUpdateCompletedToday
+        );
   const focusQueue = getDashboardFocusQueue(
     campaignPreview,
     productionPreviewSongs,
@@ -13615,13 +14369,31 @@ function DashboardView({
       <DashboardFocusQueueCard
         dailyProgress={dailyFocusProgress}
         focusQueue={focusQueue}
+        isTaskListOpen={focusQueueNavigationState.detailsOpen}
         onAddOtherTask={onAddOtherTask}
         onDeleteOtherTask={onDeleteOtherTask}
         onDismissAppleMusicReminder={onDismissAppleMusicReminder}
+        onShowCompletedOtherTasksChange={(completedTasksOpen) =>
+          onFocusQueueNavigationStateChange({
+            ...focusQueueNavigationState,
+            completedTasksOpen
+          })
+        }
+        onTaskListOpenChange={(detailsOpen) =>
+          onFocusQueueNavigationStateChange({
+            ...focusQueueNavigationState,
+            detailsOpen
+          })
+        }
         onOpenAppleMusicImport={onOpenAppleMusicImport}
         onOtherTaskChange={onOtherTaskChange}
+        onOpenTaskSource={onOpenFocusTaskSource}
+        onReconfirmFocusTaskStatus={onReconfirmFocusTaskStatus}
+        onReconfirmOtherTaskStatus={onReconfirmOtherTaskStatus}
+        onResetFocusProgress={onResetFocusProgress}
         onTaskStatusChange={updateFocusTaskStatus}
         otherTasks={otherTasks}
+        showCompletedOtherTasks={focusQueueNavigationState.completedTasksOpen}
       />
 
       <PlatformStatsSection
@@ -13863,31 +14635,90 @@ function DashboardNextEventCard({
 function DashboardFocusQueueCard({
   dailyProgress,
   focusQueue,
+  isTaskListOpen,
   onAddOtherTask,
   onDeleteOtherTask,
   onDismissAppleMusicReminder,
+  onShowCompletedOtherTasksChange,
+  onTaskListOpenChange,
   onOpenAppleMusicImport,
   onOtherTaskChange,
+  onOpenTaskSource,
+  onReconfirmFocusTaskStatus,
+  onReconfirmOtherTaskStatus,
+  onResetFocusProgress,
   onTaskStatusChange,
-  otherTasks
+  otherTasks,
+  showCompletedOtherTasks
 }: {
   dailyProgress: DailyFocusProgressItem[];
   focusQueue: {
     allTasks: FocusQueueItem[];
+    baselineTasks: FocusQueueItem[];
     visibleTasks: FocusQueueItem[];
   };
+  isTaskListOpen: boolean;
   onAddOtherTask: () => string;
   onDeleteOtherTask: (taskId: string) => void;
   onDismissAppleMusicReminder: () => void;
+  onShowCompletedOtherTasksChange: (isOpen: boolean) => void;
+  onTaskListOpenChange: (isOpen: boolean) => void;
   onOpenAppleMusicImport: () => void;
   onOtherTaskChange: (taskId: string, updates: Partial<OtherTask>) => void;
+  onOpenTaskSource: (task: FocusQueueItem) => void;
+  onReconfirmFocusTaskStatus: (task: FocusQueueItem, status: MarketingStatus) => void;
+  onReconfirmOtherTaskStatus: (task: OtherTask) => void;
+  onResetFocusProgress: () => void;
   onTaskStatusChange: (task: FocusQueueItem, status: MarketingStatus) => void;
   otherTasks: OtherTask[];
+  showCompletedOtherTasks: boolean;
 }) {
-  const [isTaskListOpen, setIsTaskListOpen] = useState(false);
   const [editingOtherTaskId, setEditingOtherTaskId] = useState<string | null>(null);
   const [openStatusTaskId, setOpenStatusTaskId] = useState<string | null>(null);
-  const [showCompletedOtherTasks, setShowCompletedOtherTasks] = useState(false);
+  const [isResetMenuOpen, setIsResetMenuOpen] = useState(false);
+  const statusMenuRef = useRef<HTMLDivElement | null>(null);
+  const resetMenuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!isResetMenuOpen) return;
+
+    function closeResetMenu(event: PointerEvent | KeyboardEvent) {
+      if (event instanceof KeyboardEvent) {
+        if (event.key === "Escape") setIsResetMenuOpen(false);
+        return;
+      }
+      if (event.target instanceof Node && !resetMenuRef.current?.contains(event.target)) {
+        setIsResetMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", closeResetMenu);
+    document.addEventListener("keydown", closeResetMenu);
+    return () => {
+      document.removeEventListener("pointerdown", closeResetMenu);
+      document.removeEventListener("keydown", closeResetMenu);
+    };
+  }, [isResetMenuOpen]);
+  useEffect(() => {
+    if (!openStatusTaskId) return;
+
+    function closeMenu(event: PointerEvent | KeyboardEvent) {
+      if (event instanceof KeyboardEvent) {
+        if (event.key === "Escape") setOpenStatusTaskId(null);
+        return;
+      }
+      if (event.target instanceof Node && !statusMenuRef.current?.contains(event.target)) {
+        setOpenStatusTaskId(null);
+      }
+    }
+
+    document.addEventListener("pointerdown", closeMenu);
+    document.addEventListener("keydown", closeMenu);
+    return () => {
+      document.removeEventListener("pointerdown", closeMenu);
+      document.removeEventListener("keydown", closeMenu);
+    };
+  }, [openStatusTaskId]);
+  const tasks = focusQueue.visibleTasks;
   const eligibleDailyProgress = dailyProgress.filter(
     (item) => item.status !== "irrelevant"
   );
@@ -13897,20 +14728,35 @@ function DashboardFocusQueueCard({
     0
   );
   const dailyPercent = Math.round((dailyPoints / 6) * 100);
+  const progressByTaskKey = new Map(
+    eligibleDailyProgress.map((item) => [item.taskKey, item])
+  );
+  const baselineProgress = focusQueue.baselineTasks.map((task, index) => {
+    const baselineItem = getDailyProgressItemForFocusTask(task, task.status);
+    const persistedItem = baselineItem
+      ? progressByTaskKey.get(baselineItem.taskKey)
+      : undefined;
+
+    return persistedItem ?? {
+      date: getViennaDateKey(),
+      label: task.label,
+      source: task.source,
+      status: "not-started" as const,
+      taskKey: `daily-target-slot-${index}`
+    };
+  });
+  const baselineTaskKeys = new Set(
+    focusQueue.baselineTasks
+      .map((task) => getDailyProgressItemForFocusTask(task, task.status)?.taskKey)
+      .filter((taskKey): taskKey is string => Boolean(taskKey))
+  );
+  const extraStartedProgress = eligibleDailyProgress.filter(
+    (item) => item.status !== "not-started" && !baselineTaskKeys.has(item.taskKey)
+  );
   const dailyProgressSlots = [
-    ...eligibleDailyProgress,
-    ...Array.from(
-      { length: Math.max(0, 3 - eligibleDailyProgress.length) },
-      (_, index) => ({
-        date: getViennaDateKey(),
-        label: `Daily target slot ${eligibleDailyProgress.length + index + 1}`,
-        source: "Other" as const,
-        status: "not-started" as const,
-        taskKey: `daily-target-slot-${index}`
-      })
-    )
+    ...baselineProgress,
+    ...extraStartedProgress
   ];
-  const tasks = focusQueue.visibleTasks;
   const activeOtherTasks = otherTasks
     .filter((task) => task.status !== "done" && task.status !== "irrelevant")
     .sort(
@@ -13919,10 +14765,13 @@ function DashboardFocusQueueCard({
           getBudgetDateSortTime(secondTask.dueDate) ||
         firstTask.title.localeCompare(secondTask.title)
     );
-  const expandedOtherTasks = activeOtherTasks.slice(3);
+  const headerOtherTasks = activeOtherTasks.filter((task) => isOtherTaskDueToday(task.dueDate));
+  const expandedOtherTasks = activeOtherTasks.filter(
+    (task) => !isOtherTaskDueToday(task.dueDate)
+  );
   const editingActiveHeaderTask =
     editingOtherTaskId && !expandedOtherTasks.some((task) => task.id === editingOtherTaskId)
-      ? activeOtherTasks.find((task) => task.id === editingOtherTaskId) ?? null
+      ? headerOtherTasks.find((task) => task.id === editingOtherTaskId) ?? null
       : null;
   const displayedExpandedOtherTasks = editingActiveHeaderTask
     ? [editingActiveHeaderTask, ...expandedOtherTasks]
@@ -13953,7 +14802,34 @@ function DashboardFocusQueueCard({
       <article className="dashboard-focus-segments">
         <div className={mainSegmentClass}>
         <div className="dashboard-focus-card-header">
-          <Clock3 size={18} aria-hidden />
+          <div className="dashboard-focus-reset-wrap" ref={resetMenuRef}>
+            <button
+              aria-expanded={isResetMenuOpen}
+              aria-label="Reset daily focus progress"
+              className="dashboard-focus-status-button"
+              onClick={() => setIsResetMenuOpen((isOpen) => !isOpen)}
+              title="Reset daily focus progress"
+              type="button"
+            >
+              <Clock3 size={16} aria-hidden />
+            </button>
+            {isResetMenuOpen ? (
+              <div className="dashboard-focus-status-menu">
+                <span className="dashboard-focus-reset-label">Reset?</span>
+                <button
+                  className="dashboard-focus-status-option"
+                  onClick={() => {
+                    onResetFocusProgress();
+                    setIsResetMenuOpen(false);
+                  }}
+                  type="button"
+                >
+                  <Clock3 size={14} aria-hidden />
+                  Reset
+                </button>
+              </div>
+            ) : null}
+          </div>
           <h2>Focus Queue</h2>
           <div
             aria-label={`Daily focus progress: ${dailyPoints} of 6 points, ${dailyPercent}%`}
@@ -13984,14 +14860,20 @@ function DashboardFocusQueueCard({
         {tasks.length > 0 ? (
           <ul className="dashboard-focus-list">
             {tasks.map((task) => (
-              <li key={task.id}>
+              <li
+                className={`dashboard-focus-task-card dashboard-focus-task-card-${task.source.toLowerCase()}`}
+                key={task.id}
+              >
                 <div className="dashboard-focus-task-topline">
                   <span className="dashboard-focus-task-header">
                     <span className="dashboard-focus-source">{task.source}</span>
                     <StatusDot status={task.status} label={statusLabels[task.status]} />
                   </span>
-                  <span className="dashboard-focus-task-label">{task.label}</span>
-                  <div className="dashboard-focus-status-menu-wrap">
+                  <FocusQueueTaskLabel task={task} />
+                  <div
+                    className="dashboard-focus-status-menu-wrap"
+                    ref={openStatusTaskId === task.id ? statusMenuRef : undefined}
+                  >
                     <button
                       aria-expanded={openStatusTaskId === task.id}
                       aria-label={`Change status for ${task.label}`}
@@ -14004,7 +14886,7 @@ function DashboardFocusQueueCard({
                       title="Change status"
                       type="button"
                     >
-                      <ChevronDown size={14} aria-hidden />
+                      <Pencil size={14} aria-hidden />
                     </button>
                     {openStatusTaskId === task.id ? (
                       <div className="dashboard-focus-status-menu">
@@ -14035,12 +14917,25 @@ function DashboardFocusQueueCard({
                           </>
                         ) : (
                           <>
+                            {task.actionTarget ? (
+                              <button
+                                className="dashboard-focus-status-option"
+                                onClick={() => {
+                                  onOpenTaskSource(task);
+                                  setOpenStatusTaskId(null);
+                                }}
+                                type="button"
+                              >
+                                <Pencil size={14} aria-hidden />
+                                Edit source task
+                              </button>
+                            ) : null}
                             {getEditableOtherTaskId(task) ? (
                               <button
                                 className="dashboard-focus-status-option"
                                 onClick={() => {
                                   setEditingOtherTaskId(getEditableOtherTaskId(task));
-                                  setIsTaskListOpen(true);
+                                  onTaskListOpenChange(true);
                                   setOpenStatusTaskId(null);
                                 }}
                                 type="button"
@@ -14065,6 +14960,9 @@ function DashboardFocusQueueCard({
                                     onOtherTaskChange(editableOtherTaskId, { status });
                                   } else {
                                     onTaskStatusChange(task, status);
+                                  }
+                                  if (status === task.status) {
+                                    onReconfirmFocusTaskStatus(task, status);
                                   }
                                   setOpenStatusTaskId(null);
                                 }}
@@ -14099,7 +14997,7 @@ function DashboardFocusQueueCard({
         <div className="dashboard-focus-actions">
           <button
             className="dashboard-task-toggle"
-            onClick={() => setIsTaskListOpen((current) => !current)}
+            onClick={() => onTaskListOpenChange(!isTaskListOpen)}
             type="button"
           >
             {isTaskListOpen ? "Hide focus details" : "Show focus details"}
@@ -14109,7 +15007,7 @@ function DashboardFocusQueueCard({
             onClick={() => {
               const newTaskId = onAddOtherTask();
               setEditingOtherTaskId(newTaskId);
-              setIsTaskListOpen(true);
+              onTaskListOpenChange(true);
             }}
             type="button"
           >
@@ -14124,19 +15022,22 @@ function DashboardFocusQueueCard({
               editingTaskId={editingOtherTaskId}
               emptyText={
                 activeOtherTasks.length > 0
-                  ? "No extra active other tasks beyond the header."
+                  ? "No future active other tasks."
                   : "No active other tasks yet."
               }
               onDeleteTask={onDeleteOtherTask}
               onEditTask={setEditingOtherTaskId}
               onTaskChange={onOtherTaskChange}
+              onTaskStatusReconfirm={onReconfirmOtherTaskStatus}
               tasks={displayedExpandedOtherTasks}
             />
             {completedOtherTasks.length > 0 ? (
               <>
                 <button
                   className="dashboard-task-toggle"
-                  onClick={() => setShowCompletedOtherTasks((current) => !current)}
+                  onClick={() =>
+                    onShowCompletedOtherTasksChange(!showCompletedOtherTasks)
+                  }
                   type="button"
                 >
                   {showCompletedOtherTasks
@@ -14155,6 +15056,7 @@ function DashboardFocusQueueCard({
               onDeleteTask={onDeleteOtherTask}
               onEditTask={setEditingOtherTaskId}
               onTaskChange={onOtherTaskChange}
+              onTaskStatusReconfirm={onReconfirmOtherTaskStatus}
               tasks={completedOtherTasks}
             />
           </div>
@@ -14170,6 +15072,7 @@ function OtherTaskList({
   onDeleteTask,
   onEditTask,
   onTaskChange,
+  onTaskStatusReconfirm,
   tasks
 }: {
   editingTaskId: string | null;
@@ -14177,27 +15080,32 @@ function OtherTaskList({
   onDeleteTask: (taskId: string) => void;
   onEditTask: (taskId: string | null) => void;
   onTaskChange: (taskId: string, updates: Partial<OtherTask>) => void;
+  onTaskStatusReconfirm: (task: OtherTask) => void;
   tasks: OtherTask[];
 }) {
   const [openOtherMenuTaskId, setOpenOtherMenuTaskId] = useState<string | null>(null);
-  const editingTaskRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!editingTaskId) {
-      return;
+    if (!openOtherMenuTaskId) return;
+
+    function closeMenu(event: PointerEvent | KeyboardEvent) {
+      if (event instanceof KeyboardEvent) {
+        if (event.key === "Escape") setOpenOtherMenuTaskId(null);
+        return;
+      }
+      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) {
+        setOpenOtherMenuTaskId(null);
+      }
     }
 
-    const scrollTimer = window.setTimeout(() => {
-      editingTaskRef.current?.scrollIntoView({
-        block: "start",
-        behavior: "smooth"
-      });
-    }, 60);
-
+    document.addEventListener("pointerdown", closeMenu);
+    document.addEventListener("keydown", closeMenu);
     return () => {
-      window.clearTimeout(scrollTimer);
+      document.removeEventListener("pointerdown", closeMenu);
+      document.removeEventListener("keydown", closeMenu);
     };
-  }, [editingTaskId]);
+  }, [openOtherMenuTaskId]);
 
   if (tasks.length === 0) {
     return emptyText ? <p className="dashboard-focus-empty">{emptyText}</p> : null;
@@ -14208,15 +15116,15 @@ function OtherTaskList({
       {tasks.map((task) =>
         editingTaskId === task.id ? (
           <OtherTaskEditor
+            autoFocusTitle={task.title.trim() === ""}
             key={task.id}
             onClose={() => onEditTask(null)}
             onDeleteTask={onDeleteTask}
             onTaskChange={onTaskChange}
-            ref={editingTaskRef}
             task={task}
           />
         ) : (
-          <div className="dashboard-other-task-row" key={task.id}>
+          <div className="dashboard-other-task-row dashboard-focus-task-card dashboard-focus-task-card-other" key={task.id}>
             <div className="dashboard-focus-task-topline">
               <span className="dashboard-focus-task-header">
                 <span className="dashboard-focus-source">Other</span>
@@ -14225,7 +15133,10 @@ function OtherTaskList({
               <span className="dashboard-focus-task-label">
                 {toOtherFocusQueueItem(task).label}
               </span>
-              <div className="dashboard-focus-status-menu-wrap">
+              <div
+                className="dashboard-focus-status-menu-wrap"
+                ref={openOtherMenuTaskId === task.id ? menuRef : undefined}
+              >
                 <button
                   aria-expanded={openOtherMenuTaskId === task.id}
                   aria-label={`Change status for ${task.title || "other task"}`}
@@ -14238,7 +15149,7 @@ function OtherTaskList({
                   title="Task actions"
                   type="button"
                 >
-                  <ChevronDown size={14} aria-hidden />
+                  <Pencil size={14} aria-hidden />
                 </button>
                 {openOtherMenuTaskId === task.id ? (
                   <div className="dashboard-focus-status-menu">
@@ -14259,6 +15170,9 @@ function OtherTaskList({
                         key={status}
                         onClick={() => {
                           onTaskChange(task.id, { status });
+                          if (status === task.status) {
+                            onTaskStatusReconfirm(task);
+                          }
                           setOpenOtherMenuTaskId(null);
                         }}
                         type="button"
@@ -14279,18 +15193,31 @@ function OtherTaskList({
 }
 
 const OtherTaskEditor = forwardRef<HTMLDivElement, {
+  autoFocusTitle?: boolean;
   onClose: () => void;
   onDeleteTask: (taskId: string) => void;
   onTaskChange: (taskId: string, updates: Partial<OtherTask>) => void;
   task: OtherTask;
 }>(function OtherTaskEditor({
+  autoFocusTitle = false,
   onClose,
   onDeleteTask,
   onTaskChange,
   task
 }, ref) {
   const [isDeleteArmed, setIsDeleteArmed] = useState(false);
+  const [dueDateDraft, setDueDateDraft] = useState(task.dueDate);
   const deleteRef = useRef<HTMLButtonElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const canSaveDueDate = Boolean(toIsoDate(dueDateDraft));
+
+  useEffect(() => {
+    if (!autoFocusTitle) return;
+    const focusTimer = window.setTimeout(() => {
+      titleInputRef.current?.focus({ preventScroll: true });
+    }, 0);
+    return () => window.clearTimeout(focusTimer);
+  }, [autoFocusTitle]);
 
   useEffect(() => {
     if (!isDeleteArmed) return;
@@ -14302,6 +15229,15 @@ const OtherTaskEditor = forwardRef<HTMLDivElement, {
     return () => document.removeEventListener("pointerdown", cancelDelete);
   }, [isDeleteArmed]);
 
+  function saveTask() {
+    if (!canSaveDueDate) return;
+
+    if (dueDateDraft !== task.dueDate) {
+      onTaskChange(task.id, { dueDate: dueDateDraft });
+    }
+    onClose();
+  }
+
   return (
     <div className="dashboard-other-task-editor" ref={ref}>
       <label>
@@ -14311,17 +15247,20 @@ const OtherTaskEditor = forwardRef<HTMLDivElement, {
             onTaskChange(task.id, { title: event.target.value })
           }
           placeholder="Short description"
+          ref={titleInputRef}
           value={task.title}
         />
       </label>
       <label>
         <span>Due date</span>
-        <input
-          onChange={(event) =>
-            onTaskChange(task.id, { dueDate: event.target.value })
+        <DateInput
+          aria-label="Other task due date"
+          calendarLabel="Choose other task due date"
+          error={
+            dueDateDraft && !canSaveDueDate ? "Enter a valid date." : undefined
           }
-          placeholder="24/07/2026"
-          value={task.dueDate}
+          onChange={setDueDateDraft}
+          value={dueDateDraft}
         />
       </label>
       <label>
@@ -14364,13 +15303,14 @@ const OtherTaskEditor = forwardRef<HTMLDivElement, {
           <Trash2 size={16} aria-hidden />
         </button>
         <button
-          aria-label="Close edit mode"
+          aria-label="Save task"
           className="icon-button ghost dashboard-other-task-collapse"
-          onClick={onClose}
-          title="Close edit"
+          disabled={!canSaveDueDate}
+          onClick={saveTask}
+          title="Save task"
           type="button"
         >
-          <ChevronDown className="dashboard-other-task-collapse-icon" size={16} aria-hidden />
+          <Save size={16} aria-hidden />
         </button>
       </div>
     </div>
@@ -15156,12 +16096,13 @@ function getAppleMusicLastUpdateDate(
 
 function getAppleMusicUpdateTask(
   updateDate: string | undefined,
-  isCampaignStartToday: boolean
+  isCampaignStartToday: boolean,
+  isCompletedToday = false
 ): FocusQueueItem | null {
   const needsCampaignStartSnapshot =
     isCampaignStartToday && !wasPlatformUpdatedToday(updateDate);
 
-  if (!isPlatformUpdateStale(updateDate) && !needsCampaignStartSnapshot) {
+  if (!isPlatformUpdateStale(updateDate) && !needsCampaignStartSnapshot && !isCompletedToday) {
     return null;
   }
 
@@ -15173,7 +16114,7 @@ function getAppleMusicUpdateTask(
       updateDate ? ` - last update ${formatDateWithDots(updateDate)}` : ""
     }`,
     source: "Other",
-    status: "not-started"
+    status: isCompletedToday ? "done" : "not-started"
   };
 }
 
@@ -15265,7 +16206,6 @@ function PlatformTrendPanelGroup({
   return (
     <div
       className="platform-trend-panel"
-      data-scroll-anchor={isOpen ? "open-card" : undefined}
     >
       <button
         aria-expanded={isOpen}
@@ -16558,22 +17498,28 @@ function RoadmapView({
   onDeletePhase,
   onOpenMarketing,
   onOpenProduction,
+  onNavigationContextChange,
   onSavePhase,
   onSongChange,
   phases,
-  songs
+  songs,
+  restoreContext
 }: {
   campaigns: MarketingCampaignConfig[];
   onCreatePhase: () => Promise<void>;
   onDeletePhase: (phaseId: string) => Promise<void>;
   onOpenMarketing: (song: ProductionSongConfig) => void;
   onOpenProduction: (songId: string) => void;
+  onNavigationContextChange: (context: RoadmapNavigationContext | null) => void;
   onSavePhase: (phase: RoadmapPhase) => Promise<void>;
   onSongChange: (songId: string, updates: Partial<ProductionSongConfig>) => void;
   phases: RoadmapPhase[];
   songs: ProductionSongConfig[];
+  restoreContext: { context: RoadmapNavigationContext; token: number } | null;
 }) {
-  const [openCardId, setOpenCardId] = useState<string | null>(null);
+  const [openCardId, setOpenCardId] = useState<string | null>(
+    () => restoreContext?.context.openCardId ?? null
+  );
   const [settingsPhaseId, setSettingsPhaseId] = useState<string | null>(null);
   const releasedSongs = songs.filter(isRoadmapSongReleased).length;
   const months = buildLiveRoadmapMonths(songs, phases);
@@ -16601,15 +17547,19 @@ function RoadmapView({
           </div>
         </div>
 
-        <RoadmapMonthStrip months={months} phases={phases} />
+        <RoadmapMonthStrip months={months} />
         <div className="roadmap-overview-toggle-row">
           <button
             aria-expanded={openCardId === "general"}
             aria-label={openCardId === "general" ? "Hide all roadmap songs" : "Show all roadmap songs"}
             className="roadmap-toggle"
-            onClick={() =>
-              setOpenCardId((current) => current === "general" ? null : "general")
-            }
+            onClick={() => {
+              const nextOpenCardId = openCardId === "general" ? null : "general";
+              onNavigationContextChange(
+                nextOpenCardId ? { openCardId: nextOpenCardId } : null
+              );
+              setOpenCardId(nextOpenCardId);
+            }}
             type="button"
           >
             <ChevronDown size={19} aria-hidden />
@@ -16666,9 +17616,13 @@ function RoadmapView({
                   aria-expanded={openCardId === phase.id}
                   aria-label={openCardId === phase.id ? `Hide Phase ${phase.phaseNumber} songs` : `Show Phase ${phase.phaseNumber} songs`}
                   className="roadmap-toggle"
-                  onClick={() =>
-                    setOpenCardId((current) => current === phase.id ? null : phase.id)
-                  }
+                  onClick={() => {
+                    const nextOpenCardId = openCardId === phase.id ? null : phase.id;
+                    onNavigationContextChange(
+                      nextOpenCardId ? { openCardId: nextOpenCardId } : null
+                    );
+                    setOpenCardId(nextOpenCardId);
+                  }}
                   type="button"
                 >
                   <ChevronDown size={19} aria-hidden />
@@ -16717,7 +17671,7 @@ function RoadmapView({
   );
 }
 
-function RoadmapMonthStrip({ months, phases }: { months: RoadmapMonth[]; phases: RoadmapPhase[] }) {
+function RoadmapMonthStrip({ months }: { months: RoadmapMonth[] }) {
   const currentMonthKey = getViennaDateKey().slice(0, 7);
   const phaseMonthGroups = months.reduce<Array<{
     months: RoadmapMonth[];
@@ -16738,9 +17692,6 @@ function RoadmapMonthStrip({ months, phases }: { months: RoadmapMonth[]; phases:
     <div className="roadmap-month-strip">
       {phaseMonthGroups.map((group) => (
         <div className="roadmap-month-phase-row" key={`roadmap-month-phase-${group.phase}`}>
-          <p className="roadmap-month-phase-label">
-            Phase {group.phase}{phases.find((phase) => phase.phaseNumber === group.phase) ? ` — ${phases.find((phase) => phase.phaseNumber === group.phase)?.title}` : ""}
-          </p>
           {group.months.map((month) => {
             const status = getRoadmapMonthStatus(month);
 
@@ -16851,8 +17802,8 @@ function buildLiveRoadmapMonths(songs: ProductionSongConfig[], phases: RoadmapPh
   const firstPhase = phases[0];
   const lastPhase = phases[phases.length - 1];
   if (!firstPhase || !lastPhase) return [];
-  const [startYear, startMonth] = firstPhase.startMonth.split("-").map(Number);
-  const [endYear, endMonth] = lastPhase.endMonth.split("-").map(Number);
+  const [startYear, startMonth] = getRoadmapMonthKey(firstPhase.startMonth).split("-").map(Number);
+  const [endYear, endMonth] = getRoadmapMonthKey(lastPhase.endMonth).split("-").map(Number);
   const cursor = new Date(Date.UTC(startYear, startMonth - 1, 1));
   const endDate = new Date(Date.UTC(endYear, endMonth - 1, 1));
   const today = getTodayUtcDate();
@@ -16864,7 +17815,9 @@ function buildLiveRoadmapMonths(songs: ProductionSongConfig[], phases: RoadmapPh
       (song) => formatInputDateForDatabase(song.releaseDate)?.slice(0, 7) === id
     );
     const phase = phases.find(
-      (candidate) => id >= candidate.startMonth && id <= candidate.endMonth
+      (candidate) =>
+        id >= getRoadmapMonthKey(candidate.startMonth) &&
+        id <= getRoadmapMonthKey(candidate.endMonth)
     ) ?? lastPhase;
 
     months.push({
@@ -16885,6 +17838,10 @@ function buildLiveRoadmapMonths(songs: ProductionSongConfig[], phases: RoadmapPh
   }
 
   return months;
+}
+
+function getRoadmapMonthKey(dateInput: string) {
+  return dateInput.slice(0, 7);
 }
 
 function formatRoadmapMonthRange(startMonth: string, endMonth: string) {
@@ -16923,21 +17880,21 @@ function RoadmapPhaseSettings({
   phase: RoadmapPhase;
 }) {
   const [draft, setDraft] = useState(phase);
+  const [startDateDraft, setStartDateDraft] = useState(() => toDisplayDate(phase.startMonth));
+  const [endDateDraft, setEndDateDraft] = useState(() => toDisplayDate(phase.endMonth));
   const [isDeleteArmed, setIsDeleteArmed] = useState(false);
   const [saveStatus, setSaveStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
   const deleteButtonRef = useRef<HTMLButtonElement>(null);
-  const canSave = Boolean(
-    draft.title.trim() &&
-    /^\d{4}-\d{2}$/.test(draft.startMonth) &&
-    /^\d{4}-\d{2}$/.test(draft.endMonth) &&
-    draft.endMonth >= draft.startMonth
-  );
+  const startDate = toIsoDate(startDateDraft);
+  const endDate = toIsoDate(endDateDraft);
+  const hasInvalidPhaseRange = Boolean(startDate && endDate && startDate > endDate);
+  const canSave = Boolean(draft.title.trim() && startDate && endDate && !hasInvalidPhaseRange);
 
   async function saveSettings() {
     if (!canSave) return;
     setSaveStatus({ message: "Saving...", state: "loading" });
     try {
-      await onSave(draft);
+      await onSave({ ...draft, endMonth: endDate!, startMonth: startDate! });
       setSaveStatus({ message: "Phase saved.", state: "success" });
     } catch (error) {
       setSaveStatus({
@@ -16996,19 +17953,27 @@ function RoadmapPhaseSettings({
         />
       </label>
       <label>
-        <span>Begin month</span>
-        <input
-          onChange={(event) => setDraft((current) => ({ ...current, startMonth: event.target.value }))}
-          type="month"
-          value={draft.startMonth}
+        <span>Begin date</span>
+        <DateInput
+          aria-label={`Phase ${phase.phaseNumber} begin date`}
+          calendarLabel={`Choose Phase ${phase.phaseNumber} begin date`}
+          error={Boolean(startDateDraft && !startDate)}
+          onChange={setStartDateDraft}
+          value={startDateDraft}
         />
       </label>
       <label>
-        <span>End month</span>
-        <input
-          onChange={(event) => setDraft((current) => ({ ...current, endMonth: event.target.value }))}
-          type="month"
-          value={draft.endMonth}
+        <span>End date</span>
+        <DateInput
+          aria-label={`Phase ${phase.phaseNumber} end date`}
+          calendarLabel={`Choose Phase ${phase.phaseNumber} end date`}
+          error={
+            hasInvalidPhaseRange
+              ? "End date must not be before the begin date."
+              : Boolean(endDateDraft && !endDate)
+          }
+          onChange={setEndDateDraft}
+          value={endDateDraft}
         />
       </label>
       <label className="roadmap-phase-description-field">
@@ -17097,7 +18062,7 @@ function RoadmapSongRow({
   song: ProductionSongConfig;
 }) {
   const [releaseDateInput, setReleaseDateInput] = useState(song.releaseDate);
-  const canSaveReleaseDate = Boolean(parseCampaignDate(releaseDateInput));
+  const canSaveReleaseDate = Boolean(toIsoDate(releaseDateInput));
   const productionStatus = getRoadmapProductionStatus(song);
   const marketingStatus = getRoadmapMarketingStatus(campaign, song);
 
@@ -17161,10 +18126,11 @@ function RoadmapSongRow({
       </label>
       <label>
         <div className="roadmap-release-date-control">
-          <input
+          <DateInput
             aria-label={`${song.title} release date`}
-            inputMode="numeric"
-            onChange={(event) => setReleaseDateInput(event.target.value)}
+            calendarLabel={`Choose ${song.title} release date`}
+            error={Boolean(releaseDateInput && !toIsoDate(releaseDateInput))}
+            onChange={setReleaseDateInput}
             value={releaseDateInput}
           />
           <button

@@ -580,6 +580,45 @@ Still deferred:
   YouTube collection, Gmail/CRM, Spotify, Deezer, Amazon, and workspace
   archive/delete workflows.
 
+## Beta 1.17 — Backlog, UX & Functional Refinements (Prepared for deployment)
+
+Headline: **The dashboard's daily workflow is now more stable, navigable, and
+mobile-ready across Focus Queue, planning, dates, and financial tracking.**
+
+Includes:
+
+- Focus Queue now uses real available baseline tasks, supports valid extra
+  work beyond that baseline, ignores deleted/orphaned daily-progress rows, and
+  supports reset confirmation plus explicit same-status reconfirmation.
+- Added the capped five-task collapsed queue, correct today/future Other-task
+  placement, stable Other-task editing/autofocus, Apple CSV completion, and
+  source-task editing for Marketing and Production items.
+- Added an in-memory Back stack with scroll/context restoration for Dashboard,
+  Focus Queue, Marketing, Production, Events, Budget, and Roadmap. Normal
+  sidebar entries reset module expansion state rather than reopening stale UI.
+- Introduced the shared strict `DD/MM/YYYY` DateInput with numeric entry,
+  separator/caret handling, in-field calendar bridge, accessible invalid
+  state, and local draft-before-commit behavior. Production, Marketing, Focus
+  Queue Other tasks, Events, Budget, and Roadmap now use it.
+- Converted Roadmap phase dates to full ISO dates while retaining a safe
+  month-oriented overview and backward compatibility with historical
+  first-of-month phase data.
+- Standardized manual Budget deletion, source-link preservation, recurring
+  record grouping, and dense responsive ledger cards.
+- Refined mobile and desktop layouts across Focus Queue, Marketing,
+  Production, Events, Budget, and Roadmap, including overflow control, compact
+  controls, consistent stripes, event summaries, and phase-month grouping.
+
+Release checks:
+
+- Shared date-input checks, TypeScript, lint, production build, and
+  `git diff --check` pass locally.
+
+Deliberately not included:
+
+- Personal/My Task architecture, new module features, browser routing/history,
+  schema changes, or a redesign beyond the targeted workflow refinements.
+
 ## Beta 1.16 — Viewer Showroom & UI Polish (Prepared for deployment)
 
 Headline: **The shared dashboard is prepared for its first real external artist workspace.**

@@ -73,6 +73,42 @@ export async function POST(request: NextRequest) {
   }
 }
 
+export async function DELETE(request: NextRequest) {
+  if (!isSameOriginWrite(request)) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+
+  try {
+    const { workspaceId } = await requireWorkspaceAccess(request);
+    const payload = (await request.json()) as { date?: string; taskKey?: string };
+    const date = normalizeDate(payload.date ?? "");
+    const taskKey = payload.taskKey?.trim();
+
+    if (!date) {
+      return NextResponse.json({ error: "Missing daily progress date." }, { status: 400 });
+    }
+
+    const supabase = createServiceSupabaseClient();
+    const deleteQuery = supabase
+      .from("focus_daily_progress")
+      .delete()
+      .eq("activity_date", date)
+      .eq("workspace_id", workspaceId);
+
+    const scopedDelete = taskKey ? deleteQuery.eq("task_key", taskKey) : deleteQuery;
+    const { error } = await scopedDelete;
+
+    if (error) throw error;
+
+    return NextResponse.json({ status: "ok" });
+  } catch (error) {
+    return NextResponse.json(
+      { error: getErrorMessage(error, "Daily focus progress delete failed.") },
+      { status: 500 }
+    );
+  }
+}
+
 async function loadItems(date: string, workspaceId: string) {
   const supabase = createServiceSupabaseClient();
   const { data, error } = await supabase

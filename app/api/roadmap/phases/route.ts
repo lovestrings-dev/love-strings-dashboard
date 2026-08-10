@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireWorkspaceAccess } from "@/lib/server/workspace-owner";
+import { parseIsoDate } from "@/lib/date-input";
 
 type RoadmapPhasePayload = {
   description?: string;
@@ -69,9 +70,9 @@ export async function PATCH(request: NextRequest) {
     const { workspaceId } = await requireWorkspaceAccess(request);
     const payload = (await request.json()) as RoadmapPhasePayload;
     const id = payload.id?.trim();
-    const startMonth = normalizeMonth(payload.startMonth);
-    const endMonth = normalizeMonth(payload.endMonth);
-    if (!id || !startMonth || !endMonth || endMonth < startMonth) {
+    const startDate = normalizePhaseDate(payload.startMonth);
+    const endDate = normalizePhaseDate(payload.endMonth);
+    if (!id || !startDate || !endDate || endDate < startDate) {
       return NextResponse.json({ error: "Invalid phase settings." }, { status: 400 });
     }
 
@@ -80,8 +81,8 @@ export async function PATCH(request: NextRequest) {
       .from("roadmap_phases")
       .update({
         description: payload.description?.trim() ?? "",
-        end_month: `${endMonth}-01`,
-        start_month: `${startMonth}-01`,
+        end_month: endDate,
+        start_month: startDate,
         title: payload.title?.trim() || "Untitled phase"
       })
       .eq("id", id)
@@ -136,10 +137,10 @@ async function loadPhases(workspaceId: string) {
   if (error) throw error;
 
   return (data ?? []).map((phase) => ({
-    endMonth: String(phase.end_month).slice(0, 7),
+    endMonth: String(phase.end_month).slice(0, 10),
     id: phase.id,
     phaseNumber: phase.phase_number,
-    startMonth: String(phase.start_month).slice(0, 7),
+    startMonth: String(phase.start_month).slice(0, 10),
     summary: phase.description,
     title: phase.title
   }));
@@ -154,10 +155,13 @@ function createServiceSupabaseClient() {
   });
 }
 
-function normalizeMonth(value?: string) {
-  const match = value?.match(/^(\d{4})-(\d{2})$/);
-  if (!match || Number(match[2]) < 1 || Number(match[2]) > 12) return null;
-  return value ?? null;
+function normalizePhaseDate(value?: string) {
+  if (!value) return null;
+  if (/^\d{4}-\d{2}$/.test(value)) {
+    const normalizedLegacyValue = `${value}-01`;
+    return parseIsoDate(normalizedLegacyValue) ? normalizedLegacyValue : null;
+  }
+  return parseIsoDate(value) ? value : null;
 }
 
 function addMonths(value: string, amount: number) {
