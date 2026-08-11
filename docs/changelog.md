@@ -580,6 +580,43 @@ Still deferred:
   YouTube collection, Gmail/CRM, Spotify, Deezer, Amazon, and workspace
   archive/delete workflows.
 
+## Beta 1.18 — Workspace Configuration & Release Readiness (Prepared for deployment)
+
+Headline: **The dashboard now treats each workspace as its own configurable
+operating environment, with safe platform identities, media, and local time.**
+
+Includes:
+
+- Made the authenticated runtime and browser persistence workspace-neutral,
+  while preserving legacy Love Strings data behind workspace-scoped access.
+- Added Admin-managed platform identities and public URLs, including explicit
+  Google Analytics property selection and idempotent QR-card seeding that
+  never overwrites a user-customized QR card.
+- Added secure Cloudinary-managed uploads for Production, Marketing, Events,
+  and QR images, with server-only credentials, workspace UUID folders,
+  normalization, bounded delivery transforms, and workspace metadata/tags.
+- Added searchable, DST-aware IANA timezone selection sorted by current UTC
+  offset, with immediate Admin save and reliable outside-tap/Escape cancel.
+- Added optional Event times and workspace-configurable defaults for future
+  Production License and Distributor costs.
+- Fixed legacy Love Strings logo upload compatibility and the successful
+  upload completion state; simplified Apple Music card timestamps to the CSV
+  data date; and completed the accepted platform-card presentation cleanup.
+
+Release checks:
+
+- Workspace timezone, Event time, and Production cost-default migrations are
+  confirmed applied on the linked Supabase project.
+- TypeScript, production build, and `git diff --check` pass locally. Lint
+  retains only the three documented historical `app/page.tsx` findings.
+
+Deliberately deferred:
+
+- Workspace loading/onboarding boundary work, multi-workspace metric scheduler
+  work, QR UX reconsideration, Cloudinary orphan cleanup, deeper empty states,
+  primary/multi-account platform UX, manual Event data decisions, and the
+  three historical lint findings.
+
 ## Beta 1.17 — Backlog, UX & Functional Refinements (Prepared for deployment)
 
 Headline: **The dashboard's daily workflow is now more stable, navigable, and

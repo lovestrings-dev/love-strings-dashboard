@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await serviceClient
       .from("app_google_connections")
       .select(
-        "google_account_email, youtube_enabled, youtube_channel_title, youtube_topic_channel_id, youtube_topic_channel_title, analytics_enabled, analytics_property_id, analytics_property_name, updated_at"
+        "google_account_email, youtube_enabled, youtube_channel_id, youtube_channel_title, youtube_topic_channel_id, youtube_topic_channel_title, analytics_enabled, analytics_property_id, analytics_property_name, updated_at"
       )
       .eq("workspace_id", workspaceId)
       .maybeSingle();
@@ -24,6 +24,7 @@ export async function GET(request: NextRequest) {
       },
       updatedAt: data?.updated_at ?? null,
       youtube: {
+        channelId: data?.youtube_channel_id ?? null,
         channelTitle: data?.youtube_channel_title ?? null,
         enabled: data?.youtube_enabled ?? false
       },

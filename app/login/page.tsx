@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
@@ -36,17 +35,10 @@ export default function LoginPage() {
   return (
     <main className="login-page">
       <section className="login-panel" aria-labelledby="login-title">
-        <Image
-          alt="Love Strings"
-          className="login-logo"
-          height={72}
-          priority
-          src="/love-strings-logo.jpeg"
-          width={72}
-        />
+        <span aria-hidden className="login-logo login-logo-neutral">LS</span>
         <div>
-          <p className="eyebrow">Love Strings</p>
-          <h1 id="login-title">Sprint Dashboard</h1>
+          <p className="eyebrow">LS Dashboard</p>
+          <h1 id="login-title">Sign in</h1>
         </div>
 
         <form className="login-form" onSubmit={signIn}>

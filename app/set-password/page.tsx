@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
@@ -134,16 +133,9 @@ export default function SetPasswordPage() {
   return (
     <main className="login-page">
       <section className="login-panel" aria-labelledby="password-title">
-        <Image
-          alt="Love Strings"
-          className="login-logo"
-          height={72}
-          priority
-          src="/love-strings-logo.jpeg"
-          width={72}
-        />
+        <span aria-hidden className="login-logo login-logo-neutral">LS</span>
         <div>
-          <p className="eyebrow">Individual account</p>
+          <p className="eyebrow">LS Dashboard</p>
           <h1 id="password-title">Choose your password</h1>
         </div>
 

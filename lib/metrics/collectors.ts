@@ -10,6 +10,7 @@ import {
   type MetricCollectorName
 } from "@/lib/metrics/collector-eligibility";
 import { defaultWorkspaceId } from "@/lib/workspace";
+import { defaultWorkspaceTimeZone, getWorkspaceDateKey, resolveTimeZone } from "@/lib/workspace-time";
 
 type CollectorStatus = "fulfilled" | "rejected" | "skipped";
 
@@ -37,7 +38,7 @@ type PlatformAccountInput = {
   externalId: string;
   platformName: string;
   platformSlug: string;
-  url: string;
+  url?: string;
 };
 type YouTubeVideoItem = {
   id: string;
@@ -203,7 +204,7 @@ async function refreshGoogleAnalyticsMetrics(workspaceId: string): Promise<Metri
   const topTrafficRow = trafficReport.rows?.[0];
   const topTrafficSource = topTrafficRow?.dimensionValues?.[0]?.value ?? "No traffic yet";
   const topTrafficSessions = Number(topTrafficRow?.metricValues?.[0]?.value ?? 0);
-  const propertyName = connection.analytics_property_name ?? "www.LoveStrings.at";
+  const propertyName = connection.analytics_property_name ?? "Google Analytics";
 
   await upsertPlatformMetricSnapshots(
     {
@@ -212,7 +213,7 @@ async function refreshGoogleAnalyticsMetrics(workspaceId: string): Promise<Metri
       externalId: connection.analytics_property_id,
       platformName: "Google Analytics",
       platformSlug: "google-analytics",
-      url: `https://analytics.google.com/analytics/web/#/p${connection.analytics_property_id}/reports/intelligenthome`
+      url: undefined
     },
     [
       {
@@ -601,7 +602,7 @@ async function upsertPlatformMetricSnapshots(
   workspaceId: string
 ) {
   const supabase = createServiceSupabaseClient();
-  const snapshotDate = getViennaSnapshotDate();
+  const snapshotDate = await getWorkspaceSnapshotDate(supabase, workspaceId);
   const { data: platform, error: platformError } = await supabase
     .from("platforms")
     .upsert(
@@ -617,6 +618,19 @@ async function upsertPlatformMetricSnapshots(
 
   if (platformError) throw platformError;
 
+  let accountUrl = accountInput.url;
+  if (accountUrl === undefined) {
+    const { data: existing, error: existingError } = await supabase
+      .from("platform_accounts")
+      .select("url")
+      .eq("workspace_id", workspaceId)
+      .eq("platform_id", platform.id)
+      .eq("account_name", accountInput.accountName)
+      .maybeSingle();
+    if (existingError) throw existingError;
+    accountUrl = existing?.url ?? null;
+  }
+
   const { data: account, error: accountError } = await supabase
     .from("platform_accounts")
     .upsert(
@@ -624,7 +638,7 @@ async function upsertPlatformMetricSnapshots(
         account_name: accountInput.accountName,
         external_id: accountInput.externalId,
         platform_id: platform.id,
-        url: accountInput.url,
+        url: accountUrl,
         workspace_id: workspaceId
       },
       { onConflict: "workspace_id,platform_id,account_name" }
@@ -664,18 +678,17 @@ async function upsertPlatformMetricSnapshots(
   }
 }
 
-function getViennaSnapshotDate() {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    day: "2-digit",
-    month: "2-digit",
-    timeZone: "Europe/Vienna",
-    year: "numeric"
-  }).formatToParts(new Date());
-  const valueByType = Object.fromEntries(
-    parts.map((part) => [part.type, part.value])
-  );
+async function getWorkspaceSnapshotDate(supabase: SupabaseClient, workspaceId: string) {
+  const { data, error } = await supabase
+    .from("app_workspace_settings")
+    .select("timezone")
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (error) throw error;
 
-  return `${valueByType.year}-${valueByType.month}-${valueByType.day}`;
+  return getWorkspaceDateKey(
+    resolveTimeZone(data?.timezone) ?? defaultWorkspaceTimeZone
+  );
 }
 
 async function upsertContentPost(

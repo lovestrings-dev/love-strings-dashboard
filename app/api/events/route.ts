@@ -13,12 +13,14 @@ type EventEntry = {
   id: string;
   dbId?: string;
   date: string;
+  time?: string;
   name: string;
   nameUrl: string;
   locationName: string;
   locationUrl: string;
   address: string;
   addressUrl: string;
+  locationId?: string;
   posterUrl?: string;
   budgetLines?: ProductionBudgetLine[];
 };
@@ -34,6 +36,7 @@ type LocationAddressBookEntry = {
   contactNotes: string;
 };
 type EventsSnapshotPayload = {
+  intent?: "clear-events";
   entries?: EventEntry[];
   locations?: LocationAddressBookEntry[];
 };
@@ -52,6 +55,7 @@ type EventRow = {
   id: string;
   stable_key: string;
   event_date: string;
+  event_time?: string | null;
   event_name: string;
   event_url: string;
   poster_url?: string | null;
@@ -105,7 +109,12 @@ export async function POST(request: NextRequest) {
 
   try {
     const { workspaceId } = await requireWorkspaceAccess(request);
-    const savedSnapshot = await saveEventsSnapshot({ entries, locations, workspaceId });
+    const savedSnapshot = await saveEventsSnapshot({
+      allowEmptyEvents: payload.intent === "clear-events",
+      entries,
+      locations,
+      workspaceId
+    });
 
     return NextResponse.json({
       ...savedSnapshot,
@@ -132,7 +141,7 @@ async function loadEventsSnapshot(workspaceId: string) {
     supabase
       .from("events")
       .select(
-        "id, stable_key, event_date, event_name, event_url, poster_url, location_id, location_name, location_url, address, address_url"
+        "id, stable_key, event_date, event_time, event_name, event_url, poster_url, location_id, location_name, location_url, address, address_url"
       )
       .eq("workspace_id", workspaceId)
       .order("event_date", { ascending: false }),
@@ -154,15 +163,24 @@ async function loadEventsSnapshot(workspaceId: string) {
 }
 
 async function saveEventsSnapshot({
+  allowEmptyEvents,
   entries,
   locations,
   workspaceId
 }: {
+  allowEmptyEvents: boolean;
   entries: EventEntry[];
   locations: LocationAddressBookEntry[];
   workspaceId: string;
 }) {
   const supabase = createServiceSupabaseClient();
+  await assertSnapshotCanReplace({
+    allowEmptyEvents,
+    entries,
+    locations,
+    supabase,
+    workspaceId
+  });
   const normalizedLocations = locations.map(normalizeLocationForSave);
   const locationRows = normalizedLocations.map(({ location, stableKey }) => ({
     stable_key: stableKey,
@@ -215,6 +233,7 @@ async function saveEventsSnapshot({
     return {
       stable_key: stableKey,
       event_date: eventDate,
+      event_time: entry.time,
       event_name: entry.name,
       event_url: entry.nameUrl,
       poster_url: entry.posterUrl ?? "",
@@ -293,14 +312,14 @@ async function saveEventsSnapshot({
 
 function normalizeLocationForSave(location: LocationAddressBookEntry) {
   const stableKey =
-    createStableId(`${location.locationName}-${location.address}`) ||
     createStableId(location.id) ||
+    createStableId(`${location.locationName}-${location.address}`) ||
     `location-${Date.now()}`;
 
   return {
     location: {
       ...location,
-      address: location.address.trim() || "Address",
+      address: normalizeOptionalText(location.address),
       addressUrl: location.addressUrl.trim(),
       contactName: location.contactName.trim(),
       contactNotes: location.contactNotes.trim(),
@@ -317,11 +336,13 @@ function normalizeEventForSave(
   normalizedLocations: ReturnType<typeof normalizeLocationForSave>[],
   locationIdByStableKey: Map<string, string>
 ) {
-  const matchingLocation = normalizedLocations.find(
-    ({ location }) =>
-      getLocationAddressBookKey(location.locationName, location.address) ===
-      getLocationAddressBookKey(entry.locationName, entry.address)
-  );
+  const matchingLocation = entry.locationId
+    ? normalizedLocations.find(({ location }) => location.id === entry.locationId)
+    : normalizedLocations.find(
+        ({ location }) =>
+          getLocationAddressBookKey(location.locationName, location.address) ===
+          getLocationAddressBookKey(entry.locationName, entry.address)
+      );
   const stableKey =
     createStableId(entry.id) ||
     createStableId(`${entry.date}-${entry.name}-${entry.locationName}`) ||
@@ -330,9 +351,10 @@ function normalizeEventForSave(
   return {
     entry: {
       ...entry,
-      address: entry.address.trim() || "Address",
+      address: normalizeOptionalText(entry.address),
       addressUrl: entry.addressUrl.trim(),
       date: entry.date.trim(),
+      time: normalizeEventTime(entry.time),
       locationName: entry.locationName.trim() || "Location name",
       locationUrl: entry.locationUrl.trim(),
       name: entry.name.trim() || "Event",
@@ -344,6 +366,44 @@ function normalizeEventForSave(
       : null,
     stableKey
   };
+}
+
+async function assertSnapshotCanReplace({
+  allowEmptyEvents,
+  entries,
+  locations,
+  supabase,
+  workspaceId
+}: {
+  allowEmptyEvents: boolean;
+  entries: EventEntry[];
+  locations: LocationAddressBookEntry[];
+  supabase: ReturnType<typeof createServiceSupabaseClient>;
+  workspaceId: string;
+}) {
+  const [eventsResult, locationsResult] = await Promise.all([
+    supabase.from("events").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId),
+    supabase
+      .from("event_locations")
+      .select("id", { count: "exact", head: true })
+      .eq("workspace_id", workspaceId)
+  ]);
+
+  if (eventsResult.error) throw eventsResult.error;
+  if (locationsResult.error) throw locationsResult.error;
+
+  if (entries.length === 0 && (eventsResult.count ?? 0) > 0 && !allowEmptyEvents) {
+    throw new Error("Refusing to replace a non-empty Events archive with an empty snapshot.");
+  }
+
+  if (locations.length === 0 && (locationsResult.count ?? 0) > 0) {
+    throw new Error("Refusing to replace non-empty Event locations with an empty snapshot.");
+  }
+}
+
+function normalizeOptionalText(value: string | undefined) {
+  const normalized = value?.trim() ?? "";
+  return normalized === "Address" ? "" : normalized;
 }
 
 async function deleteMissingRows({
@@ -406,9 +466,12 @@ function mapEventsSnapshotRows({
       addressUrl: entry.address_url,
       budgetLines: mapBudgetLines(budgetLinesByEventId.get(entry.id) ?? []),
       date: formatDateKeyForInput(entry.event_date),
+      time: formatEventTimeForInput(entry.event_time),
       dbId: entry.id,
       id: entry.stable_key,
       locationName: entry.location_name,
+      locationId: locations.find((location) => location.id === entry.location_id)
+        ?.stable_key,
       locationUrl: entry.location_url,
       name: entry.event_name,
       nameUrl: entry.event_url,
@@ -557,6 +620,21 @@ function formatDateKeyForInput(dateKey: string) {
     String(date.getUTCMonth() + 1).padStart(2, "0"),
     date.getUTCFullYear()
   ].join("/");
+}
+
+function formatEventTimeForInput(value?: string | null) {
+  return value ? value.slice(0, 5) : "";
+}
+
+function normalizeEventTime(value?: string) {
+  const normalizedValue = value?.trim() ?? "";
+
+  if (!normalizedValue) return null;
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(normalizedValue)) {
+    throw new Error("Invalid event time.");
+  }
+
+  return normalizedValue;
 }
 
 function parseInputDate(value: string) {

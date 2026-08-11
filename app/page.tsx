@@ -31,6 +31,8 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { AccountControl } from "./account-control";
 import { DateInput } from "./date-input";
 import { toDisplayDate, toIsoDate } from "@/lib/date-input";
+import { defaultWorkspaceTimeZone, getWorkspaceDateKey } from "@/lib/workspace-time";
+import { defaultWorkspaceId } from "@/lib/workspace";
 
 type Section = (typeof sections)[number];
 type FocusQueueNavigationState = {
@@ -87,6 +89,7 @@ type GoogleConnectionStatus = {
   };
   updatedAt: string | null;
   youtube: {
+    channelId: string | null;
     channelTitle: string | null;
     enabled: boolean;
   };
@@ -205,6 +208,7 @@ type BudgetEntryType = "earned" | "spent" | "one-off" | "recurring";
 type BudgetSourceBucket = "events" | "production" | "marketing" | "other";
 type BudgetLedgerSortKey = "date" | "bucket" | "description" | "amount" | "type";
 type BudgetRecurringCadence = "monthly" | "yearly";
+type ProductionDefaultCosts = Record<"license" | "distributor", number>;
 type SortDirection = "ascending" | "descending";
 type BudgetEntry = {
   id: string;
@@ -226,12 +230,14 @@ type EventEntry = {
   id: string;
   dbId?: string;
   date: string;
+  time?: string;
   name: string;
   nameUrl: string;
   locationName: string;
   locationUrl: string;
   address: string;
   addressUrl: string;
+  locationId?: string;
   posterUrl?: string;
   budgetLines?: ProductionBudgetLine[];
   earnedAmount?: number;
@@ -434,6 +440,7 @@ type EventDbRow = {
   id: string;
   stable_key: string;
   event_date: string;
+  event_time?: string | null;
   event_name: string;
   event_url: string;
   poster_url?: string | null;
@@ -455,212 +462,164 @@ type EventsSnapshot = {
   entries: EventEntry[];
   locations: LocationAddressBookEntry[];
 };
+type EventsSaveSnapshot = EventsSnapshot & {
+  intent?: "clear-events";
+};
 
 const platformStats = [
   {
     platform: "Instagram",
     slug: "instagram",
-    profileUrl: "https://www.instagram.com/lovestringsband/",
+    profileUrl: "",
     icon: Camera,
     dashboard: true,
     metrics: [
-      { label: "Followers", metricName: "followers", value: "184" },
+      { label: "Followers", metricName: "followers", value: "—", context: "" },
       {
         label: "Accounts Reached, Last 30 Days",
         metricName: "accounts_reached_30d",
-        value: "3.5K"
+        value: "—"
       },
       {
         label: "Views, Last 30 Days",
         metricName: "views_30d",
-        value: "29.0K"
+        value: "—"
       },
       {
         label: "Latest Reel/Post Views",
         metricName: "latest_reel_post_views",
-        value: "2.1K",
-        context: "Our version of Flowers is officially out!"
+        value: "—"
       }
     ]
   },
   {
     platform: "YouTube Channel",
     slug: "youtube",
-    profileUrl: "https://www.youtube.com/@LoveStringsBand",
+    profileUrl: "",
     icon: Video,
     dashboard: true,
     metrics: [
-      { label: "Subscribers", metricName: "subscribers", value: "39" },
-      { label: "Lifetime Views", metricName: "total_channel_views", value: "17.8K" },
+      { label: "Subscribers", metricName: "subscribers", value: "—", context: "" },
+      { label: "Lifetime Views", metricName: "total_channel_views", value: "—" },
       {
         label: "Latest Video Views",
         metricName: "latest_video_views",
-        value: "39",
-        context: "A Rooftop Sunset in Vienna | Wonderful Life (Acoustic Cover)"
+        value: "—"
       },
       {
         label: "Latest Short Views",
         metricName: "latest_short_views",
-        value: "19",
-        context: "Learning English Through Music"
+        value: "—"
       }
     ]
   },
   {
     platform: "YouTube Topic",
     slug: "youtube-music",
-    profileUrl:
-      "https://www.youtube.com/",
+    profileUrl: "",
     icon: Headphones,
     dashboard: false,
     metrics: [
-      { label: "Subscribers", metricName: "subscribers", value: "11" },
-      { label: "Total Plays", metricName: "total_plays", value: "75" },
+      { label: "Subscribers", metricName: "subscribers", value: "—", context: "" },
+      { label: "Total Plays", metricName: "total_plays", value: "—" },
       {
         label: "Current Release Plays",
         metricName: "current_release_plays",
-        value: "15",
-        context: "Flowers"
+        value: "—"
       }
     ]
   },
   {
     platform: "Website Analytics",
     slug: "google-analytics",
-    profileUrl: "https://analytics.google.com/",
+    profileUrl: "",
     icon: BarChart3,
     dashboard: false,
     metrics: [
-      { label: "Active Users, Last 30 Days", metricName: "active_users_30d", value: "0" },
-      { label: "Sessions, Last 30 Days", metricName: "sessions_30d", value: "0" },
-      { label: "Page Views, Last 30 Days", metricName: "page_views_30d", value: "0" },
+      { label: "Active Users, Last 30 Days", metricName: "active_users_30d", value: "—", context: "" },
+      { label: "Sessions, Last 30 Days", metricName: "sessions_30d", value: "—" },
+      { label: "Page Views, Last 30 Days", metricName: "page_views_30d", value: "—" },
       {
         label: "Top Traffic Source, Last 30 Days",
         metricName: "top_traffic_source_sessions_30d",
-        value: "0",
-        context: "No traffic yet"
+        value: "—"
       }
     ]
   },
   {
     platform: "Spotify",
     slug: "spotify",
-    profileUrl:
-      "https://open.spotify.com/artist/4CESELwcVlIPnfiWuaxRbF?si=odblVX83T7SBd486lli_sg",
+    profileUrl: "",
     icon: Headphones,
     dashboard: true,
     metrics: [
-      { label: "Followers", metricName: "followers", value: "10" },
-      { label: "Total Streams", metricName: "total_streams", value: "19" },
+      { label: "Followers", metricName: "followers", value: "—", context: "" },
+      { label: "Total Streams", metricName: "total_streams", value: "—" },
       {
         label: "Current Release Streams",
         metricName: "current_release_streams",
-        value: "4",
-        context: "Flowers"
+        value: "—"
       }
     ]
   },
   {
     platform: "Apple Music",
     slug: "apple-music",
-    profileUrl: "https://music.apple.com/us/artist/love-strings/1894951732",
+    profileUrl: "",
     icon: Music2,
     dashboard: true,
     metrics: [
-      { label: "Last Update", metricName: "last_update_date", value: "04/07/2026" },
-      { label: "Total Plays", metricName: "total_plays", value: "12" },
-      { label: "Total Shazams", metricName: "total_shazams", value: "0" },
+      { label: "Last Update", metricName: "last_update_date", value: "—", context: "" },
+      { label: "Total Plays", metricName: "total_plays", value: "—" },
+      { label: "Total Shazams", metricName: "total_shazams", value: "—" },
       {
         label: "Current Release Plays",
         metricName: "current_release_plays",
-        value: "0",
-        context: "Flowers"
+        value: "—"
       },
       {
         label: "Current Release Shazams",
         metricName: "current_release_shazams",
-        value: "0",
-        context: "Flowers"
+        value: "—"
       }
     ]
   },
   {
     platform: "Amazon Music",
     slug: "amazon-music",
-    profileUrl:
-      "https://amazon.de/music/player/artists/B0GXX8D1Q6/love-strings?marketplaceId=A1PA6795UKMFR9&musicTerritory=DE&ref=dm_sh_DllfMUlhifqDm8suXQHK2D5tg",
+    profileUrl: "",
     icon: Headphones,
     dashboard: false,
     metrics: [
-      { label: "Listeners", metricName: "listeners", value: "3" },
-      { label: "Total Streams", metricName: "total_streams", value: "4" },
+      { label: "Listeners", metricName: "listeners", value: "—", context: "" },
+      { label: "Total Streams", metricName: "total_streams", value: "—" },
       {
         label: "Current Release Streams",
         metricName: "current_release_streams",
-        value: "2",
-        context: "Flowers"
+        value: "—"
       }
     ]
   },
   {
     platform: "Deezer",
     slug: "deezer",
-    profileUrl: "https://www.deezer.com/en/artist/9299570",
+    profileUrl: "",
     icon: Disc3,
     dashboard: false,
     metrics: [
-      { label: "Fans", metricName: "fans", value: "2" },
-      { label: "Total Streams", metricName: "total_streams", value: "4" },
+      { label: "Fans", metricName: "fans", value: "—", context: "" },
+      { label: "Total Streams", metricName: "total_streams", value: "—" },
       {
         label: "Current Release Streams",
         metricName: "current_release_streams",
-        value: "2",
-        context: "Flowers"
+        value: "—"
       }
     ]
   }
 ];
 
-const platformPlaceholder = {
-  platform: "New Platform",
-  slug: "new-platform-placeholder",
-  icon: Headphones,
-  dashboard: false,
-  metrics: [
-    { label: "Fans", metricName: "fans", value: "XXX" },
-    { label: "Streams", metricName: "total_streams", value: "XXX" },
-    {
-      label: "Current Streams",
-      metricName: "current_release_streams",
-      value: "XXX",
-      context: "Release name"
-    }
-  ]
-};
-
-const defaultQrCodeLinks: QrCodeLink[] = [
-  {
-    id: "website",
-    name: "Website",
-    qrImageUrl: "/love-strings-website-qr.png",
-    targetUrl: "https://www.lovestrings.at/"
-  },
-  {
-    id: "dashboard",
-    name: "Dashboard",
-    qrImageUrl: "",
-    targetUrl: "https://love-strings-dashboard.vercel.app/"
-  },
-  ...platformStats.map((platform) => ({
-    id: `platform-${platform.slug}`,
-    name: platform.platform,
-    qrImageUrl: "",
-    targetUrl: platform.profileUrl
-  }))
-];
-
-const appVersionLabel = "Beta 1.17";
-const defaultAppLogoUrl = "/love-strings-logo.jpeg";
+const appVersionLabel = "Beta 1.18";
+const defaultAppLogoUrl = "";
 
 const sections = [
   "Dashboard",
@@ -903,17 +862,16 @@ const marketingCampaigns: MarketingCampaignConfig[] = [
   ...historicalMarketingCampaigns
 ];
 
-const campaignDraftStorageKey = "love-strings-marketing-campaign-drafts";
-const productionDraftStorageKey = "love-strings-production-song-drafts-v3";
-const budgetDraftStorageKey = "love-strings-budget-entry-drafts-v2";
-const deletedBudgetForecastStorageKey = "love-strings-budget-deleted-forecast-v1";
-const eventDraftStorageKey = "love-strings-event-entry-drafts-v1";
-const locationAddressBookStorageKey = "love-strings-location-address-book-v1";
-const qrCodeLinksStorageKey = "love-strings-qr-code-links-v1";
-const otherTaskStorageKey = "love-strings-focus-other-tasks-v1";
-const otherTaskSupabaseMigrationKey = "love-strings-focus-other-tasks-supabase-v1";
-const appleMusicReminderDismissedDateKey =
-  "love-strings-apple-music-reminder-dismissed-date-v1";
+const workspaceStorageKey = (workspaceId: string, key: string) =>
+  `workspace:${workspaceId}:${key}`;
+const campaignDraftStorageKey = "marketing-campaign-drafts";
+const productionDraftStorageKey = "production-song-drafts-v3";
+const budgetDraftStorageKey = "budget-entry-drafts-v2";
+const deletedBudgetForecastStorageKey = "budget-deleted-forecast-v1";
+const eventDraftStorageKey = "event-entry-drafts-v1";
+const locationAddressBookStorageKey = "location-address-book-v1";
+const qrCodeLinksStorageKey = "qr-code-links-v1";
+const appleMusicReminderDismissedDateKey = "apple-music-reminder-dismissed-date-v1";
 
 const newMarketingCampaign: Omit<MarketingCampaignConfig, "id"> = {
   campaignKind: "song",
@@ -924,17 +882,21 @@ const newMarketingCampaign: Omit<MarketingCampaignConfig, "id"> = {
 
 const defaultCampaignDayCount = 14;
 const defaultProductionStepTemplates = [
-  { label: "Demo", offset: -42 },
-  { label: "Drums", offset: -35 },
-  { label: "Guitars", offset: -30 },
-  { label: "Bass", offset: -27 },
-  { label: "Vocals", offset: -23 },
-  { label: "Mix", offset: -13 },
-  { label: "Master", offset: -8 },
-  { label: "License", offset: -5 },
-  { label: "Cover Art", offset: -3 },
-  { label: "Distributor", offset: 0 }
+  { key: "demo", label: "Demo", offset: -42 },
+  { key: "drums", label: "Drums", offset: -35 },
+  { key: "guitars", label: "Guitars", offset: -30 },
+  { key: "bass", label: "Bass", offset: -27 },
+  { key: "vocals", label: "Vocals", offset: -23 },
+  { key: "mix", label: "Mix", offset: -13 },
+  { key: "master", label: "Master", offset: -8 },
+  { key: "license", label: "License", offset: -5 },
+  { key: "cover-art", label: "Cover Art", offset: -3 },
+  { key: "distributor", label: "Distributor", offset: 0 }
 ];
+const defaultProductionStepCosts: ProductionDefaultCosts = {
+  distributor: -10,
+  license: -20
+};
 const deletableProductionStepLabels = new Set([
   "drums",
   "guitars",
@@ -1852,6 +1814,7 @@ function getNextProductionSongDeadline(songs: ProductionSongConfig[]) {
 
 function createProductionSongSeed({
   albumArtUrl = "",
+  defaultCosts,
   deadline,
   id,
   statusPattern,
@@ -1859,6 +1822,7 @@ function createProductionSongSeed({
 }: {
   albumArtUrl?: string;
   deadline: string;
+  defaultCosts?: ProductionDefaultCosts;
   id: string;
   statusPattern: MarketingStatus[];
   title: string;
@@ -1873,7 +1837,7 @@ function createProductionSongSeed({
     id,
     releaseDate,
     roadmapPhaseId: null,
-    steps: buildProductionSteps(deadline, title, statusPattern),
+    steps: buildProductionSteps(deadline, statusPattern, defaultCosts),
     title
   };
 }
@@ -1902,8 +1866,8 @@ function createProductionSongFromWorkbookSeed(
 
 function buildProductionSteps(
   productionDeadlineInput: string,
-  songTitle: string,
-  statusPattern: MarketingStatus[] = ["not-started"]
+  statusPattern: MarketingStatus[] = ["not-started"],
+  defaultCosts = defaultProductionStepCosts
 ) {
   const productionDeadline =
     parseCampaignDate(productionDeadlineInput) ?? new Date(Date.UTC(2026, 5, 26));
@@ -1920,8 +1884,8 @@ function buildProductionSteps(
       label: template.label,
       deadline: formatDateForInput(deadline),
       isDefaultStep: true,
-      notes: `${songTitle}: ${template.label.toLowerCase()} notes`,
-      budgetLines: getDefaultProductionStepBudgetLines(template.label),
+      notes: "",
+      budgetLines: getDefaultProductionStepBudgetLines(template.key, defaultCosts),
       status,
       extraTasks: []
     } satisfies ProductionStep;
@@ -1941,18 +1905,21 @@ function buildProductionStepsFromWorkbookSeed(seed: ProductionWorkbookSeed) {
       deadline: formatDateForInput(deadline),
       isDefaultStep: true,
       notes: getProductionStepWorkbookNote(seed, template.label),
-      budgetLines: getDefaultProductionStepBudgetLines(template.label),
+      budgetLines: getDefaultProductionStepBudgetLines(template.key),
       status: getProductionStepWorkbookStatus(seed, template.label),
       extraTasks: []
     } satisfies ProductionStep;
   });
 }
 
-function getDefaultProductionStepBudgetLines(stepLabel: string): ProductionBudgetLine[] {
-  if (stepLabel === "License") {
+function getDefaultProductionStepBudgetLines(
+  stepKey: string,
+  defaultCosts = defaultProductionStepCosts
+): ProductionBudgetLine[] {
+  if (stepKey === "license") {
     return [
       {
-        amount: -20,
+        amount: defaultCosts.license,
         bucket: "production",
         description: "License",
         id: "default-license-budget"
@@ -1960,10 +1927,10 @@ function getDefaultProductionStepBudgetLines(stepLabel: string): ProductionBudge
     ];
   }
 
-  if (stepLabel === "Distributor") {
+  if (stepKey === "distributor") {
     return [
       {
-        amount: -10,
+        amount: defaultCosts.distributor,
         bucket: "production",
         description: "Distributor",
         id: "default-distributor-budget"
@@ -2262,10 +2229,14 @@ function compareText(firstValue: string, secondValue: string) {
 }
 
 function sortEventEntriesByDate(entries: EventEntry[]) {
-  return [...entries].sort(
+  const sortedEntries = [...entries].sort(
     (firstEntry, secondEntry) =>
       getBudgetDateSortTime(secondEntry.date) - getBudgetDateSortTime(firstEntry.date)
   );
+
+  return sortedEntries.every((entry, index) => entry.id === entries[index]?.id)
+    ? entries
+    : sortedEntries;
 }
 
 function normalizeEventEntries(entries: EventEntry[]) {
@@ -2638,6 +2609,10 @@ function getMatchingLocationAddressBookEntry(
   event: EventEntry,
   locations: LocationAddressBookEntry[]
 ) {
+  if (event.locationId) {
+    return locations.find((location) => location.id === event.locationId);
+  }
+
   const eventLocationKey = getLocationAddressBookKey(
     event.locationName,
     event.address
@@ -3522,7 +3497,8 @@ function getDashboardFocusQueue(
   productionPreviewSongs: ProductionSongConfig[],
   otherTasks: OtherTask[] = [],
   utilityTasks: FocusQueueItem[] = [],
-  campaigns: MarketingCampaignConfig[] = []
+  campaigns: MarketingCampaignConfig[] = [],
+  workspaceTimeZone = defaultWorkspaceTimeZone
 ) {
   const todayTime = getTodayUtcDate().getTime();
   const marketingCandidate = campaigns
@@ -3607,7 +3583,7 @@ function getDashboardFocusQueue(
     )
     .map(toOtherFocusQueueItem);
   const todayOtherTasks = activeOtherTasks.filter((task) =>
-    task.dueDate ? isOtherTaskDueToday(task.dueDate) : false
+    task.dueDate ? isOtherTaskDueToday(task.dueDate, workspaceTimeZone) : false
   );
   const otherHistoryTasks = otherTasks
     .filter((task) => task.status === "done" || task.status === "irrelevant")
@@ -3625,6 +3601,12 @@ function getDashboardFocusQueue(
   ]
     .filter((task): task is FocusQueueItem => Boolean(task))
     .slice(0, 3);
+  const coreVisibleTasks = [
+    primaryMarketingTask,
+    primaryProductionTask,
+    ...utilityTasks
+  ].filter((task): task is FocusQueueItem => Boolean(task));
+  const visibleOtherTaskSlots = Math.max(0, 5 - coreVisibleTasks.length);
 
   return {
     allTasks: [
@@ -3635,18 +3617,14 @@ function getDashboardFocusQueue(
     ],
     baselineTasks,
     visibleTasks: [
-      primaryMarketingTask,
-      primaryProductionTask,
-      ...utilityTasks,
-      ...todayOtherTasks
-    ]
-      .filter((task): task is FocusQueueItem => Boolean(task))
-      .slice(0, 5)
+      ...coreVisibleTasks,
+      ...todayOtherTasks.slice(0, visibleOtherTaskSlots)
+    ].slice(0, 5)
   };
 }
 
-function isOtherTaskDueToday(dueDate: string) {
-  return dueDate === formatDateForInput(getTodayUtcDate());
+function isOtherTaskDueToday(dueDate: string, workspaceTimeZone = defaultWorkspaceTimeZone) {
+  return toIsoDate(dueDate) === getWorkspaceDateKey(workspaceTimeZone);
 }
 
 function getCampaignDailyProgressItems(
@@ -4415,9 +4393,12 @@ function mapEventsSnapshotRows({
           budgetLinesByEventId.get(entry.id) ?? []
         ),
         date: formatDateKeyForInput(entry.event_date),
+        time: formatEventTimeForInput(entry.event_time),
         dbId: entry.id,
         id: entry.stable_key,
         locationName: entry.location_name,
+        locationId: locations.find((location) => location.id === entry.location_id)
+          ?.stable_key,
         locationUrl: entry.location_url,
         name: entry.event_name,
         nameUrl: entry.event_url,
@@ -4454,6 +4435,10 @@ function mapEventBudgetLineRows(rows: EventBudgetLineDbRow[]) {
       description: line.description,
       id: line.id
     }));
+}
+
+function formatEventTimeForInput(value?: string | null) {
+  return value ? value.slice(0, 5) : "";
 }
 
 function applyCampaignDaySeed(
@@ -4715,11 +4700,12 @@ async function loadEventsSnapshotFromSupabase(): Promise<EventsSnapshot | null> 
 
 async function saveEventsSnapshotToSupabase({
   entries,
-  locations
-}: EventsSnapshot): Promise<EventsSnapshot | null> {
+  locations,
+  intent
+}: EventsSaveSnapshot): Promise<EventsSnapshot | null> {
   try {
     const response = await fetch("/api/events", {
-      body: JSON.stringify({ entries, locations }),
+      body: JSON.stringify({ entries, intent, locations }),
       credentials: "same-origin",
       headers: {
         "Content-Type": "application/json",
@@ -4871,10 +4857,10 @@ async function saveDailyFocusProgress(item: DailyFocusProgressItem) {
   }
 }
 
-async function deleteDailyFocusProgress(taskKey: string) {
+async function deleteDailyFocusProgress(taskKey: string, date: string) {
   try {
     const response = await fetch("/api/focus/daily-progress", {
-      body: JSON.stringify({ date: getViennaDateKey(), taskKey }),
+      body: JSON.stringify({ date, taskKey }),
       credentials: "same-origin",
       headers: {
         "Content-Type": "application/json",
@@ -4894,10 +4880,10 @@ async function deleteDailyFocusProgress(taskKey: string) {
   }
 }
 
-async function resetDailyFocusProgress() {
+async function resetDailyFocusProgress(date: string) {
   try {
     const response = await fetch("/api/focus/daily-progress", {
-      body: JSON.stringify({ date: getViennaDateKey() }),
+      body: JSON.stringify({ date }),
       credentials: "same-origin",
       headers: {
         "Content-Type": "application/json",
@@ -5080,13 +5066,18 @@ export default function Home() {
   const marketingBudgetSaveTimers = useRef<Record<string, number>>({});
   const otherTaskSaveTimers = useRef<Record<string, number>>({});
   const eventSaveTimer = useRef<number | null>(null);
+  const pendingFinalEventDeletion = useRef(false);
   const budgetSaveTimer = useRef<number | null>(null);
   const qrCodeSaveTimer = useRef<number | null>(null);
   const hasRequestedEventSupabaseLoad = useRef(false);
   const hasRequestedBudgetSupabaseLoad = useRef(false);
-  const hasRequestedOtherTaskSupabaseLoad = useRef(false);
+  const otherTaskLoadWorkspaceId = useRef<string | null>(null);
+  const otherTaskMutationVersions = useRef(new Map<string, number>());
+  const otherTaskMutationVersion = useRef(0);
+  const activeWorkspaceIdRef = useRef("");
   const hasRequestedQrCodeSupabaseLoad = useRef(false);
   const [activeSection, setActiveSection] = useState<Section>("Dashboard");
+  const previousActiveSection = useRef<Section>("Dashboard");
   const [focusQueueNavigationState, setFocusQueueNavigationState] = useState<FocusQueueNavigationState>({
     completedTasksOpen: false,
     detailsOpen: false
@@ -5129,6 +5120,9 @@ export default function Home() {
   const [workspaceRole, setWorkspaceRole] = useState<WorkspaceRole | null>(null);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
   const [activeWorkspaceName, setActiveWorkspaceName] = useState("Workspace");
+  const [workspaceTimeZone, setWorkspaceTimeZone] = useState(defaultWorkspaceTimeZone);
+  const [productionDefaultCosts, setProductionDefaultCosts] =
+    useState<ProductionDefaultCosts>(defaultProductionStepCosts);
   const [appLogoPath, setAppLogoPath] = useState("");
   const [appLogoUrl, setAppLogoUrl] = useState(defaultAppLogoUrl);
   const [dailyFocusProgress, setDailyFocusProgress] = useState<
@@ -5136,8 +5130,10 @@ export default function Home() {
   >([]);
   const [appleMusicReminderDismissedDate, setAppleMusicReminderDismissedDate] =
     useState("");
+  const [appleMusicLastUploadedAt, setAppleMusicLastUploadedAt] = useState("");
   const [platformStatsData, setPlatformStatsData] = useState<typeof platformStats>([]);
   const [platformMetricRows, setPlatformMetricRows] = useState<MetricRow[]>([]);
+  const [configuredPlatformUrls, setConfiguredPlatformUrls] = useState<Record<string, string>>({});
   const [workspaceGoogleConnection, setWorkspaceGoogleConnection] =
     useState<GoogleConnectionStatus | null>(null);
   const [refreshStatus, setRefreshStatus] = useState<RefreshStatus>({
@@ -5169,6 +5165,11 @@ export default function Home() {
     entryId: string;
     token: number;
   } | null>(null);
+  const [locationFocusTarget, setLocationFocusTarget] = useState<{
+    locationId: string;
+    token: number;
+  } | null>(null);
+  const locationFocusToken = useRef(0);
   const [campaigns, setCampaigns] = useState<MarketingCampaignConfig[]>([]);
   const [productionSongDrafts, setProductionSongDrafts] = useState<ProductionSongConfig[]>([]);
   const [roadmapPhaseDrafts, setRoadmapPhaseDrafts] = useState<RoadmapPhase[]>([]);
@@ -5178,6 +5179,7 @@ export default function Home() {
   const fallbackEventEntriesForAddressBook = useRef(eventEntryDrafts);
   const [locationAddressBook, setLocationAddressBook] = useState<LocationAddressBookEntry[]>([]);
   const [otherTasks, setOtherTasks] = useState<OtherTask[]>([]);
+  const [otherTaskSaveErrors, setOtherTaskSaveErrors] = useState<Record<string, string>>({});
   const [qrCodeLinks, setQrCodeLinks] = useState<QrCodeLink[]>([]);
   const [hasLoadedCampaignDrafts, setHasLoadedCampaignDrafts] = useState(false);
   const [hasLoadedProductionDrafts, setHasLoadedProductionDrafts] =
@@ -5196,7 +5198,7 @@ export default function Home() {
     useState(false);
   const hasCheckedOpeningMetricRefresh = useRef(false);
   const activePlatformStats = getActivePlatformStats(
-    platformStatsData,
+    platformStatsData.map((platform) => ({ ...platform, profileUrl: configuredPlatformUrls[platform.slug] ?? platform.profileUrl })),
     workspaceGoogleConnection
   );
   const dashboardPlatformStats = getDashboardPlatformStats(activePlatformStats);
@@ -5226,9 +5228,61 @@ export default function Home() {
     productionSongDrafts,
     deletedBudgetForecastIds
   );
+  const workspaceDateKey = getWorkspaceDateKey(workspaceTimeZone);
+  const resortEventEntries = useCallback(() => {
+    setEventEntryDrafts((currentEntries) => sortEventEntriesByDate(currentEntries));
+  }, []);
+
+  useEffect(() => {
+    if (
+      previousActiveSection.current === "Budget" &&
+      activeSection !== "Budget"
+    ) {
+      setBudgetEntryDrafts((currentEntries) => sortBudgetEntriesByDate(currentEntries));
+    }
+
+    if (
+      previousActiveSection.current === "Events" &&
+      activeSection !== "Events"
+    ) {
+      resortEventEntries();
+    }
+
+    previousActiveSection.current = activeSection;
+  }, [activeSection, resortEventEntries]);
+
+  const loadAppleMusicLastUploadedAt = useCallback(async () => {
+    if (!activeWorkspaceId) return;
+    const supabase = createBrowserSupabaseClient();
+    const { data } = await supabase
+      .from("import_logs")
+      .select("finished_at")
+      .eq("workspace_id", activeWorkspaceId)
+      .eq("source", "apple-music-csv")
+      .eq("import_status", "completed")
+      .not("finished_at", "is", null)
+      .order("finished_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    setAppleMusicLastUploadedAt(data?.finished_at ?? "");
+  }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    let isCancelled = false;
+    void fetch("/api/workspace/platforms", { cache: "no-store" }).then((response) => response.json()).then((payload: { accounts?: Array<{ slug: string; url: string | null }> }) => {
+      if (!isCancelled) setConfiguredPlatformUrls(Object.fromEntries((payload.accounts ?? []).map((account) => [account.slug, account.url ?? ""])));
+    }).catch(() => { if (!isCancelled) setConfiguredPlatformUrls({}); });
+    return () => { isCancelled = true; };
+  }, [activeWorkspaceId, workspaceGoogleConnection]);
+
+  useEffect(() => {
+    activeWorkspaceIdRef.current = activeWorkspaceId;
+  }, [activeWorkspaceId]);
 
   function queueProductionSongSave(song: ProductionSongConfig) {
     const existingTimer = productionSaveTimers.current[song.id];
+    const songWorkspaceId = activeWorkspaceId;
 
     if (existingTimer) {
       window.clearTimeout(existingTimer);
@@ -5236,11 +5290,18 @@ export default function Home() {
 
     productionSaveTimers.current[song.id] = window.setTimeout(() => {
       delete productionSaveTimers.current[song.id];
+      if (!songWorkspaceId || activeWorkspaceIdRef.current !== songWorkspaceId) {
+        return;
+      }
       setProductionSaveStatus({
         message: "Saving production changes...",
         state: "loading"
       });
       void saveProductionSongToSupabase(song).then((savedSong) => {
+        if (activeWorkspaceIdRef.current !== songWorkspaceId) {
+          return;
+        }
+
         if (!savedSong.ok) {
           setProductionSaveStatus({
             message: savedSong.error,
@@ -5264,7 +5325,17 @@ export default function Home() {
 
     eventSaveTimer.current = window.setTimeout(() => {
       eventSaveTimer.current = null;
-      void saveEventsSnapshotToSupabase(snapshot);
+      const shouldAllowEmptyEvents =
+        snapshot.entries.length === 0 && pendingFinalEventDeletion.current;
+
+      void saveEventsSnapshotToSupabase({
+        ...snapshot,
+        intent: shouldAllowEmptyEvents ? "clear-events" : undefined
+      }).then((savedSnapshot) => {
+        if (savedSnapshot && shouldAllowEmptyEvents) {
+          pendingFinalEventDeletion.current = false;
+        }
+      });
     }, 900);
   }
 
@@ -5281,6 +5352,8 @@ export default function Home() {
 
   function queueOtherTaskSave(task: OtherTask) {
     const existingTimer = otherTaskSaveTimers.current[task.id];
+    const taskWorkspaceId = activeWorkspaceId;
+    const taskMutationVersion = otherTaskMutationVersions.current.get(task.id);
 
     if (existingTimer) {
       window.clearTimeout(existingTimer);
@@ -5288,7 +5361,27 @@ export default function Home() {
 
     otherTaskSaveTimers.current[task.id] = window.setTimeout(() => {
       delete otherTaskSaveTimers.current[task.id];
-      void saveOtherTasksToSupabase([task]);
+      if (!taskWorkspaceId || activeWorkspaceIdRef.current !== taskWorkspaceId) {
+        return;
+      }
+      void saveOtherTasksToSupabase([task]).then((savedTasks) => {
+        if (otherTaskMutationVersions.current.get(task.id) !== taskMutationVersion) {
+          return;
+        }
+
+        if (savedTasks === null) {
+          setOtherTaskSaveErrors((currentErrors) => ({
+            ...currentErrors,
+            [task.id]: "Other task could not be saved. Edit it to retry."
+          }));
+          return;
+        }
+
+        setOtherTaskSaveErrors((currentErrors) => {
+          const { [task.id]: _resolvedError, ...remainingErrors } = currentErrors;
+          return remainingErrors;
+        });
+      });
     }, 650);
   }
 
@@ -5303,10 +5396,8 @@ export default function Home() {
     }, 650);
   }
 
-  function recordDailyFocusStatus(
-    item: Omit<DailyFocusProgressItem, "date">
-  ) {
-    const progressItem = { ...item, date: getViennaDateKey() };
+  const recordDailyFocusStatus = useCallback((item: Omit<DailyFocusProgressItem, "date">) => {
+    const progressItem = { ...item, date: workspaceDateKey };
 
     setDailyFocusProgress((currentItems) => [
       ...currentItems.filter(
@@ -5315,7 +5406,7 @@ export default function Home() {
       progressItem
     ]);
     void saveDailyFocusProgress(progressItem);
-  }
+  }, [workspaceDateKey]);
 
   const loadPlatformStats = useCallback(async () => {
     if (!activeWorkspaceId) return [];
@@ -5676,6 +5767,7 @@ export default function Home() {
 
       const result = await response.json();
       await loadPlatformStats();
+      await loadAppleMusicLastUploadedAt();
 
       if (result.skipped) {
         setRefreshStatus({
@@ -5846,7 +5938,7 @@ export default function Home() {
         void saveMarketingCampaignDays(campaign, campaignDays);
       }
     },
-    [campaigns]
+    [campaigns, recordDailyFocusStatus]
   );
 
   function deleteCampaign(campaignId: string) {
@@ -5865,6 +5957,7 @@ export default function Home() {
     const newSongNumber = productionSongDrafts.length + 1;
     const newDeadline = getNextProductionSongDeadline(productionSongDrafts);
     const localSong = createProductionSongSeed({
+      defaultCosts: productionDefaultCosts,
       id: `production-song-${newSongNumber}-${Date.now()}`,
       title: `New Song ${newSongNumber}`,
       deadline: formatDateForInput(newDeadline),
@@ -5990,10 +6083,8 @@ export default function Home() {
 
   function updateBudgetEntry(entryId: string, updates: Partial<BudgetEntry>) {
     setBudgetEntryDrafts((currentEntries) =>
-      sortBudgetEntriesByDate(
-        currentEntries.map((entry) =>
-          entry.id === entryId ? { ...entry, ...updates } : entry
-        )
+      currentEntries.map((entry) =>
+        entry.id === entryId ? { ...entry, ...updates } : entry
       )
     );
   }
@@ -6018,45 +6109,98 @@ export default function Home() {
   }
 
   function addEventEntry() {
+    const entryId = `event-entry-${Date.now()}`;
+    setEventFocusTarget({ entryId, token: Date.now() });
     setEventEntryDrafts((currentEntries) =>
-      sortEventEntriesByDate([
+      [
         {
-          id: `event-entry-${Date.now()}`,
+          id: entryId,
           date: formatDateForInput(getTodayUtcDate()),
+          time: "",
           name: "New event",
           nameUrl: "",
           locationName: "Location name",
           locationUrl: "",
-          address: "Address",
+          address: "",
           addressUrl: "",
           posterUrl: "",
           budgetLines: [
             {
-              id: `event-budget-line-${Date.now()}`,
+              id: `${entryId}-budget-line`,
               amount: 0,
               description: ""
             }
           ]
         },
         ...currentEntries
-      ])
+      ]
     );
   }
 
   function updateEventEntry(entryId: string, updates: Partial<EventEntry>) {
     setEventEntryDrafts((currentEntries) =>
-      sortEventEntriesByDate(
-        currentEntries.map((entry) =>
-          entry.id === entryId ? { ...entry, ...updates } : entry
-        )
+      currentEntries.map((entry) =>
+        entry.id === entryId ? { ...entry, ...updates } : entry
       )
     );
   }
 
+  function saveEventLocation(entryId: string) {
+    const entry = eventEntryDrafts.find((candidate) => candidate.id === entryId);
+
+    if (!entry) return;
+
+    let locationId = entry.locationId;
+    let existingLocation = locationId
+      ? locationAddressBook.find((location) => location.id === locationId)
+      : undefined;
+
+    if (!existingLocation) {
+      // Legacy Events predate the persisted location ID. This exact composite
+      // lookup only upgrades those existing unlinked records; new links use IDs.
+      const legacyLocationKey = getLocationConsolidationKey(
+        entry.locationName,
+        entry.address
+      );
+      existingLocation = locationAddressBook.find(
+        (location) =>
+          getLocationConsolidationKey(location.locationName, location.address) ===
+          legacyLocationKey
+      );
+      locationId = existingLocation?.id;
+    }
+
+    if (!locationId) {
+      locationId = `location-${createStableId(`${entry.id}-address-book`)}`;
+      const newLocation: LocationAddressBookEntry = {
+        address: entry.address === "Address" ? "" : entry.address,
+        addressUrl: entry.addressUrl,
+        contactName: "",
+        contactNotes: "",
+        contactPhone: "",
+        id: locationId,
+        locationName: entry.locationName === "Location name" ? "" : entry.locationName,
+        locationUrl: entry.locationUrl
+      };
+      setLocationAddressBook((currentLocations) => [newLocation, ...currentLocations]);
+    }
+
+    updateEventEntry(entryId, { locationId });
+    navigateWithHistory(() => {
+      setEventsNavigationContext(null);
+      locationFocusToken.current += 1;
+      setLocationFocusTarget({
+        locationId: locationId!,
+        token: locationFocusToken.current
+      });
+    });
+  }
+
   function deleteEventEntry(entryId: string) {
-    setEventEntryDrafts((currentEntries) =>
-      currentEntries.filter((entry) => entry.id !== entryId)
-    );
+    setEventEntryDrafts((currentEntries) => {
+      pendingFinalEventDeletion.current = currentEntries.length === 1;
+      return currentEntries.filter((entry) => entry.id !== entryId);
+    });
   }
 
   function addLocationAddressBookEntry() {
@@ -6065,7 +6209,7 @@ export default function Home() {
         id: `location-${Date.now()}`,
         locationName: "New location",
         locationUrl: "",
-        address: "Address",
+        address: "",
         addressUrl: "",
         contactName: "",
         contactPhone: "",
@@ -6103,7 +6247,9 @@ export default function Home() {
 
     const newTaskId = `other-task-${Date.now()}`;
     const newTask: OtherTask = {
-      dueDate: "",
+      dueDate: formatDateForInput(
+        parseCampaignDateKey(workspaceDateKey) ?? getTodayUtcDate()
+      ),
       id: newTaskId,
       notes: "",
       status: "not-started",
@@ -6113,6 +6259,9 @@ export default function Home() {
     setOtherTasks((currentTasks) => {
       return [newTask, ...currentTasks];
     });
+    otherTaskMutationVersion.current += 1;
+    otherTaskMutationVersions.current.set(newTaskId, otherTaskMutationVersion.current);
+    queueOtherTaskSave(newTask);
 
     return newTaskId;
   }
@@ -6126,6 +6275,8 @@ export default function Home() {
     setOtherTasks((currentTasks) =>
       currentTasks.map((task) => (task.id === taskId ? updatedTask : task))
     );
+    otherTaskMutationVersion.current += 1;
+    otherTaskMutationVersions.current.set(taskId, otherTaskMutationVersion.current);
     if (toIsoDate(updatedTask.dueDate)) {
       queueOtherTaskSave(updatedTask);
     }
@@ -6155,17 +6306,21 @@ export default function Home() {
     setOtherTasks((currentTasks) =>
       currentTasks.filter((task) => task.id !== taskId)
     );
+    setOtherTaskSaveErrors((currentErrors) => {
+      const { [taskId]: _deletedError, ...remainingErrors } = currentErrors;
+      return remainingErrors;
+    });
     setDailyFocusProgress((currentItems) =>
       currentItems.filter((item) => item.taskKey !== `other:${taskId}`)
     );
     void deleteOtherTaskFromSupabase(taskId);
-    void deleteDailyFocusProgress(`other:${taskId}`);
+    void deleteDailyFocusProgress(`other:${taskId}`, workspaceDateKey);
   }
 
   function resetFocusQueueProgress() {
     const previousProgress = dailyFocusProgress;
     setDailyFocusProgress([]);
-    void resetDailyFocusProgress().then((didReset) => {
+    void resetDailyFocusProgress(workspaceDateKey).then((didReset) => {
       if (!didReset) setDailyFocusProgress(previousProgress);
     });
   }
@@ -6475,6 +6630,42 @@ export default function Home() {
 
   useEffect(() => {
     let isCancelled = false;
+    void fetch("/api/workspace/production-default-costs", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((payload: { costs?: ProductionDefaultCosts }) => {
+        if (!isCancelled && payload.costs) setProductionDefaultCosts(payload.costs);
+      })
+      .catch(() => {
+        if (!isCancelled) setProductionDefaultCosts(defaultProductionStepCosts);
+      });
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadWorkspaceTimeZone() {
+      try {
+        const response = await fetch("/api/workspace/timezone", { cache: "no-store" });
+        const payload = (await response.json()) as { timezone?: string };
+        if (!isCancelled && response.ok && payload.timezone) {
+          setWorkspaceTimeZone(payload.timezone);
+        }
+      } catch {
+        if (!isCancelled) setWorkspaceTimeZone(defaultWorkspaceTimeZone);
+      }
+    }
+
+    void loadWorkspaceTimeZone();
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    let isCancelled = false;
 
     async function loadWorkspaceBranding() {
       if (!activeWorkspaceId) return;
@@ -6655,16 +6846,19 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!hasLoadedCampaignDrafts) {
+    if (!activeWorkspaceId || !hasLoadedCampaignDrafts) {
       return;
     }
 
     try {
-      window.localStorage.setItem(campaignDraftStorageKey, JSON.stringify(campaigns));
+      window.localStorage.setItem(
+        workspaceStorageKey(activeWorkspaceId, campaignDraftStorageKey),
+        JSON.stringify(campaigns)
+      );
     } catch (error) {
       console.warn("Unable to save local campaign drafts.", error);
     }
-  }, [campaigns, hasLoadedCampaignDrafts]);
+  }, [activeWorkspaceId, campaigns, hasLoadedCampaignDrafts]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -6706,19 +6900,19 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!hasLoadedQrCodeLinks) {
+    if (!activeWorkspaceId || !hasLoadedQrCodeLinks) {
       return;
     }
 
     try {
       window.localStorage.setItem(
-        qrCodeLinksStorageKey,
+        workspaceStorageKey(activeWorkspaceId, qrCodeLinksStorageKey),
         JSON.stringify(qrCodeLinks)
       );
     } catch (error) {
       console.warn("Unable to save local QR code links.", error);
     }
-  }, [hasLoadedQrCodeLinks, qrCodeLinks]);
+  }, [activeWorkspaceId, hasLoadedQrCodeLinks, qrCodeLinks]);
 
   useEffect(() => {
     if (
@@ -6804,19 +6998,19 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!hasLoadedProductionDrafts) {
+    if (!activeWorkspaceId || !hasLoadedProductionDrafts) {
       return;
     }
 
     try {
       window.localStorage.setItem(
-        productionDraftStorageKey,
+        workspaceStorageKey(activeWorkspaceId, productionDraftStorageKey),
         JSON.stringify(productionSongDrafts)
       );
     } catch (error) {
       console.warn("Unable to save local production drafts.", error);
     }
-  }, [productionSongDrafts, hasLoadedProductionDrafts]);
+  }, [activeWorkspaceId, productionSongDrafts, hasLoadedProductionDrafts]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -6872,23 +7066,23 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!hasLoadedBudgetDrafts) {
+    if (!activeWorkspaceId || !hasLoadedBudgetDrafts) {
       return;
     }
 
     try {
       window.localStorage.setItem(
-        budgetDraftStorageKey,
+        workspaceStorageKey(activeWorkspaceId, budgetDraftStorageKey),
         JSON.stringify(budgetEntryDrafts)
       );
       window.localStorage.setItem(
-        deletedBudgetForecastStorageKey,
+        workspaceStorageKey(activeWorkspaceId, deletedBudgetForecastStorageKey),
         JSON.stringify(deletedBudgetForecastIds)
       );
     } catch (error) {
       console.warn("Unable to save local budget drafts.", error);
     }
-  }, [budgetEntryDrafts, deletedBudgetForecastIds, hasLoadedBudgetDrafts]);
+  }, [activeWorkspaceId, budgetEntryDrafts, deletedBudgetForecastIds, hasLoadedBudgetDrafts]);
 
   useEffect(() => {
     if (!hasLoadedBudgetDrafts || hasRequestedBudgetSupabaseLoad.current) {
@@ -6973,19 +7167,19 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!hasLoadedEventDrafts) {
+    if (!activeWorkspaceId || !hasLoadedEventDrafts) {
       return;
     }
 
     try {
       window.localStorage.setItem(
-        eventDraftStorageKey,
+        workspaceStorageKey(activeWorkspaceId, eventDraftStorageKey),
         JSON.stringify(eventEntryDrafts)
       );
     } catch (error) {
       console.warn("Unable to save local event drafts.", error);
     }
-  }, [eventEntryDrafts, hasLoadedEventDrafts]);
+  }, [activeWorkspaceId, eventEntryDrafts, hasLoadedEventDrafts]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -7033,19 +7227,19 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!hasLoadedLocationAddressBook) {
+    if (!activeWorkspaceId || !hasLoadedLocationAddressBook) {
       return;
     }
 
     try {
       window.localStorage.setItem(
-        locationAddressBookStorageKey,
+        workspaceStorageKey(activeWorkspaceId, locationAddressBookStorageKey),
         JSON.stringify(locationAddressBook)
       );
     } catch (error) {
       console.warn("Unable to save local location address book.", error);
     }
-  }, [hasLoadedLocationAddressBook, locationAddressBook]);
+  }, [activeWorkspaceId, hasLoadedLocationAddressBook, locationAddressBook]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -7085,36 +7279,55 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!hasLoadedOtherTasks) {
-      return;
-    }
-
-    try {
-      window.localStorage.setItem(otherTaskStorageKey, JSON.stringify(otherTasks));
-    } catch (error) {
-      console.warn("Unable to save local focus other tasks.", error);
-    }
-  }, [hasLoadedOtherTasks, otherTasks]);
-
-  useEffect(() => {
     if (
       !hasLoadedOtherTasks ||
-      hasRequestedOtherTaskSupabaseLoad.current
+      !activeWorkspaceId ||
+      otherTaskLoadWorkspaceId.current === activeWorkspaceId
     ) {
       return;
     }
 
-    hasRequestedOtherTaskSupabaseLoad.current = true;
+    otherTaskLoadWorkspaceId.current = activeWorkspaceId;
     let isCancelled = false;
+    const requestedWorkspaceId = activeWorkspaceId;
+    const requestedMutationVersion = otherTaskMutationVersion.current;
 
     async function loadSharedOtherTasks() {
       const remoteTasks = await loadOtherTasksFromSupabase();
 
-      if (isCancelled || remoteTasks === null) {
+      if (
+        isCancelled ||
+        remoteTasks === null ||
+        activeWorkspaceIdRef.current !== requestedWorkspaceId
+      ) {
         return;
       }
 
-      setOtherTasks(remoteTasks);
+      setOtherTasks((currentTasks) => {
+        const currentTaskById = new Map(
+          currentTasks.map((task) => [task.id, task])
+        );
+        const remoteTaskIds = new Set(remoteTasks.map((task) => task.id));
+        const mergedTasks = remoteTasks.map((remoteTask) => {
+          const localMutationVersion = otherTaskMutationVersions.current.get(remoteTask.id);
+          return localMutationVersion && localMutationVersion > requestedMutationVersion
+            ? currentTaskById.get(remoteTask.id) ?? remoteTask
+            : remoteTask;
+        });
+
+        currentTasks.forEach((task) => {
+          const localMutationVersion = otherTaskMutationVersions.current.get(task.id);
+          if (
+            !remoteTaskIds.has(task.id) &&
+            localMutationVersion &&
+            localMutationVersion > requestedMutationVersion
+          ) {
+            mergedTasks.push(task);
+          }
+        });
+
+        return mergedTasks;
+      });
     }
 
     void loadSharedOtherTasks();
@@ -7122,7 +7335,7 @@ export default function Home() {
     return () => {
       isCancelled = true;
     };
-  }, [hasLoadedOtherTasks, otherTasks]);
+  }, [activeWorkspaceId, hasLoadedOtherTasks, otherTasks]);
 
   useEffect(() => {
     if (
@@ -7258,8 +7471,11 @@ export default function Home() {
   }, [activeWorkspaceId]);
 
   useEffect(() => {
+    let isCancelled = false;
+    const requestedWorkspaceId = activeWorkspaceId;
+
     async function loadProductionSongs() {
-      if (!activeWorkspaceId) return;
+      if (!requestedWorkspaceId) return;
       try {
         const supabase = createBrowserSupabaseClient();
         const [
@@ -7271,7 +7487,7 @@ export default function Home() {
           supabase
             .from("production_songs")
             .select("id, slug, title, production_deadline, release_date, roadmap_phase_id, album_art_url")
-            .eq("workspace_id", activeWorkspaceId)
+            .eq("workspace_id", requestedWorkspaceId)
             .order("production_deadline", { ascending: true }),
           supabase
             .from("production_steps")
@@ -7296,6 +7512,10 @@ export default function Home() {
         if (tasksResult.error) throw tasksResult.error;
         if (budgetLinesResult.error) throw budgetLinesResult.error;
 
+        if (isCancelled || activeWorkspaceIdRef.current !== requestedWorkspaceId) {
+          return;
+        }
+
         if ((songsResult.data ?? []).length === 0) {
           setProductionSongDrafts([]);
           setHasLoadedProductionDrafts(true);
@@ -7314,11 +7534,16 @@ export default function Home() {
         setProductionSongDrafts(nextSongs);
         setHasLoadedProductionDrafts(true);
       } catch (error) {
-        console.warn("Using local production fallback.", error);
+        if (!isCancelled && activeWorkspaceIdRef.current === requestedWorkspaceId) {
+          console.warn("Using local production fallback.", error);
+        }
       }
     }
 
-    loadProductionSongs();
+    void loadProductionSongs();
+    return () => {
+      isCancelled = true;
+    };
   }, [activeWorkspaceId]);
 
   useEffect(() => {
@@ -7354,7 +7579,7 @@ export default function Home() {
   useEffect(() => {
     let isCancelled = false;
 
-    void loadDailyFocusProgress(getViennaDateKey()).then((items) => {
+    void loadDailyFocusProgress(workspaceDateKey).then((items) => {
       if (!isCancelled && items) {
         setDailyFocusProgress(items);
       }
@@ -7363,17 +7588,27 @@ export default function Home() {
     return () => {
       isCancelled = true;
     };
-  }, []);
+  }, [workspaceDateKey]);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadAppleMusicLastUploadedAt();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadAppleMusicLastUploadedAt]);
+
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
     const loadTimer = window.setTimeout(() => {
       setAppleMusicReminderDismissedDate(
-        window.localStorage.getItem(appleMusicReminderDismissedDateKey) ?? ""
+        window.localStorage.getItem(
+          workspaceStorageKey(activeWorkspaceId, appleMusicReminderDismissedDateKey)
+        ) ?? ""
       );
     }, 0);
 
     return () => window.clearTimeout(loadTimer);
-  }, []);
+  }, [activeWorkspaceId]);
 
   function openAppleMusicImport() {
     setActiveSection("Platforms");
@@ -7386,9 +7621,14 @@ export default function Home() {
   }
 
   function dismissAppleMusicReminderForToday() {
-    const todayKey = getViennaDateKey();
+    const todayKey = workspaceDateKey;
     setAppleMusicReminderDismissedDate(todayKey);
-    window.localStorage.setItem(appleMusicReminderDismissedDateKey, todayKey);
+    if (activeWorkspaceId) {
+      window.localStorage.setItem(
+        workspaceStorageKey(activeWorkspaceId, appleMusicReminderDismissedDateKey),
+        todayKey
+      );
+    }
   }
 
   function openRoadmapProductionSong(songId: string) {
@@ -7548,15 +7788,19 @@ export default function Home() {
               <span>Sprint Dashboard</span>
             </div>
 
-            <Image
-              alt=""
-              aria-hidden
-              className="brand-logo"
-              height={44}
-              src={appLogoUrl}
-              unoptimized
-              width={44}
-            />
+            {appLogoUrl ? (
+              <Image
+                alt=""
+                aria-hidden
+                className="brand-logo"
+                height={44}
+                src={appLogoUrl}
+                unoptimized
+                width={44}
+              />
+            ) : (
+              <span aria-hidden className="brand-logo brand-logo-neutral">LS</span>
+            )}
           </div>
         </div>
 
@@ -7602,6 +7846,7 @@ export default function Home() {
         workspaceRole === "admin" ? (
           <GeneralSettingsView
             activeSection={activeSection}
+            key={`general-settings-${activeWorkspaceId}`}
             logoPath={appLogoPath}
             logoUrl={appLogoUrl}
             onBack={() => setSettingsView(null)}
@@ -7610,9 +7855,13 @@ export default function Home() {
               setAppLogoUrl(logoUrl);
             }}
             onWorkspaceNameChange={setActiveWorkspaceName}
+            onWorkspaceTimeZoneChange={setWorkspaceTimeZone}
+            onProductionDefaultCostsChange={setProductionDefaultCosts}
             workspaceName={activeWorkspaceName}
             workspaceId={activeWorkspaceId}
             workspaceRole={workspaceRole}
+            workspaceTimeZone={workspaceTimeZone}
+            productionDefaultCosts={productionDefaultCosts}
           />
         ) : null}
         {settingsView === "platform" ? (
@@ -7659,6 +7908,7 @@ export default function Home() {
         {!settingsView && activeSection === "Platforms" ? (
           <PlatformsView
             appleMusicImportStatus={appleMusicImportStatus}
+            appleMusicLastUploadedAt={appleMusicLastUploadedAt}
             onAddQrCode={addQrCodeLink}
             onAppleMusicCsvImport={importAppleMusicCsv}
             onDeleteQrCode={deleteQrCodeLink}
@@ -7668,6 +7918,7 @@ export default function Home() {
             platformStatsData={activePlatformStats}
             qrCodeLinks={qrCodeLinks}
             refreshStatus={refreshStatus}
+            workspaceTimeZone={workspaceTimeZone}
           />
         ) : null}
         {!settingsView && activeSection === "Production" ? (
@@ -7704,6 +7955,7 @@ export default function Home() {
           <EventsView
             entries={eventEntryDrafts}
             focusTarget={eventFocusTarget}
+            locationFocusTarget={locationFocusTarget}
             restoreContext={eventsRestoreContext}
             isLoaded={hasLoadedEventSupabaseSnapshot}
             locations={locationAddressBook}
@@ -7714,6 +7966,8 @@ export default function Home() {
             onEntryChange={updateEventEntry}
             onLocationChange={updateLocationAddressBookEntry}
             onNavigationContextChange={setEventsNavigationContext}
+            onResortEntries={resortEventEntries}
+            onSaveEventLocation={saveEventLocation}
           />
         ) : null}
         {!settingsView &&
@@ -7747,11 +8001,13 @@ export default function Home() {
             onProductionSongChange={updateProductionSong}
             onQrCodeChange={updateQrCodeLink}
             otherTasks={otherTasks}
+            otherTaskSaveErrors={otherTaskSaveErrors}
             appleMusicReminderDismissedDate={appleMusicReminderDismissedDate}
             platformMetricRows={platformMetricRows}
             productionSongs={productionSongDrafts}
             qrCodeLinks={qrCodeLinks}
             roadmapPhasesData={roadmapPhaseDrafts}
+            workspaceTimeZone={workspaceTimeZone}
             workspaceName={activeWorkspaceName}
           />
         ) : null}
@@ -7825,6 +8081,86 @@ async function createSquareImageBlob(file: File) {
   }
 }
 
+function TimeZoneSelector({ isSaving, onSelect, value }: { isSaving: boolean; onSelect: (timezone: string) => void; value: string }) {
+  const selectorRef = useRef<HTMLDivElement>(null);
+  const optionsRef = useRef<HTMLDivElement>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [activeIndex, setActiveIndex] = useState(0);
+  const options = useMemo(() => getTimeZoneOptions(value), [value]);
+  const selected = options.find((option) => option.id === value) ?? createTimeZoneOption(value);
+  const normalizedQuery = query.trim().toLowerCase();
+  const filtered = options.filter((option) => !normalizedQuery || option.search.includes(normalizedQuery));
+  function choose(option: TimeZoneOption) { onSelect(option.id); setQuery(""); setIsOpen(false); }
+  useEffect(() => {
+    if (!isOpen) return;
+    function closeOnOutsidePointer(event: PointerEvent) {
+      if (event.target instanceof Node && !selectorRef.current?.contains(event.target)) { setIsOpen(false); setQuery(""); }
+    }
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [isOpen]);
+  useEffect(() => {
+    if (!isOpen || query) return;
+    Array.from(optionsRef.current?.querySelectorAll<HTMLElement>("[data-timezone-id]") ?? []).find((element) => element.dataset.timezoneId === value)?.scrollIntoView({ block: "center" });
+  }, [isOpen, query, value]);
+  return <div className="workspace-timezone-selector" ref={selectorRef}>
+    <input
+      aria-autocomplete="list"
+      aria-controls="workspace-timezone-options"
+      aria-expanded={isOpen}
+      aria-label="Workspace time zone"
+      className="workspace-timezone-search"
+      onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); setIsOpen(true); }}
+      onFocus={() => setIsOpen(true)}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowDown") { event.preventDefault(); setIsOpen(true); setActiveIndex((index) => Math.min(index + 1, Math.max(0, filtered.length - 1))); }
+        if (event.key === "ArrowUp") { event.preventDefault(); setActiveIndex((index) => Math.max(index - 1, 0)); }
+        if (event.key === "Enter" && isOpen && filtered[activeIndex]) { event.preventDefault(); choose(filtered[activeIndex]); }
+        if (event.key === "Escape") { setIsOpen(false); setQuery(""); }
+      }}
+      placeholder={selected.label}
+      role="combobox"
+      value={query}
+    />
+    {isOpen ? <div className="workspace-timezone-options" id="workspace-timezone-options" ref={optionsRef} role="listbox">
+      {filtered.map((option, index) => <button aria-selected={option.id === value} className={`${index === activeIndex ? "is-active" : ""}${option.id === value ? " is-selected" : ""}`} data-timezone-id={option.id} disabled={isSaving} key={option.id} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(option)} role="option" type="button">{option.label}</button>)}
+      {!filtered.length ? <p>No matching timezone. Keep the current valid selection or search by city, IANA name, or UTC offset.</p> : null}
+    </div> : null}
+  </div>;
+}
+
+type TimeZoneOption = { id: string; label: string; offsetMinutes: number; search: string };
+
+function getTimeZoneOptions(currentValue: string) {
+  const supported = typeof Intl.supportedValuesOf === "function"
+    ? Intl.supportedValuesOf("timeZone")
+    : [defaultWorkspaceTimeZone, Intl.DateTimeFormat().resolvedOptions().timeZone];
+  return Array.from(new Set([...supported, currentValue])).filter(Boolean).map(createTimeZoneOption).sort((first, second) => first.offsetMinutes - second.offsetMinutes || first.id.localeCompare(second.id));
+}
+
+function createTimeZoneOption(id: string): TimeZoneOption {
+  const location = id.split("/").at(-1)?.replaceAll("_", " ") || id.replaceAll("_", " ");
+  const offset = getCurrentUtcOffset(id);
+  const label = `${offset} — ${id}`;
+  return { id, label, offsetMinutes: getUtcOffsetMinutes(offset), search: `${label} ${location} ${offset.replace("UTC", "")}`.toLowerCase() };
+}
+
+function getCurrentUtcOffset(timeZone: string) {
+  try {
+    const value = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "shortOffset" }).formatToParts(new Date()).find((part) => part.type === "timeZoneName")?.value ?? "GMT";
+    const offset = value.replace("GMT", "") || "+0";
+    return `UTC${offset}`;
+  } catch { return "UTC?"; }
+}
+
+function getUtcOffsetMinutes(offset: string) {
+  const match = offset.match(/^UTC([+-])(\d{1,2})(?::?(\d{2}))?$/);
+  if (!match) return 0;
+  const minutes = Number(match[2]) * 60 + Number(match[3] ?? 0);
+  return match[1] === "-" ? -minutes : minutes;
+}
+
 function GeneralSettingsView({
   activeSection,
   logoPath,
@@ -7832,9 +8168,13 @@ function GeneralSettingsView({
   onBack,
   onLogoChange,
   onWorkspaceNameChange,
+  onProductionDefaultCostsChange,
+  onWorkspaceTimeZoneChange,
   workspaceName,
   workspaceId,
-  workspaceRole
+  workspaceRole,
+  workspaceTimeZone
+  ,productionDefaultCosts
 }: {
   activeSection: Section;
   logoPath: string;
@@ -7842,11 +8182,16 @@ function GeneralSettingsView({
   onBack: () => void;
   onLogoChange: (logoPath: string, logoUrl: string) => void;
   onWorkspaceNameChange: (name: string) => void;
+  onProductionDefaultCostsChange: (costs: ProductionDefaultCosts) => void;
+  onWorkspaceTimeZoneChange: (timezone: string) => void;
   workspaceName: string;
   workspaceId: string;
   workspaceRole: "admin";
+  workspaceTimeZone: string;
+  productionDefaultCosts: ProductionDefaultCosts;
 }) {
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const isCurrentWorkspace = useRef(true);
   const [logoStatus, setLogoStatus] = useState<RefreshStatus>({
     message: "",
     state: "idle"
@@ -7879,8 +8224,57 @@ function GeneralSettingsView({
   });
   const [topicChannel, setTopicChannel] = useState("");
   const [workspaceNameDraft, setWorkspaceNameDraft] = useState(workspaceName);
+  const [workspaceTimeZoneDraft, setWorkspaceTimeZoneDraft] = useState(workspaceTimeZone);
+  const [workspaceTimeZoneStatus, setWorkspaceTimeZoneStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
+  const [productionDefaultCostsDraft, setProductionDefaultCostsDraft] = useState(productionDefaultCosts);
+  const [productionDefaultCostsStatus, setProductionDefaultCostsStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
   const [topicCandidate, setTopicCandidate] = useState<{ channelId: string; channelTitle: string; caution: boolean; sameAsMain: boolean } | null>(null);
+  const [platformUrls, setPlatformUrls] = useState<Record<string, string>>({});
+  const [platformStatus, setPlatformStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
+  const [analyticsProperties, setAnalyticsProperties] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedAnalyticsProperty, setSelectedAnalyticsProperty] = useState("");
   const [armedSettingsAction, setArmedSettingsAction] = useState<string | null>(null);
+
+  useEffect(() => {
+    // React development Strict Mode replays effect cleanup after mount. Resetting
+    // here keeps async logo completion live for the real mounted settings view.
+    isCurrentWorkspace.current = true;
+    return () => {
+      isCurrentWorkspace.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/workspace/platforms", { cache: "no-store" }).then((response) => response.json()).then((payload: { accounts?: Array<{ slug: string; url: string | null }> }) => {
+      if (!cancelled) setPlatformUrls(Object.fromEntries((payload.accounts ?? []).map((account) => [account.slug, account.url ?? ""])));
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [workspaceId]);
+
+  async function savePlatformUrl(slug: string) {
+    setPlatformStatus({ message: "Saving platform URL...", state: "loading" });
+    try {
+      const response = await fetch("/api/workspace/platforms", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug, url: platformUrls[slug] ?? "" }) });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Platform URL save failed.");
+      setPlatformStatus({ message: "Platform URL saved. QR defaults are created only when missing.", state: "success" });
+    } catch (error) { setPlatformStatus({ message: error instanceof Error ? error.message : "Platform URL save failed.", state: "error" }); }
+  }
+
+  async function selectAnalyticsProperty() {
+    if (!selectedAnalyticsProperty) return;
+    setGoogleStatus({ message: "Connecting Analytics property...", state: "loading" });
+    try {
+      const response = await fetch("/api/integrations/google/analytics", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ propertyId: selectedAnalyticsProperty }) });
+      const payload = await response.json() as { error?: string; property?: { id: string; name: string } };
+      const property = payload.property;
+      if (!response.ok || !property) throw new Error(payload.error || "Analytics property selection failed.");
+      setGoogleConnection((current) => current ? { ...current, analytics: { enabled: true, propertyId: property.id, propertyName: property.name } } : current);
+      setAnalyticsProperties([]); window.dispatchEvent(new Event("workspace-google-connection-changed"));
+      setGoogleStatus({ message: "Google Analytics property connected.", state: "success" });
+    } catch (error) { setGoogleStatus({ message: error instanceof Error ? error.message : "Analytics property selection failed.", state: "error" }); }
+  }
 
   useEffect(() => {
     if (!armedSettingsAction) return;
@@ -7898,7 +8292,45 @@ function GeneralSettingsView({
 
   async function saveWorkspaceName() {
     setGoogleStatus({ message: "Saving workspace name...", state: "loading" });
-    try { const response = await fetch("/api/workspace/name", { body: JSON.stringify({ name: workspaceNameDraft }), headers: { "Content-Type": "application/json" }, method: "PATCH" }); const payload = (await response.json()) as { name?: string; error?: string }; if (!response.ok) throw new Error(payload.error || "Workspace rename failed."); onWorkspaceNameChange(payload.name!); setWorkspaceNameDraft(payload.name!); setGoogleStatus({ message: "Workspace name saved.", state: "success" }); } catch (error) { setGoogleStatus({ message: error instanceof Error ? error.message : "Workspace rename failed.", state: "error" }); }
+    try { const response = await fetch("/api/workspace/name", { body: JSON.stringify({ name: workspaceNameDraft }), headers: { "Content-Type": "application/json" }, method: "PATCH" }); const payload = (await response.json()) as { name?: string; error?: string }; if (!response.ok) throw new Error(payload.error || "Workspace rename failed."); if (!isCurrentWorkspace.current) return; onWorkspaceNameChange(payload.name!); setWorkspaceNameDraft(payload.name!); setGoogleStatus({ message: "Workspace name saved.", state: "success" }); } catch (error) { if (!isCurrentWorkspace.current) return; setGoogleStatus({ message: error instanceof Error ? error.message : "Workspace rename failed.", state: "error" }); }
+  }
+
+  async function saveWorkspaceTimeZone(timezone = workspaceTimeZoneDraft) {
+    setWorkspaceTimeZoneStatus({ message: "Saving workspace timezone...", state: "loading" });
+    try {
+      const response = await fetch("/api/workspace/timezone", {
+        body: JSON.stringify({ timezone }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH"
+      });
+      const payload = (await response.json()) as { error?: string; timezone?: string };
+      if (!response.ok || !payload.timezone) throw new Error(payload.error || "Workspace timezone update failed.");
+      if (!isCurrentWorkspace.current) return;
+      setWorkspaceTimeZoneDraft(payload.timezone);
+      onWorkspaceTimeZoneChange(payload.timezone);
+      setWorkspaceTimeZoneStatus({ message: "Workspace timezone saved.", state: "success" });
+    } catch (error) {
+      if (!isCurrentWorkspace.current) return;
+      setWorkspaceTimeZoneStatus({ message: error instanceof Error ? error.message : "Workspace timezone update failed.", state: "error" });
+    }
+  }
+
+  async function saveProductionDefaultCosts() {
+    setProductionDefaultCostsStatus({ message: "Saving production defaults...", state: "loading" });
+    try {
+      const response = await fetch("/api/workspace/production-default-costs", {
+        body: JSON.stringify({ costs: productionDefaultCostsDraft }),
+        headers: { "Content-Type": "application/json" },
+        method: "PATCH"
+      });
+      const payload = (await response.json()) as { costs?: ProductionDefaultCosts; error?: string };
+      if (!response.ok || !payload.costs) throw new Error(payload.error || "Production defaults update failed.");
+      onProductionDefaultCostsChange(payload.costs);
+      setProductionDefaultCostsDraft(payload.costs);
+      setProductionDefaultCostsStatus({ message: "Production defaults saved.", state: "success" });
+    } catch (error) {
+      setProductionDefaultCostsStatus({ message: error instanceof Error ? error.message : "Production defaults update failed.", state: "error" });
+    }
   }
 
   async function checkTopicChannel() {
@@ -7951,6 +8383,11 @@ function GeneralSettingsView({
           throw new Error(payload.error || "Google connection status failed.");
         }
         setGoogleConnection(payload);
+        if (!payload.analytics.enabled && payload.accountEmail) {
+          void fetch("/api/integrations/google/analytics", { cache: "no-store" }).then((propertiesResponse) => propertiesResponse.json()).then((propertiesPayload: { properties?: Array<{ id: string; name: string }> }) => {
+            setAnalyticsProperties(propertiesPayload.properties ?? []);
+          }).catch(() => setAnalyticsProperties([]));
+        }
         if (!result) setGoogleStatus({ message: "", state: "idle" });
       } catch (error) {
         setGoogleStatus({
@@ -8073,7 +8510,7 @@ function GeneralSettingsView({
                   : current.analytics,
               youtube:
                 service === "youtube"
-                  ? { channelTitle: null, enabled: false }
+                  ? { channelId: null, channelTitle: null, enabled: false }
                   : current.youtube
             }
           : current
@@ -8249,7 +8686,10 @@ function GeneralSettingsView({
     try {
       const logoBlob = await createSquareImageBlob(file);
       const supabase = createBrowserSupabaseClient();
-      const nextLogoPath = `${workspaceId}/app-logo-${Date.now()}.jpg`;
+      // The original Love Strings workspace deliberately retains its legacy
+      // Storage namespace; its all-zero UUID is not a versioned UUID path.
+      const brandingFolder = workspaceId === defaultWorkspaceId ? "love-strings" : workspaceId;
+      const nextLogoPath = `${brandingFolder}/app-logo-${Date.now()}.jpg`;
       const { error: uploadError } = await supabase.storage
         .from("branding")
         .upload(nextLogoPath, logoBlob, {
@@ -8280,6 +8720,8 @@ function GeneralSettingsView({
         throw signedLogoError ?? new Error("Logo preview could not be created.");
       }
 
+      if (!isCurrentWorkspace.current) return;
+
       onLogoChange(nextLogoPath, signedLogo.signedUrl);
       setLogoStatus({ message: "App logo updated.", state: "success" });
 
@@ -8301,10 +8743,6 @@ function GeneralSettingsView({
           <p className="eyebrow">Shared workspace</p>
           <h1 id="general-settings-title">General Settings</h1>
         </div>
-        <button className="user-settings-back" onClick={onBack} type="button">
-          <ArrowLeft aria-hidden size={18} />
-          <span>Back to {activeSection}</span>
-        </button>
       </header>
 
       <div className="user-settings-content">
@@ -8564,8 +9002,28 @@ function GeneralSettingsView({
           <div className="google-topic-config"><input aria-label="Workspace name" onChange={(event) => setWorkspaceNameDraft(event.target.value)} value={workspaceNameDraft} /><button disabled={googleStatus.state === "loading"} onClick={() => void saveWorkspaceName()} type="button">Save</button></div>
         </article>
         <article className="general-settings-card">
+          <div className="general-settings-heading"><div><p className="eyebrow">Workspace calendar</p><h2>Workspace time zone</h2></div></div>
+          <p className="settings-description">All members use this timezone for workspace-day calculations such as Focus Queue today.</p>
+          <div className="workspace-timezone-row"><TimeZoneSelector isSaving={workspaceTimeZoneStatus.state === "loading"} onSelect={(timezone) => void saveWorkspaceTimeZone(timezone)} value={workspaceTimeZoneDraft} /></div>
+          {workspaceTimeZoneStatus.message ? <p className={workspaceTimeZoneStatus.state === "error" ? "settings-error" : "settings-status"} role={workspaceTimeZoneStatus.state === "error" ? "alert" : "status"}>{workspaceTimeZoneStatus.message}</p> : null}
+        </article>
+        <article className="general-settings-card">
+          <div className="general-settings-heading"><div><p className="eyebrow">Production</p><h2>Default step costs</h2></div></div>
+          <p className="settings-description">Applied only when creating future Production songs.</p>
+          <div className="google-topic-config">
+            <label>License<input aria-label="Default License cost" min="0" onChange={(event) => setProductionDefaultCostsDraft((current) => ({ ...current, license: -Math.abs(Number(event.target.value) || 0) }))} type="number" value={Math.abs(productionDefaultCostsDraft.license)} /></label>
+            <label>Distributor<input aria-label="Default Distributor cost" min="0" onChange={(event) => setProductionDefaultCostsDraft((current) => ({ ...current, distributor: -Math.abs(Number(event.target.value) || 0) }))} type="number" value={Math.abs(productionDefaultCostsDraft.distributor)} /></label>
+            <button disabled={productionDefaultCostsStatus.state === "loading"} onClick={() => void saveProductionDefaultCosts()} type="button">{productionDefaultCostsStatus.state === "loading" ? "Saving..." : "Save"}</button>
+          </div>
+          {productionDefaultCostsStatus.message ? <p className={productionDefaultCostsStatus.state === "error" ? "settings-error" : "settings-status"} role={productionDefaultCostsStatus.state === "error" ? "alert" : "status"}>{productionDefaultCostsStatus.message}</p> : null}
+        </article>
+        <article className="general-settings-card">
           <div className="general-settings-heading">
-            <Image alt="Current app logo" className="general-settings-logo" height={72} src={logoUrl} unoptimized width={72} />
+            {logoUrl ? (
+              <Image alt="Current app logo" className="general-settings-logo" height={72} src={logoUrl} unoptimized width={72} />
+            ) : (
+              <span aria-label="No app logo uploaded" className="general-settings-logo general-settings-logo-neutral">LS</span>
+            )}
             <div><p className="eyebrow">App identity</p><h2>App logo</h2></div>
           </div>
           <input
@@ -8652,7 +9110,6 @@ function GeneralSettingsView({
                 </button>
               )}
             </div>
-
             <section className="google-topic-section">
               <div className="google-topic-heading"><strong>YouTube Topic</strong><span>Optional</span></div>
               {googleConnection?.youtubeTopic.enabled ? <p className="google-topic-current">Configured: {googleConnection.youtubeTopic.channelTitle || googleConnection.youtubeTopic.channelId}</p> : null}
@@ -8716,6 +9173,8 @@ function GeneralSettingsView({
                 </button>
               )}
             </div>
+            {googleConnection?.analytics.enabled ? <p className="google-analytics-current">Selected property: {googleConnection.analytics.propertyName || `Property ${googleConnection.analytics.propertyId}`}</p> : null}
+            {!googleConnection?.analytics.enabled && googleConnection?.accountEmail && analyticsProperties.length > 1 ? <div className="google-analytics-property-selector"><span>Choose the Google Analytics property LS Dashboard should track.</span><div className="google-topic-config"><select aria-label="Analytics property" onChange={(event) => setSelectedAnalyticsProperty(event.target.value)} value={selectedAnalyticsProperty}><option value="">Choose Analytics property</option>{analyticsProperties.map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}</select><button disabled={!selectedAnalyticsProperty || googleStatus.state === "loading"} onClick={() => void selectAnalyticsProperty()} type="button">Use property</button></div></div> : null}
 
             <div className="google-service-row google-service-placeholder">
               <div>
@@ -8750,6 +9209,14 @@ function GeneralSettingsView({
         <article className="general-settings-card settings-provider-card settings-provider-placeholder">
           <h3>Amazon Music</h3>
           <p>Connection onboarding is in development.</p>
+        </article>
+        <article className="general-settings-card settings-provider-card">
+          <div className="general-settings-heading"><div><p className="eyebrow">Workspace configuration</p><h2>Platform links</h2></div></div>
+          <p>These public URLs power platform cards and create a QR card only the first time a matching destination is available. QR cards remain independently editable afterwards.</p>
+          <div className="general-settings-stack">
+            {[['spotify', 'Spotify'], ['apple-music', 'Apple Music'], ['instagram', 'Instagram'], ['amazon-music', 'Amazon Music'], ['deezer', 'Deezer'], ['google-analytics', 'Website']].map(([slug, label]) => <div className="general-settings-row" key={slug}><label>{label}<input aria-label={`${label} public URL`} onChange={(event) => setPlatformUrls((current) => ({ ...current, [slug]: event.target.value }))} placeholder="https://" value={platformUrls[slug] ?? ""} /></label><button disabled={platformStatus.state === "loading"} onClick={() => void savePlatformUrl(slug)} type="button">Save</button></div>)}
+          </div>
+          {platformStatus.message ? <p className={platformStatus.state === "error" ? "settings-error" : "settings-status"} role={platformStatus.state === "error" ? "alert" : "status"}>{platformStatus.message}</p> : null}
         </article>
         </section>
 
@@ -9320,6 +9787,7 @@ function EventsView({
   entries,
   focusTarget,
   isLoaded,
+  locationFocusTarget,
   locations,
   onAddEntry,
   onAddLocation,
@@ -9328,11 +9796,14 @@ function EventsView({
   onEntryChange,
   onLocationChange,
   onNavigationContextChange,
+  onResortEntries,
+  onSaveEventLocation,
   restoreContext
 }: {
   entries: EventEntry[];
   focusTarget: { entryId: string; token: number } | null;
   isLoaded: boolean;
+  locationFocusTarget: { locationId: string; token: number } | null;
   locations: LocationAddressBookEntry[];
   onAddEntry: () => void;
   onAddLocation: () => void;
@@ -9344,17 +9815,30 @@ function EventsView({
     updates: Partial<LocationAddressBookEntry>
   ) => void;
   onNavigationContextChange: (context: EventsNavigationContext | null) => void;
+  onResortEntries: () => void;
+  onSaveEventLocation: (entryId: string) => void;
   restoreContext: { context: EventsNavigationContext; token: number } | null;
 }) {
   const nextEvent = getNextUpcomingEvent(entries);
   const nextEventDate = nextEvent ? parseFlexibleBudgetDate(nextEvent.date) : null;
   const nextEventDaysLeft = nextEventDate ? getDaysUntilDate(nextEventDate) : null;
   const eventElementRefs = useRef<Record<string, HTMLElement | null>>({});
+  const activeEventEditorId = useRef<string | null>(restoreContext?.context.eventId ?? null);
+
+  function handleEventEditorChange(entryId: string, isOpening: boolean) {
+    if (isOpening && activeEventEditorId.current && activeEventEditorId.current !== entryId) {
+      onResortEntries();
+    }
+
+    activeEventEditorId.current = isOpening ? entryId : null;
+  }
 
   useEffect(() => {
     if (!focusTarget) {
       return;
     }
+
+    activeEventEditorId.current = focusTarget.entryId;
 
     window.setTimeout(() => {
       eventElementRefs.current[focusTarget.entryId]?.scrollIntoView({
@@ -9407,9 +9891,11 @@ function EventsView({
 
       <LocationAddressBook
         events={entries}
+        focusTarget={locationFocusTarget}
         locations={locations}
         onAddLocation={onAddLocation}
         onDeleteLocation={onDeleteLocation}
+        onEnterAddressBook={onResortEntries}
         onLocationChange={onLocationChange}
       />
 
@@ -9432,11 +9918,13 @@ function EventsView({
               focusToken={
                 focusTarget?.entryId === entry.id ? focusTarget.token : undefined
               }
-              key={`${entry.id}:${entry.date}`}
+              key={entry.id}
               locations={locations}
               onDelete={onDeleteEntry}
+              onEditorChange={handleEventEditorChange}
               onEntryChange={onEntryChange}
               onNavigationContextChange={onNavigationContextChange}
+              onSaveLocation={onSaveEventLocation}
               refCallback={(element) => {
                 eventElementRefs.current[entry.id] = element;
               }}
@@ -9453,28 +9941,54 @@ function EventsView({
 
 function LocationAddressBook({
   events,
+  focusTarget,
   locations,
   onAddLocation,
   onDeleteLocation,
+  onEnterAddressBook,
   onLocationChange
 }: {
   events: EventEntry[];
+  focusTarget: { locationId: string; token: number } | null;
   locations: LocationAddressBookEntry[];
   onAddLocation: () => void;
   onDeleteLocation: (locationId: string) => void;
+  onEnterAddressBook: () => void;
   onLocationChange: (
     locationId: string,
     updates: Partial<LocationAddressBookEntry>
   ) => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const locationElementRefs = useRef<Record<string, HTMLElement | null>>({});
+
+  useEffect(() => {
+    if (!focusTarget) return;
+
+    const focusTimer = window.setTimeout(() => {
+      onEnterAddressBook();
+      setIsOpen(true);
+      window.setTimeout(() => {
+        const locationElement = locationElementRefs.current[focusTarget.locationId];
+        locationElement?.scrollIntoView({ behavior: "smooth", block: "center" });
+        locationElement?.focus({ preventScroll: true });
+      }, 0);
+    }, 0);
+
+    return () => window.clearTimeout(focusTimer);
+  }, [focusTarget, onEnterAddressBook]);
 
   return (
     <section className="location-address-book module-accent module-accent-events" aria-label="Location address book">
       <button
         aria-expanded={isOpen}
         className="location-address-book-toggle"
-        onClick={() => setIsOpen((currentIsOpen) => !currentIsOpen)}
+        onClick={() =>
+          setIsOpen((currentIsOpen) => {
+            if (!currentIsOpen) onEnterAddressBook();
+            return !currentIsOpen;
+          })
+        }
         type="button"
       >
         <span>
@@ -9502,6 +10016,9 @@ function LocationAddressBook({
                 location={location}
                 onDeleteLocation={onDeleteLocation}
                 onLocationChange={onLocationChange}
+                refCallback={(element) => {
+                  locationElementRefs.current[location.id] = element;
+                }}
               />
             ))}
           </div>
@@ -9515,7 +10032,8 @@ function LocationAddressBookCard({
   events,
   location,
   onDeleteLocation,
-  onLocationChange
+  onLocationChange,
+  refCallback
 }: {
   events: EventEntry[];
   location: LocationAddressBookEntry;
@@ -9524,6 +10042,7 @@ function LocationAddressBookCard({
     locationId: string,
     updates: Partial<LocationAddressBookEntry>
   ) => void;
+  refCallback: (element: HTMLElement | null) => void;
 }) {
   const pastEvents = getPastEventsForLocation(location, events);
   const [isDeleteArmed, setIsDeleteArmed] = useState(false);
@@ -9559,7 +10078,11 @@ function LocationAddressBookCard({
   }
 
   return (
-    <article className="location-address-book-card module-subtle-events module-accent-thin module-accent-events">
+    <article
+      className="location-address-book-card module-subtle-events module-accent-thin module-accent-events"
+      ref={refCallback}
+      tabIndex={-1}
+    >
       <div className="location-address-book-card-header">
         <strong>{location.locationName || "Location name"}</strong>
         <span>{location.address || "Address"}</span>
@@ -9678,8 +10201,10 @@ function EventCard({
   focusToken,
   locations,
   onDelete,
+  onEditorChange,
   onEntryChange,
   onNavigationContextChange,
+  onSaveLocation,
   restoreContext,
   refCallback
 }: {
@@ -9687,8 +10212,10 @@ function EventCard({
   focusToken?: number;
   locations: LocationAddressBookEntry[];
   onDelete: (entryId: string) => void;
+  onEditorChange: (entryId: string, isOpening: boolean) => void;
   onEntryChange: (entryId: string, updates: Partial<EventEntry>) => void;
   onNavigationContextChange: (context: EventsNavigationContext | null) => void;
+  onSaveLocation: (entryId: string) => void;
   refCallback: (element: HTMLElement | null) => void;
   restoreContext: { context: EventsNavigationContext; token: number } | null;
 }) {
@@ -9697,6 +10224,7 @@ function EventCard({
   const [eventDateDraft, setEventDateDraft] = useState(entry.date);
   const deleteButtonRef = useRef<HTMLButtonElement>(null);
   const selectedLocation = getMatchingLocationAddressBookEntry(entry, locations);
+  const displayLocation = selectedLocation ?? entry;
   const eventBudgetLines =
     entry.budgetLines && entry.budgetLines.length > 0
       ? entry.budgetLines
@@ -9752,6 +10280,11 @@ function EventCard({
   }
 
   function selectLocation(locationId: string) {
+    if (locationId === "__add-new-location") {
+      onSaveLocation(entry.id);
+      return;
+    }
+
     const location = locations.find((candidate) => candidate.id === locationId);
 
     if (!location) {
@@ -9759,6 +10292,7 @@ function EventCard({
     }
 
     onEntryChange(entry.id, {
+      locationId: location.id,
       locationName: location.locationName,
       locationUrl: location.locationUrl,
       address: location.address,
@@ -9818,7 +10352,7 @@ function EventCard({
               aria-label={`${entry.name} poster preview`}
               className="event-header-poster-thumb"
               role="img"
-              style={{ backgroundImage: `url("${entry.posterUrl}")` }}
+              style={{ backgroundImage: `url("${getDashboardImageUrl(entry.posterUrl, 240)}")` }}
             />
           ) : (
             <span className="event-header-poster-thumb event-header-poster-thumb-empty">
@@ -9827,22 +10361,24 @@ function EventCard({
           )}
           <div className="event-title-block">
             <EventMaybeLink label={entry.name.trim() || "TBD"} url={entry.nameUrl} />
-            <strong className="event-date-display">{formatEventSummaryDate(entry.date)}</strong>
+            <strong className="event-date-display">
+              {formatEventSummaryDate(entry.date, entry.time)}
+            </strong>
           </div>
         </div>
         <div className="event-location-summary">
           <span>
             <MapPin size={14} aria-hidden />
             <EventMaybeLink
-              label={entry.locationName || "Location name"}
-              url={entry.locationUrl}
+              label={displayLocation.locationName || "Location name"}
+              url={displayLocation.locationUrl}
             />
           </span>
           <span>
             <LinkIcon size={14} aria-hidden />
             <EventMaybeLink
-              label={entry.address || "Address"}
-              url={entry.addressUrl}
+              label={displayLocation.address || "Address"}
+              url={displayLocation.addressUrl}
             />
           </span>
         </div>
@@ -9853,6 +10389,7 @@ function EventCard({
           className="campaign-toggle"
           onClick={() => {
             const nextIsOpen = !isEventOpen;
+            onEditorChange(entry.id, nextIsOpen);
             onNavigationContextChange(nextIsOpen ? { eventId: entry.id } : null);
             setIsEventOpen(nextIsOpen);
             setIsDeleteArmed(false);
@@ -9868,6 +10405,46 @@ function EventCard({
         hidden={!isEventOpen}
         id={`${entry.id}-event-details`}
       >
+        <div className="event-edit-grid event-primary-edit-grid">
+          <label>
+            Event name
+            <input
+              onChange={(event) =>
+                onEntryChange(entry.id, { name: event.target.value })
+              }
+              value={entry.name}
+            />
+          </label>
+          <label>
+            Date
+            <DateInput
+              aria-label={`${entry.name} date`}
+              calendarLabel={`Choose ${entry.name} date`}
+              error={Boolean(eventDateDraft && !toIsoDate(eventDateDraft))}
+              onBlur={() => commitEventDate()}
+              onChange={setEventDateDraft}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return;
+                event.preventDefault();
+                commitEventDate();
+              }}
+              onPickerChange={(nextDate) => commitEventDate(nextDate)}
+              value={eventDateDraft}
+            />
+          </label>
+          <label>
+            Time
+            <input
+              aria-label={`${entry.name} time`}
+              onChange={(event) =>
+                onEntryChange(entry.id, { time: event.target.value })
+              }
+              type="time"
+              value={entry.time ?? ""}
+            />
+          </label>
+        </div>
+
         <div className="event-budget-section">
           <strong>Budget</strong>
           <div className="event-budget-lines">
@@ -9894,45 +10471,22 @@ function EventCard({
           </button>
         </div>
 
-        <div className="event-poster-section">
-          <label>
-            Poster image URL
-            <input
-              onChange={(event) =>
-                onEntryChange(entry.id, { posterUrl: event.target.value })
-              }
-              placeholder="https://..."
-              value={entry.posterUrl ?? ""}
-            />
-          </label>
-        </div>
-
         <div className="event-edit-grid">
           <label>
-            Date
-            <DateInput
-              aria-label={`${entry.name} date`}
-              calendarLabel={`Choose ${entry.name} date`}
-              error={Boolean(eventDateDraft && !toIsoDate(eventDateDraft))}
-              onBlur={() => commitEventDate()}
-              onChange={setEventDateDraft}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter") return;
-                event.preventDefault();
-                commitEventDate();
-              }}
-              onPickerChange={(nextDate) => commitEventDate(nextDate)}
-              value={eventDateDraft}
-            />
-          </label>
-          <label>
-            Event name
-            <input
-              onChange={(event) =>
-                onEntryChange(entry.id, { name: event.target.value })
-              }
-              value={entry.name}
-            />
+            Location name
+            <select
+              aria-label={`${entry.name} location`}
+              onChange={(event) => selectLocation(event.target.value)}
+              value={selectedLocation?.id ?? ""}
+            >
+              <option value="">Choose location</option>
+              <option value="__add-new-location">+ Add new location…</option>
+              {locations.map((location) => (
+                <option key={location.id} value={location.id}>
+                  {location.locationName}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             Event link
@@ -9944,50 +10498,20 @@ function EventCard({
               value={entry.nameUrl}
             />
           </label>
+        </div>
+
+        <div className="event-poster-section">
           <label>
-            Location name
-            <select
-              aria-label={`${entry.name} location`}
-              onChange={(event) => selectLocation(event.target.value)}
-              value={selectedLocation?.id ?? ""}
-            >
-              <option value="">Choose location</option>
-              {locations.map((location) => (
-                <option key={location.id} value={location.id}>
-                  {location.locationName}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Location link
+            Poster image URL
             <input
               onChange={(event) =>
-                onEntryChange(entry.id, { locationUrl: event.target.value })
+                onEntryChange(entry.id, { posterUrl: event.target.value })
               }
               placeholder="https://..."
-              value={entry.locationUrl}
+              value={entry.posterUrl ?? ""}
             />
           </label>
-          <label>
-            Address
-            <input
-              onChange={(event) =>
-                onEntryChange(entry.id, { address: event.target.value })
-              }
-              value={entry.address}
-            />
-          </label>
-          <label>
-            Address link
-            <input
-              onChange={(event) =>
-                onEntryChange(entry.id, { addressUrl: event.target.value })
-              }
-              placeholder="https://..."
-              value={entry.addressUrl}
-            />
-          </label>
+          <ManagedImageUploadButton module="events" onUploaded={(url) => onEntryChange(entry.id, { posterUrl: url })} />
         </div>
 
         <div className="event-danger-zone">
@@ -10028,8 +10552,18 @@ function EventBudgetLineRow({
   showBucket?: boolean;
   showSignToggle?: boolean;
 }) {
-  const [isActionsOpen, setIsActionsOpen] = useState(false);
-  const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
+  const [isDeleteArmed, setIsDeleteArmed] = useState(false);
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!isDeleteArmed) return;
+    function cancelDelete(event: PointerEvent) {
+      if (event.target instanceof Node && deleteButtonRef.current?.contains(event.target)) return;
+      setIsDeleteArmed(false);
+    }
+    document.addEventListener("pointerdown", cancelDelete);
+    return () => document.removeEventListener("pointerdown", cancelDelete);
+  }, [isDeleteArmed]);
 
   return (
     <div className={showBucket ? "event-budget-line event-budget-line-with-bucket" : "event-budget-line"}>
@@ -10087,35 +10621,14 @@ function EventBudgetLineRow({
       </label>
       {showActions ? <div className="event-budget-actions-cell">
         <button
-          aria-expanded={isActionsOpen}
-          aria-label={`${isActionsOpen ? "Hide" : "Show"} event budget line actions`}
-          className="budget-row-action-button"
-          onClick={() => setIsActionsOpen((current) => !current)}
+          aria-label={isDeleteArmed ? "Confirm delete event budget line" : "Delete event budget line"}
+          className={`delete-campaign-task-button${isDeleteArmed ? " is-armed" : ""}`}
+          onClick={() => isDeleteArmed ? onDelete(line.id) : setIsDeleteArmed(true)}
+          ref={deleteButtonRef}
           type="button"
         >
-          <Pencil size={15} aria-hidden />
+          <Trash2 size={15} aria-hidden />
         </button>
-        {isActionsOpen ? (
-          <div className="event-budget-action-panel">
-            <label>
-              <input
-                checked={isDeleteConfirmed}
-                onChange={(event) => setIsDeleteConfirmed(event.target.checked)}
-                type="checkbox"
-              />
-              Enable
-            </label>
-            <button
-              aria-label="Delete event budget line"
-              className="delete-campaign-task-button"
-              disabled={!isDeleteConfirmed}
-              onClick={() => onDelete(line.id)}
-              type="button"
-            >
-              <Trash2 size={15} aria-hidden />
-            </button>
-          </div>
-        ) : null}
       </div> : null}
     </div>
   );
@@ -10136,15 +10649,16 @@ function EventMaybeLink({ label, url }: { label: string; url: string }) {
   );
 }
 
-function formatEventSummaryDate(value: string) {
+function formatEventSummaryDate(value: string, time?: string) {
   const date = parseCampaignDate(value);
-  if (!date) return value;
-  return date.toLocaleDateString("en-GB", {
+  if (!date) return time ? `${value} · ${time}` : value;
+  const formattedDate = date.toLocaleDateString("en-GB", {
     day: "2-digit",
     month: "short",
     timeZone: "UTC",
     weekday: "short"
   });
+  return time ? `${formattedDate} · ${time}` : formattedDate;
 }
 
 function BudgetView({
@@ -10190,14 +10704,32 @@ function BudgetView({
     direction: "descending",
     key: "date"
   });
-  const sortedEntries = useMemo(
-    () => sortBudgetEntriesForLedger(entries, ledgerSort.key, ledgerSort.direction),
-    [entries, ledgerSort]
+  const [ledgerEntryOrder, setLedgerEntryOrder] = useState(() =>
+    entries.map((entry) => entry.id)
   );
+  const orderedEntries = useMemo(() => {
+    const entriesById = new Map(entries.map((entry) => [entry.id, entry]));
+    return ledgerEntryOrder
+      .map((entryId) => entriesById.get(entryId))
+      .filter((entry): entry is BudgetEntry => Boolean(entry));
+  }, [entries, ledgerEntryOrder]);
+
+  useEffect(() => {
+    setLedgerEntryOrder((currentOrder) => {
+      const entryIds = new Set(entries.map((entry) => entry.id));
+      const retainedOrder = currentOrder.filter((entryId) => entryIds.has(entryId));
+      const orderedIds = new Set(retainedOrder);
+      const appendedIds = entries
+        .map((entry) => entry.id)
+        .filter((entryId) => !orderedIds.has(entryId));
+
+      return appendedIds.length > 0 ? [...retainedOrder, ...appendedIds] : retainedOrder;
+    });
+  }, [entries]);
   const { historicalEntries, upcomingEntries } = useMemo(() => {
     const todayTime = getTodayUtcDate().getTime();
 
-    return sortedEntries.reduce(
+    return orderedEntries.reduce(
       (groups, entry) => {
         const entryDate = parseFlexibleBudgetDate(entry.date);
 
@@ -10214,7 +10746,7 @@ function BudgetView({
         upcomingEntries: [] as BudgetEntry[]
       }
     );
-  }, [sortedEntries]);
+  }, [orderedEntries]);
 
   useEffect(() => {
     if (!isHistoricalLedgerOpen || !pendingEntryFocusId) {
@@ -10239,18 +10771,25 @@ function BudgetView({
 
   function updateLedgerSort(nextKey: BudgetLedgerSortKey) {
     setLedgerSort((currentSort) => {
-      if (currentSort.key !== nextKey) {
-        return {
+      const nextSort: { direction: SortDirection; key: BudgetLedgerSortKey } =
+        currentSort.key !== nextKey
+          ? {
           direction: "ascending",
           key: nextKey
-        };
-      }
+            }
+          : {
+              direction:
+                currentSort.direction === "ascending" ? "descending" : "ascending",
+              key: nextKey
+            };
 
-      return {
-        direction:
-          currentSort.direction === "ascending" ? "descending" : "ascending",
-        key: nextKey
-      };
+      setLedgerEntryOrder(
+        sortBudgetEntriesForLedger(entries, nextSort.key, nextSort.direction).map(
+          (entry) => entry.id
+        )
+      );
+
+      return nextSort;
     });
   }
 
@@ -10673,7 +11212,7 @@ function BudgetLedgerTable({
             <BudgetEntryRow
               entry={entry}
               entriesById={entriesById}
-              key={`${entry.id}:${entry.date}:${entry.paymentPlanEndDate ?? ""}`}
+              key={entry.id}
               onDelete={onDeleteEntry}
               onEntryChange={onEntryChange}
               onOpenSource={onOpenEntrySource}
@@ -11534,7 +12073,7 @@ function ProductionSongBoard({
                 aria-label={`${songTitle} artwork preview`}
                 className="album-art-image"
                 role="img"
-                style={{ backgroundImage: `url("${albumArtUrl}")` }}
+                style={{ backgroundImage: `url("${getDashboardImageUrl(albumArtUrl, 480)}")` }}
               />
             ) : (
               <>
@@ -11632,6 +12171,14 @@ function ProductionSongBoard({
                   type="url"
                   value={albumArtUrl}
                 />
+                <ManagedImageUploadButton
+                  module="production"
+                  onUploaded={(url) => {
+                    setAlbumArtUrl(url);
+                    onChange(song.id, { albumArtUrl: url });
+                    setIsAlbumArtEditorOpen(false);
+                  }}
+                />
                 <button
                   aria-label={isAlbumArtEditorOpen ? "Save artwork URL" : "Edit artwork URL"}
                   onClick={() => {
@@ -11726,7 +12273,7 @@ function ProductionSongBoard({
             <tbody>
               {song.steps.map((step) => (
                 <ProductionStepRow
-                  key={`${step.id}:${step.deadline}`}
+                  key={step.id}
                   onAddTask={addStepTask}
                   onDeleteStep={deleteProductionStep}
                   onDeleteTask={deleteStepTask}
@@ -11967,6 +12514,7 @@ function ProductionStepRow({
                 onTaskChange(step.id, taskId, updates)
               }
               onDelete={(_, taskId) => onDeleteTask(step.id, taskId)}
+              requiresDeleteConfirmation
               task={task}
             />
           ))}
@@ -13457,7 +14005,7 @@ function MarketingCampaignBoard({
                   aria-label={`${displayedCampaignTitle} album art preview`}
                   className="album-art-image"
                   role="img"
-                  style={{ backgroundImage: `url("${albumArtUrl}")` }}
+                  style={{ backgroundImage: `url("${getDashboardImageUrl(albumArtUrl, 480)}")` }}
                 />
               ) : (
                 <>
@@ -13559,6 +14107,11 @@ function MarketingCampaignBoard({
                     placeholder="Album art image URL"
                     value={generalAlbumArtUrlInput}
                   />
+                  <ManagedImageUploadButton disabled={!isGeneralSettingsEditing} module="marketing" onUploaded={(url) => {
+                    setGeneralAlbumArtUrlInput(url);
+                    setAppliedGeneralAlbumArtUrlInput(url);
+                    onGeneralCampaignSettingsSave(campaign.id, { albumArtUrl: url, releaseTitle: generalTitleInput.trim(), startDate: generalStartDateInput }, campaignDays);
+                  }} />
                   <DateInput
                     aria-label="General campaign start date"
                     calendarLabel="Choose general campaign start date"
@@ -14208,11 +14761,13 @@ function DashboardView({
   onProductionSongChange,
   onQrCodeChange,
   otherTasks,
+  otherTaskSaveErrors,
   platformMetricRows,
   productionSongs,
   qrCodeLinks,
   roadmapPhasesData
-  ,workspaceName
+  ,workspaceName,
+  workspaceTimeZone
 }: {
   appleMusicReminderDismissedDate: string;
   budgetEntries: BudgetEntry[];
@@ -14238,11 +14793,13 @@ function DashboardView({
   onProductionSongChange: (songId: string, updates: Partial<ProductionSongConfig>) => void;
   onQrCodeChange: (linkId: string, updates: Partial<QrCodeLink>) => void;
   otherTasks: OtherTask[];
+  otherTaskSaveErrors: Record<string, string>;
   platformMetricRows: MetricRow[];
   productionSongs: ProductionSongConfig[];
   qrCodeLinks: QrCodeLink[];
   roadmapPhasesData: RoadmapPhase[];
   workspaceName: string;
+  workspaceTimeZone: string;
 }) {
   const campaignPreview = getDashboardCampaignPreview(campaigns);
   const budgetSummary = getBudgetSummary(budgetEntries);
@@ -14256,24 +14813,26 @@ function DashboardView({
     dashboardPlatformStats,
     platformMetricRows
   );
-  const isCampaignStartToday = isMarketingCampaignStartToday(campaigns);
+  const isCampaignStartToday = isMarketingCampaignStartToday(campaigns, workspaceTimeZone);
   const isAppleMusicUpdateCompletedToday = dailyFocusProgress.some(
     (item) => item.taskKey === "other:apple-music-csv-update" && item.status === "done"
   );
   const appleMusicUpdateTask =
-    appleMusicReminderDismissedDate === getViennaDateKey()
+    appleMusicReminderDismissedDate === getWorkspaceDateKey(workspaceTimeZone)
       ? null
       : getAppleMusicUpdateTask(
           appleMusicLastUpdate,
           isCampaignStartToday,
-          isAppleMusicUpdateCompletedToday
+          isAppleMusicUpdateCompletedToday,
+          workspaceTimeZone
         );
   const focusQueue = getDashboardFocusQueue(
     campaignPreview,
     productionPreviewSongs,
     otherTasks,
     appleMusicUpdateTask ? [appleMusicUpdateTask] : [],
-    campaigns
+    campaigns,
+    workspaceTimeZone
   );
   const phaseOne = roadmapPhasesData[0] ?? null;
 
@@ -14393,7 +14952,9 @@ function DashboardView({
         onResetFocusProgress={onResetFocusProgress}
         onTaskStatusChange={updateFocusTaskStatus}
         otherTasks={otherTasks}
+        otherTaskSaveErrors={otherTaskSaveErrors}
         showCompletedOtherTasks={focusQueueNavigationState.completedTasksOpen}
+        workspaceTimeZone={workspaceTimeZone}
       />
 
       <PlatformStatsSection
@@ -14542,7 +15103,7 @@ function DashboardCampaignCard({
                 aria-label={`${displayedCampaignTitle} album art preview`}
                 className="dashboard-production-art"
                 role="img"
-                style={{ backgroundImage: `url("${campaignAlbumArtUrl}")` }}
+                style={{ backgroundImage: `url("${getDashboardImageUrl(campaignAlbumArtUrl, 320)}")` }}
               />
             ) : (
               <span className="dashboard-production-art dashboard-production-art-empty">
@@ -14649,7 +15210,9 @@ function DashboardFocusQueueCard({
   onResetFocusProgress,
   onTaskStatusChange,
   otherTasks,
-  showCompletedOtherTasks
+  otherTaskSaveErrors,
+  showCompletedOtherTasks,
+  workspaceTimeZone
 }: {
   dailyProgress: DailyFocusProgressItem[];
   focusQueue: {
@@ -14671,7 +15234,9 @@ function DashboardFocusQueueCard({
   onResetFocusProgress: () => void;
   onTaskStatusChange: (task: FocusQueueItem, status: MarketingStatus) => void;
   otherTasks: OtherTask[];
+  otherTaskSaveErrors: Record<string, string>;
   showCompletedOtherTasks: boolean;
+  workspaceTimeZone: string;
 }) {
   const [editingOtherTaskId, setEditingOtherTaskId] = useState<string | null>(null);
   const [openStatusTaskId, setOpenStatusTaskId] = useState<string | null>(null);
@@ -14765,9 +15330,11 @@ function DashboardFocusQueueCard({
           getBudgetDateSortTime(secondTask.dueDate) ||
         firstTask.title.localeCompare(secondTask.title)
     );
-  const headerOtherTasks = activeOtherTasks.filter((task) => isOtherTaskDueToday(task.dueDate));
+  const headerOtherTasks = activeOtherTasks.filter((task) =>
+    isOtherTaskDueToday(task.dueDate, workspaceTimeZone)
+  );
   const expandedOtherTasks = activeOtherTasks.filter(
-    (task) => !isOtherTaskDueToday(task.dueDate)
+    (task) => !isOtherTaskDueToday(task.dueDate, workspaceTimeZone)
   );
   const editingActiveHeaderTask =
     editingOtherTaskId && !expandedOtherTasks.some((task) => task.id === editingOtherTaskId)
@@ -14861,7 +15428,9 @@ function DashboardFocusQueueCard({
           <ul className="dashboard-focus-list">
             {tasks.map((task) => (
               <li
-                className={`dashboard-focus-task-card dashboard-focus-task-card-${task.source.toLowerCase()}`}
+                className={`dashboard-focus-task-card dashboard-focus-task-card-${task.source.toLowerCase()}${
+                  openStatusTaskId === task.id ? " is-status-menu-open" : ""
+                }`}
                 key={task.id}
               >
                 <div className="dashboard-focus-task-topline">
@@ -15015,6 +15584,13 @@ function DashboardFocusQueueCard({
             Other task
           </button>
         </div>
+        {Object.keys(otherTaskSaveErrors).length > 0 ? (
+          <p className="dashboard-focus-save-error" role="alert">
+            {Object.keys(otherTaskSaveErrors).length === 1
+              ? "An Other task could not be saved. Edit it to retry."
+              : "Some Other tasks could not be saved. Edit them to retry."}
+          </p>
+        ) : null}
         </div>
         {isTaskListOpen ? (
           <div className={detailsSegmentClass}>
@@ -15116,7 +15692,7 @@ function OtherTaskList({
       {tasks.map((task) =>
         editingTaskId === task.id ? (
           <OtherTaskEditor
-            autoFocusTitle={task.title.trim() === ""}
+            autoFocusTitle
             key={task.id}
             onClose={() => onEditTask(null)}
             onDeleteTask={onDeleteTask}
@@ -15124,7 +15700,12 @@ function OtherTaskList({
             task={task}
           />
         ) : (
-          <div className="dashboard-other-task-row dashboard-focus-task-card dashboard-focus-task-card-other" key={task.id}>
+          <div
+            className={`dashboard-other-task-row dashboard-focus-task-card dashboard-focus-task-card-other${
+              openOtherMenuTaskId === task.id ? " is-status-menu-open" : ""
+            }`}
+            key={task.id}
+          >
             <div className="dashboard-focus-task-topline">
               <span className="dashboard-focus-task-header">
                 <span className="dashboard-focus-source">Other</span>
@@ -15396,7 +15977,7 @@ function DashboardProductionCard({
               aria-label={`${song.title} album art preview`}
               className="dashboard-production-art"
               role="img"
-              style={{ backgroundImage: `url("${song.albumArtUrl}")` }}
+              style={{ backgroundImage: `url("${getDashboardImageUrl(song.albumArtUrl, 320)}")` }}
             />
           ) : (
             <span className="dashboard-production-art dashboard-production-art-empty">
@@ -15553,6 +16134,7 @@ function DashboardRoadmapPhasePreview({
 
 function PlatformsView({
   appleMusicImportStatus,
+  appleMusicLastUploadedAt,
   onAddQrCode,
   onAppleMusicCsvImport,
   onDeleteQrCode,
@@ -15561,9 +16143,11 @@ function PlatformsView({
   platformMetricRows,
   platformStatsData,
   qrCodeLinks,
-  refreshStatus
+  refreshStatus,
+  workspaceTimeZone
 }: {
   appleMusicImportStatus: AppleMusicImportStatus;
+  appleMusicLastUploadedAt: string;
   onAddQrCode: () => void;
   onAppleMusicCsvImport: (file: File) => void;
   onDeleteQrCode: (linkId: string) => void;
@@ -15573,6 +16157,7 @@ function PlatformsView({
   platformStatsData: typeof platformStats;
   qrCodeLinks: QrCodeLink[];
   refreshStatus: RefreshStatus;
+  workspaceTimeZone: string;
 }) {
   const instagramFollowerTrend = getPlatformMetricTrend(
     platformMetricRows,
@@ -15816,13 +16401,7 @@ function PlatformsView({
                     appleMusicLastUpdate
                   )}
                 >
-                  Last update: {formatPlatformUpdateTimestamp(
-                    appleMusicLastUpdate,
-                    getPlatformLastSnapshotImportedAt(
-                      platformMetricRows,
-                      "apple-music"
-                    )
-                  )}
+                  Last update {formatDateForDisplay(appleMusicLastUpdate)}
                 </span>
               ) : null}
               <AppleMusicCsvImportControl
@@ -15844,6 +16423,32 @@ function PlatformsView({
       />
     </>
   );
+}
+
+function ManagedImageUploadButton({
+  disabled = false,
+  module,
+  onUploaded
+}: {
+  disabled?: boolean;
+  module: "production" | "marketing" | "events" | "qr";
+  onUploaded: (url: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [status, setStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
+  async function upload(file: File) {
+    setStatus({ message: "Uploading image...", state: "loading" });
+    try {
+      const form = new FormData();
+      form.set("file", file); form.set("module", module);
+      const response = await fetch("/api/media/images", { body: form, method: "POST" });
+      const payload = await response.json() as { error?: string; url?: string };
+      if (!response.ok || !payload.url) throw new Error(payload.error || "Image upload failed.");
+      onUploaded(payload.url);
+      setStatus({ message: "Image uploaded.", state: "success" });
+    } catch (error) { setStatus({ message: error instanceof Error ? error.message : "Image upload failed.", state: "error" }); }
+  }
+  return <div className="managed-image-upload"><input accept="image/jpeg,image/png,image/webp" aria-label="Upload image" disabled={disabled || status.state === "loading"} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }} ref={inputRef} type="file" /><button disabled={disabled || status.state === "loading"} onClick={() => inputRef.current?.click()} type="button"><Upload aria-hidden size={14} />{status.state === "loading" ? "Uploading..." : "Upload image"}</button>{status.message ? <span className={status.state === "error" ? "settings-error" : "settings-status"} role={status.state === "error" ? "alert" : "status"}>{status.message}</span> : null}</div>;
 }
 
 function QrCodeLinksSection({
@@ -15901,22 +16506,34 @@ function QrCodeLinksSection({
 
               return (
                 <article className="qr-link-card module-accent-thin module-accent-platforms" key={link.id}>
-                  <button
-                    aria-expanded={isExpanded}
-                    className="qr-link-header"
-                    onClick={() => setExpandedLinkIds((current) => ({ ...current, [link.id]: !current[link.id] }))}
-                    type="button"
-                  >
-                    <span><QrIcon size={17} aria-hidden />{link.name || "QR code"}</span>
-                    <ChevronDown size={16} aria-hidden />
-                  </button>
+                  <div className="qr-link-header">
+                    {getSafeExternalUrl(link.targetUrl) ? (
+                      <a href={getSafeExternalUrl(link.targetUrl)!} rel="noreferrer" target="_blank">
+                        <QrIcon size={17} aria-hidden />
+                        <span>{link.name || "QR code"}</span>
+                        <ArrowUpRight size={14} aria-hidden />
+                      </a>
+                    ) : (
+                      <span className="qr-link-header-name"><QrIcon size={17} aria-hidden />{link.name || "QR code"}</span>
+                    )}
+                    <button
+                      aria-expanded={isExpanded}
+                      aria-label={`${isExpanded ? "Close" : "Edit"} ${link.name || "QR code"} settings`}
+                      className="qr-link-edit-button"
+                      onClick={() => setExpandedLinkIds((current) => ({ ...current, [link.id]: !current[link.id] }))}
+                      title={isExpanded ? "Close settings" : "Edit QR code"}
+                      type="button"
+                    >
+                      {isExpanded ? <Save size={15} aria-hidden /> : <Pencil size={15} aria-hidden />}
+                    </button>
+                  </div>
                   {link.qrImageUrl ? (
                     <a
                       aria-label={`Open ${link.name || "QR code"} link`}
                       className="qr-code-preview"
                       href={link.targetUrl || link.qrImageUrl}
                       rel="noreferrer"
-                      style={{ backgroundImage: `url("${link.qrImageUrl}")` }}
+                      style={{ backgroundImage: `url("${getDashboardImageUrl(link.qrImageUrl, 800, true)}")` }}
                       target="_blank"
                     />
                   ) : (
@@ -15949,6 +16566,7 @@ function QrCodeLinksSection({
                         value={link.qrImageUrl}
                       />
                     </label>
+                    <ManagedImageUploadButton module="qr" onUploaded={(url) => onLinkChange(link.id, { qrImageUrl: url })} />
                     <label>
                       Link opens
                       <input
@@ -15988,6 +16606,29 @@ function QrCodeLinksSection({
       ) : null}
     </section>
   );
+}
+
+function getSafeExternalUrl(value: string) {
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function getDashboardImageUrl(value: string, maxWidth: number, preserveSharpness = false) {
+  try {
+    const url = new URL(value);
+    if (!url.hostname.endsWith("cloudinary.com") || !url.pathname.includes("/image/upload/")) return value;
+    const transformation = preserveSharpness
+      ? `c_limit,w_${maxWidth}`
+      : `f_auto,q_auto,c_limit,w_${maxWidth}`;
+    url.pathname = url.pathname.replace("/image/upload/", `/image/upload/${transformation}/`);
+    return url.toString();
+  } catch {
+    return value;
+  }
 }
 
 function getQrLinkIcon(name: string) {
@@ -16097,12 +16738,14 @@ function getAppleMusicLastUpdateDate(
 function getAppleMusicUpdateTask(
   updateDate: string | undefined,
   isCampaignStartToday: boolean,
-  isCompletedToday = false
+  isCompletedToday = false,
+  workspaceTimeZone = defaultWorkspaceTimeZone
 ): FocusQueueItem | null {
+  if (isCompletedToday) return null;
   const needsCampaignStartSnapshot =
-    isCampaignStartToday && !wasPlatformUpdatedToday(updateDate);
+    isCampaignStartToday && !wasPlatformUpdatedToday(updateDate, workspaceTimeZone);
 
-  if (!isPlatformUpdateStale(updateDate) && !needsCampaignStartSnapshot && !isCompletedToday) {
+  if (!isPlatformUpdateStale(updateDate, workspaceTimeZone) && !needsCampaignStartSnapshot) {
     return null;
   }
 
@@ -16114,12 +16757,12 @@ function getAppleMusicUpdateTask(
       updateDate ? ` - last update ${formatDateWithDots(updateDate)}` : ""
     }`,
     source: "Other",
-    status: isCompletedToday ? "done" : "not-started"
+    status: "not-started"
   };
 }
 
-function isMarketingCampaignStartToday(campaigns: MarketingCampaignConfig[]) {
-  const todayKey = getViennaDateKey();
+function isMarketingCampaignStartToday(campaigns: MarketingCampaignConfig[], workspaceTimeZone = defaultWorkspaceTimeZone) {
+  const todayKey = getWorkspaceDateKey(workspaceTimeZone);
 
   return campaigns.some((campaign) => {
     const campaignDays =
@@ -16132,9 +16775,9 @@ function isMarketingCampaignStartToday(campaigns: MarketingCampaignConfig[]) {
   });
 }
 
-function wasPlatformUpdatedToday(updateDate?: string) {
+function wasPlatformUpdatedToday(updateDate?: string, workspaceTimeZone = defaultWorkspaceTimeZone) {
   const parsedDate = updateDate ? parsePlatformUpdateDate(updateDate) : null;
-  return parsedDate?.toISOString().slice(0, 10) === getViennaDateKey();
+  return parsedDate?.toISOString().slice(0, 10) === getWorkspaceDateKey(workspaceTimeZone);
 }
 
 function getPlatformUpdateMetaClass(platformSlug: string, updateDate?: string) {
@@ -16148,7 +16791,7 @@ function getPlatformUpdateMetaClass(platformSlug: string, updateDate?: string) {
     .join(" ");
 }
 
-function isPlatformUpdateStale(updateDate?: string) {
+function isPlatformUpdateStale(updateDate?: string, workspaceTimeZone = defaultWorkspaceTimeZone) {
   const parsedDate = updateDate ? parsePlatformUpdateDate(updateDate) : null;
 
   if (!parsedDate) {
@@ -16156,7 +16799,7 @@ function isPlatformUpdateStale(updateDate?: string) {
   }
 
   const ageInDays =
-    (getTodayUtcDate().getTime() - parsedDate.getTime()) / (24 * 60 * 60 * 1000);
+    ((parseCampaignDateKey(getWorkspaceDateKey(workspaceTimeZone))?.getTime() ?? getTodayUtcDate().getTime()) - parsedDate.getTime()) / (24 * 60 * 60 * 1000);
 
   return ageInDays > 7;
 }
@@ -16730,6 +17373,20 @@ function formatDateWithDots(date: string) {
   return `${day}.${month}.${year}`;
 }
 
+function formatAppleUploadTimestamp(timestamp: string, workspaceTimeZone: string) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "2-digit",
+    timeZone: workspaceTimeZone,
+    year: "numeric"
+  }).format(date).replace(",", "");
+}
+
 function formatPlatformUpdateTimestamp(date: string, importedAt?: string) {
   const formattedDate = formatDateWithDots(date);
 
@@ -16812,7 +17469,6 @@ function getDashboardPlatformStats(stats: typeof platformStats) {
   const dashboardOrder = [
     "instagram",
     "youtube",
-    "spotify",
     "youtube-music",
     "apple-music"
   ];
@@ -16854,12 +17510,9 @@ function getPlatformsViewStats(stats: typeof platformStats) {
     "amazon-music"
   ];
 
-  return [
-    ...platformOrder
-      .map((slug) => stats.find((platform) => platform.slug === slug))
-      .filter((platform): platform is (typeof platformStats)[number] => Boolean(platform)),
-    platformPlaceholder
-  ];
+  return platformOrder
+    .map((slug) => stats.find((platform) => platform.slug === slug))
+    .filter((platform): platform is (typeof platformStats)[number] => Boolean(platform));
 }
 
 function getSingle<T>(value: T | T[] | null) {
@@ -17377,12 +18030,12 @@ function PlatformStatsSection({
 }: {
   description: string;
   hideHeading?: boolean;
-  platforms: Array<(typeof platformStats)[number] | typeof platformPlaceholder>;
+  platforms: Array<(typeof platformStats)[number]>;
   renderCardAddon?: (
-    platform: (typeof platformStats)[number] | typeof platformPlaceholder
+    platform: (typeof platformStats)[number]
   ) => ReactNode;
   renderCardHeaderMeta?: (
-    platform: (typeof platformStats)[number] | typeof platformPlaceholder
+    platform: (typeof platformStats)[number]
   ) => ReactNode;
   title: string;
   variant: "dashboard" | "full";
@@ -17470,19 +18123,13 @@ function PlatformStatsSection({
                       </div>
                     );
                   })}
-                {platform.slug === "spotify" && variant === "dashboard" ? (
+                {(["spotify", "deezer", "amazon-music"] as const).includes(platform.slug as "spotify" | "deezer" | "amazon-music") && variant === "full" ? (
                   <div className="platform-metric-row platform-info-note">
                     <strong>Historical / manually maintained data</strong>
-                    <span>Automatic Spotify API updates are in development.</span>
+                    <span>Automatic live API updates are in development.</span>
                   </div>
                 ) : null}
               </dl>
-              {platform.slug === "spotify" && variant !== "dashboard" ? (
-                <p className="platform-info-note">
-                  <strong>Historical / manually maintained data</strong>
-                  <span>Automatic Spotify API updates are in development.</span>
-                </p>
-              ) : null}
               {cardAddon}
             </article>
           );

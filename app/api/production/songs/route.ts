@@ -126,18 +126,32 @@ async function saveProductionSong(song: ProductionSongConfig, workspaceId: strin
     release_date: releaseDate,
     roadmap_phase_id: song.roadmapPhaseId,
     album_art_url: song.albumArtUrl,
-    source: "app",
-    workspace_id: workspaceId,
-    ...(song.dbId ? { id: song.dbId } : {})
+    source: "app"
   };
-  const { data: savedSong, error: songError } = await supabase
-    .from("production_songs")
-    .upsert(songPayload, { onConflict: "workspace_id,slug" })
-    .select("id, slug")
-    .single();
+  const savedSongResult = song.dbId
+    ? await supabase
+        .from("production_songs")
+        .update(songPayload)
+        .eq("id", song.dbId)
+        .eq("workspace_id", workspaceId)
+        .select("id, slug")
+        .maybeSingle()
+    : await supabase
+        .from("production_songs")
+        .upsert(
+          { ...songPayload, workspace_id: workspaceId },
+          { onConflict: "workspace_id,slug" }
+        )
+        .select("id, slug")
+        .single();
+  const { data: savedSong, error: songError } = savedSongResult;
 
   if (songError) {
     throw songError;
+  }
+
+  if (!savedSong) {
+    throw new Error("Production song was not found in the active workspace.");
   }
 
   const { error: campaignSyncError } = await supabase

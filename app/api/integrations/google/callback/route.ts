@@ -7,6 +7,7 @@ import {
   isGoogleService
 } from "@/lib/google/oauth";
 import { requireWorkspaceAdministrator } from "@/lib/server/workspace-owner";
+import { reconcilePlatformAccount } from "@/lib/server/platform-accounts";
 
 type GoogleUserInfo = { email?: string; sub?: string };
 type YouTubeChannelsResponse = {
@@ -17,6 +18,7 @@ type AnalyticsAccountSummaries = {
     propertySummaries?: Array<{ displayName?: string; property?: string }>;
   }>;
 };
+type AnalyticsDataStreams = { dataStreams?: Array<{ type?: string; webStreamData?: { defaultUri?: string } }> };
 
 export async function GET(request: NextRequest) {
   const returnUrl = createSettingsReturnUrl(request);
@@ -82,6 +84,8 @@ export async function GET(request: NextRequest) {
       workspace_id: workspaceId
     };
 
+    let analyticsNeedsSelection = false;
+    let selectedAnalyticsProperty: { id: string; name: string } | null = null;
     if (service === "youtube") {
       const channelData = await fetchGoogleJson<YouTubeChannelsResponse>(
         tokens.access_token!,
@@ -99,16 +103,16 @@ export async function GET(request: NextRequest) {
       );
       const properties =
         summaries.accountSummaries?.flatMap((account) => account.propertySummaries ?? []) ?? [];
-      const property =
-        properties.find((item) =>
-          item.displayName?.toLowerCase().includes("lovestrings.at")
-        ) ?? (properties.length === 1 ? properties[0] : undefined);
+      const property = properties.length === 1 ? properties[0] : undefined;
       if (!property?.property) {
-        throw new Error("The www.lovestrings.at Analytics property was not found.");
+        if (!properties.length) throw new Error("No accessible Google Analytics property was found for this Google account.");
+        analyticsNeedsSelection = true;
+      } else {
+        updates.analytics_enabled = true;
+        updates.analytics_property_id = property.property.replace("properties/", "");
+        updates.analytics_property_name = property.displayName ?? "Google Analytics";
+        selectedAnalyticsProperty = { id: String(updates.analytics_property_id), name: String(updates.analytics_property_name) };
       }
-      updates.analytics_enabled = true;
-      updates.analytics_property_id = property.property.replace("properties/", "");
-      updates.analytics_property_name = property.displayName ?? "www.lovestrings.at";
     }
 
     const { error: upsertError } = await serviceClient
@@ -116,7 +120,20 @@ export async function GET(request: NextRequest) {
       .upsert(updates, { onConflict: "workspace_id" });
     if (upsertError) throw upsertError;
 
-    return clearOAuthCookies(NextResponse.redirect(setResult(returnUrl, "connected")));
+    if (service === "youtube") {
+      await reconcilePlatformAccount(serviceClient, {
+        workspaceId, platformSlug: "youtube", externalId: String(updates.youtube_channel_id),
+        accountName: String(updates.youtube_channel_title),
+        url: `https://www.youtube.com/channel/${updates.youtube_channel_id}`
+      });
+    }
+    if (selectedAnalyticsProperty) {
+      const streams = await fetchGoogleJson<AnalyticsDataStreams>(tokens.access_token!, `https://analyticsadmin.googleapis.com/v1beta/properties/${selectedAnalyticsProperty.id}/dataStreams`);
+      const webUris = (streams.dataStreams ?? []).filter((stream) => stream.type === "WEB_DATA_STREAM" && stream.webStreamData?.defaultUri).map((stream) => stream.webStreamData!.defaultUri!);
+      await reconcilePlatformAccount(serviceClient, { workspaceId, platformSlug: "google-analytics", externalId: selectedAnalyticsProperty.id, accountName: selectedAnalyticsProperty.name, url: webUris.length === 1 ? webUris[0] : undefined });
+    }
+
+    return clearOAuthCookies(NextResponse.redirect(setResult(returnUrl, analyticsNeedsSelection ? "select-analytics" : "connected")));
   } catch (error) {
     return clearOAuthCookies(
       NextResponse.redirect(
