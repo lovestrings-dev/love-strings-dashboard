@@ -2,11 +2,14 @@
 
 import Image from "next/image";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import { Fragment } from "react";
 import { forwardRef } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUpRight,
+  ArrowDown,
   ArrowLeft,
+  ArrowUp,
   BarChart3,
   CalendarDays,
   Camera,
@@ -33,6 +36,17 @@ import { DateInput } from "./date-input";
 import { toDisplayDate, toIsoDate } from "@/lib/date-input";
 import { defaultWorkspaceTimeZone, getWorkspaceDateKey } from "@/lib/workspace-time";
 import { defaultWorkspaceId } from "@/lib/workspace";
+import {
+  dashboardCardRegistry,
+  resolveDashboardPreferences,
+  type DashboardCardId,
+  type ResolvedDashboardPreferences
+} from "@/lib/dashboard-preferences";
+import {
+  loadDashboardPreferences,
+  resetDashboardPreferences,
+  saveDashboardPreferences
+} from "@/lib/dashboard-preferences-client";
 
 type Section = (typeof sections)[number];
 type FocusQueueNavigationState = {
@@ -618,7 +632,7 @@ const platformStats = [
   }
 ];
 
-const appVersionLabel = "Beta 1.18";
+const appVersionLabel = "Beta 1.19";
 const defaultAppLogoUrl = "";
 
 const sections = [
@@ -630,6 +644,21 @@ const sections = [
   "Budget",
   "Roadmap"
 ] as const;
+
+const dashboardNavigationSections: Partial<Record<DashboardCardId, Section>> = {
+  budget: "Budget",
+  events: "Events",
+  marketing: "Marketing",
+  platforms: "Platforms",
+  production: "Production",
+  roadmap: "Roadmap"
+};
+
+function dashboardCardRegistryById(cardId: DashboardCardId) {
+  const card = dashboardCardRegistry.find((candidate) => candidate.id === cardId);
+  if (!card) throw new Error(`Unknown Dashboard card: ${cardId}`);
+  return card;
+}
 
 const marketingStatusOptions: MarketingStatus[] = [
   "not-started",
@@ -2143,6 +2172,10 @@ function createStableId(value: string) {
     .replace(/^-|-$/g, "");
 }
 
+function createClientMutationId(prefix: string) {
+  return `${prefix}-${crypto.randomUUID()}`;
+}
+
 function formatDateForInput(date: Date) {
   return [
     String(date.getUTCDate()).padStart(2, "0"),
@@ -3400,12 +3433,19 @@ function getCampaignCompletionScore(campaign: MarketingCampaignConfig) {
 
 function getDashboardCampaignPreview(campaigns: MarketingCampaignConfig[]) {
   const today = getTodayUtcDate();
-  const sortedCampaigns = sortCampaignsByReleaseDate(
-    campaigns.filter((campaign) => (campaign.campaignKind ?? "song") === "song")
-  );
-  const current =
-    sortedCampaigns.find((campaign) => isCampaignActive(campaign, today)) ??
-    null;
+  const getCurrentAndNext = (campaignKind: MarketingCampaignKind) => {
+    const sorted = sortCampaignsByReleaseDate(campaigns.filter((campaign) => (campaign.campaignKind ?? "song") === campaignKind));
+    const current = sorted.find((campaign) => isCampaignActive(campaign, today)) ?? null;
+    const next = sorted.filter((campaign) => {
+      const releaseDate = parseCampaignDate(campaign.releaseDate);
+      return releaseDate ? releaseDate.getTime() >= today.getTime() : false;
+    }).sort((first, second) => getCampaignSortTime(first.releaseDate) - getCampaignSortTime(second.releaseDate)).find((campaign) => campaign.id !== current?.id) ?? null;
+    return { current, next, sorted };
+  };
+  const songCampaigns = getCurrentAndNext("song");
+  const generalCampaigns = getCurrentAndNext("general");
+  const sortedCampaigns = songCampaigns.sorted;
+  const current = songCampaigns.current;
   const benchmark =
     [...sortedCampaigns]
       .sort(
@@ -3415,20 +3455,18 @@ function getDashboardCampaignPreview(campaigns: MarketingCampaignConfig[]) {
           getCampaignSortTime(secondCampaign.releaseDate) -
             getCampaignSortTime(firstCampaign.releaseDate)
       )[0] ?? null;
-  const next =
-    sortedCampaigns
-      .filter((campaign) => {
-        const releaseDate = parseCampaignDate(campaign.releaseDate);
-        return releaseDate ? releaseDate.getTime() >= today.getTime() : false;
-      })
+  const benchmarkGeneral =
+    [...generalCampaigns.sorted]
       .sort(
         (firstCampaign, secondCampaign) =>
-          getCampaignSortTime(firstCampaign.releaseDate) -
-          getCampaignSortTime(secondCampaign.releaseDate)
-      )
-      .find((campaign) => campaign.id !== current?.id) ?? null;
+          getCampaignCompletionScore(secondCampaign) -
+            getCampaignCompletionScore(firstCampaign) ||
+          getCampaignSortTime(secondCampaign.releaseDate) -
+            getCampaignSortTime(firstCampaign.releaseDate)
+      )[0] ?? null;
+  const next = songCampaigns.next;
 
-  return { benchmark, current, next };
+  return { benchmark, benchmarkGeneral, current, next, currentGeneral: generalCampaigns.current, nextGeneral: generalCampaigns.next };
 }
 
 function getProductionCompletionScore(song: ProductionSongConfig) {
@@ -3573,18 +3611,12 @@ function getDashboardFocusQueue(
   const primaryProductionTask = productionTasks[0]
     ? productionFocusItems[0]
     : null;
-  const activeOtherTasks = otherTasks
-    .filter((task) => task.status !== "done" && task.status !== "irrelevant")
-    .sort(
-      (firstTask, secondTask) =>
-        getBudgetDateSortTime(firstTask.dueDate) -
-          getBudgetDateSortTime(secondTask.dueDate) ||
-        firstTask.title.localeCompare(secondTask.title)
-    )
-    .map(toOtherFocusQueueItem);
-  const todayOtherTasks = activeOtherTasks.filter((task) =>
-    task.dueDate ? isOtherTaskDueToday(task.dueDate, workspaceTimeZone) : false
+  const activeOtherTasks = getSortedActiveOtherTasks(otherTasks, workspaceTimeZone);
+  const eligibleOtherTasks = activeOtherTasks.filter((task) =>
+    isFocusQueueEligibleOtherTask(task, workspaceTimeZone)
   );
+  const activeOtherFocusItems = activeOtherTasks.map(toOtherFocusQueueItem);
+  const eligibleOtherFocusItems = eligibleOtherTasks.map(toOtherFocusQueueItem);
   const otherHistoryTasks = otherTasks
     .filter((task) => task.status === "done" || task.status === "irrelevant")
     .sort(
@@ -3594,37 +3626,71 @@ function getDashboardFocusQueue(
         firstTask.title.localeCompare(secondTask.title)
     )
     .map(toOtherFocusQueueItem);
-  const baselineTasks = [
-    primaryMarketingTask,
-    primaryProductionTask,
-    ...utilityTasks
-  ]
-    .filter((task): task is FocusQueueItem => Boolean(task))
-    .slice(0, 3);
   const coreVisibleTasks = [
     primaryMarketingTask,
     primaryProductionTask,
     ...utilityTasks
   ].filter((task): task is FocusQueueItem => Boolean(task));
-  const visibleOtherTaskSlots = Math.max(0, 5 - coreVisibleTasks.length);
+  const visibleTasks = [...coreVisibleTasks, ...eligibleOtherFocusItems].slice(0, 5);
 
   return {
     allTasks: [
       ...(primaryMarketingTask ? [primaryMarketingTask] : []),
       ...(primaryProductionTask ? [primaryProductionTask] : []),
       ...utilityTasks,
-      ...activeOtherTasks
+      ...activeOtherFocusItems
     ],
-    baselineTasks,
-    visibleTasks: [
-      ...coreVisibleTasks,
-      ...todayOtherTasks.slice(0, visibleOtherTaskSlots)
-    ].slice(0, 5)
+    baselineTasks: visibleTasks.slice(0, 3),
+    visibleTasks
   };
 }
 
-function isOtherTaskDueToday(dueDate: string, workspaceTimeZone = defaultWorkspaceTimeZone) {
-  return toIsoDate(dueDate) === getWorkspaceDateKey(workspaceTimeZone);
+function isFocusQueueEligibleOtherTask(
+  task: OtherTask,
+  workspaceTimeZone = defaultWorkspaceTimeZone
+) {
+  const dueDate = toIsoDate(task.dueDate);
+  const today = getWorkspaceDateKey(workspaceTimeZone);
+
+  return Boolean(dueDate && dueDate <= today);
+}
+
+function getSortedActiveOtherTasks(
+  otherTasks: OtherTask[],
+  workspaceTimeZone = defaultWorkspaceTimeZone
+) {
+  const today = getWorkspaceDateKey(workspaceTimeZone);
+  const getTaskGroup = (task: OtherTask) => {
+    const dueDate = toIsoDate(task.dueDate);
+    if (!dueDate) return 4;
+    if (dueDate > today) return 3;
+    if (task.status === "not-started") return dueDate === today ? 0 : 1;
+    return 2;
+  };
+
+  return otherTasks
+    .filter((task) => task.status !== "done" && task.status !== "irrelevant")
+    .sort((firstTask, secondTask) => {
+      const firstGroup = getTaskGroup(firstTask);
+      const secondGroup = getTaskGroup(secondTask);
+      if (firstGroup !== secondGroup) return firstGroup - secondGroup;
+
+      const firstDueDate = toIsoDate(firstTask.dueDate);
+      const secondDueDate = toIsoDate(secondTask.dueDate);
+      if (firstGroup === 1 || firstGroup === 2) {
+        return (
+          (secondDueDate ?? "").localeCompare(firstDueDate ?? "") ||
+          firstTask.title.localeCompare(secondTask.title)
+        );
+      }
+      if (firstGroup === 3) {
+        return (
+          (firstDueDate ?? "").localeCompare(secondDueDate ?? "") ||
+          firstTask.title.localeCompare(secondTask.title)
+        );
+      }
+      return firstTask.title.localeCompare(secondTask.title);
+    });
 }
 
 function getCampaignDailyProgressItems(
@@ -4677,6 +4743,7 @@ async function deleteProductionSongFromSupabase(songDbId: string) {
 async function loadEventsSnapshotFromSupabase(): Promise<EventsSnapshot | null> {
   try {
     const response = await fetch("/api/events", {
+      cache: "no-store",
       credentials: "same-origin",
       method: "GET"
     });
@@ -4698,14 +4765,32 @@ async function loadEventsSnapshotFromSupabase(): Promise<EventsSnapshot | null> 
   }
 }
 
-async function saveEventsSnapshotToSupabase({
-  entries,
-  locations,
-  intent
-}: EventsSaveSnapshot): Promise<EventsSnapshot | null> {
+function mergeEventReconciliation<T extends { id: string }>(
+  localItems: T[],
+  remoteItems: T[],
+  protectedIds: Set<string>,
+  deletedIds: Set<string>
+) {
+  const localById = new Map(localItems.map((item) => [item.id, item]));
+  const remoteIds = new Set(remoteItems.map((item) => item.id));
+  const reconciled = remoteItems.flatMap((remoteItem) => {
+    if (deletedIds.has(remoteItem.id)) return [];
+    return [protectedIds.has(remoteItem.id) ? localById.get(remoteItem.id) ?? remoteItem : remoteItem];
+  });
+
+  localItems.forEach((localItem) => {
+    if (!remoteIds.has(localItem.id) && protectedIds.has(localItem.id) && !deletedIds.has(localItem.id)) {
+      reconciled.push(localItem);
+    }
+  });
+
+  return reconciled;
+}
+
+async function mutateEventsInSupabase(payload: unknown) {
   try {
     const response = await fetch("/api/events", {
-      body: JSON.stringify({ entries, intent, locations }),
+      body: JSON.stringify(payload),
       credentials: "same-origin",
       headers: {
         "Content-Type": "application/json",
@@ -4719,14 +4804,9 @@ async function saveEventsSnapshotToSupabase({
       throw new Error(body.error ?? `Events save failed with status ${response.status}.`);
     }
 
-    const result = (await response.json()) as EventsSnapshot;
-
-    return {
-      entries: normalizeEventEntries(result.entries ?? []),
-      locations: normalizeLocationAddressBookEntries(result.locations ?? [])
-    };
+    return await response.json();
   } catch (error) {
-    console.warn("Unable to save events to Supabase.", error);
+    console.warn("Unable to save event mutation to Supabase.", error);
     return null;
   }
 }
@@ -4734,6 +4814,7 @@ async function saveEventsSnapshotToSupabase({
 async function loadOtherTasksFromSupabase(): Promise<OtherTask[] | null> {
   try {
     const response = await fetch("/api/focus/other-tasks", {
+      cache: "no-store",
       credentials: "same-origin",
       method: "GET"
     });
@@ -5065,15 +5146,26 @@ export default function Home() {
   const productionSaveTimers = useRef<Record<string, number>>({});
   const marketingBudgetSaveTimers = useRef<Record<string, number>>({});
   const otherTaskSaveTimers = useRef<Record<string, number>>({});
-  const eventSaveTimer = useRef<number | null>(null);
-  const pendingFinalEventDeletion = useRef(false);
+  const eventSaveTimers = useRef<Record<string, number>>({});
+  const eventMutationVersions = useRef(new Map<string, number>());
+  const locationMutationVersions = useRef(new Map<string, number>());
+  const deletedEventIds = useRef(new Set<string>());
+  const deletedLocationIds = useRef(new Set<string>());
+  const eventMutationVersion = useRef(0);
+  const focusTargetToken = useRef(0);
+  const eventsReconcileInFlight = useRef(false);
   const budgetSaveTimer = useRef<number | null>(null);
   const qrCodeSaveTimer = useRef<number | null>(null);
   const hasRequestedEventSupabaseLoad = useRef(false);
   const hasRequestedBudgetSupabaseLoad = useRef(false);
   const otherTaskLoadWorkspaceId = useRef<string | null>(null);
   const otherTaskMutationVersions = useRef(new Map<string, number>());
+  const otherTaskLastMutationVersions = useRef(new Map<string, number>());
   const otherTaskMutationVersion = useRef(0);
+  const deletedOtherTaskIds = useRef(new Set<string>());
+  const otherTasksReconcileInFlight = useRef(false);
+  const hasVisitedFocusDashboard = useRef(false);
+  const dashboardPreferenceMutationVersion = useRef(0);
   const activeWorkspaceIdRef = useRef("");
   const hasRequestedQrCodeSupabaseLoad = useRef(false);
   const [activeSection, setActiveSection] = useState<Section>("Dashboard");
@@ -5119,6 +5211,13 @@ export default function Home() {
   >(null);
   const [workspaceRole, setWorkspaceRole] = useState<WorkspaceRole | null>(null);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
+  const [dashboardPreferences, setDashboardPreferences] = useState<ResolvedDashboardPreferences>(
+    () => resolveDashboardPreferences()
+  );
+  const [dashboardPreferenceStatus, setDashboardPreferenceStatus] = useState<RefreshStatus>({
+    message: "",
+    state: "idle"
+  });
   const [activeWorkspaceName, setActiveWorkspaceName] = useState("Workspace");
   const [workspaceTimeZone, setWorkspaceTimeZone] = useState(defaultWorkspaceTimeZone);
   const [productionDefaultCosts, setProductionDefaultCosts] =
@@ -5170,12 +5269,15 @@ export default function Home() {
     token: number;
   } | null>(null);
   const locationFocusToken = useRef(0);
+  const consumeEventFocusTarget = useCallback(() => setEventFocusTarget(null), []);
+  const consumeLocationFocusTarget = useCallback(() => setLocationFocusTarget(null), []);
   const [campaigns, setCampaigns] = useState<MarketingCampaignConfig[]>([]);
   const [productionSongDrafts, setProductionSongDrafts] = useState<ProductionSongConfig[]>([]);
   const [roadmapPhaseDrafts, setRoadmapPhaseDrafts] = useState<RoadmapPhase[]>([]);
   const [budgetEntryDrafts, setBudgetEntryDrafts] = useState<BudgetEntry[]>([]);
   const [deletedBudgetForecastIds, setDeletedBudgetForecastIds] = useState<string[]>([]);
   const [eventEntryDrafts, setEventEntryDrafts] = useState<EventEntry[]>([]);
+  const [eventSaveError, setEventSaveError] = useState("");
   const fallbackEventEntriesForAddressBook = useRef(eventEntryDrafts);
   const [locationAddressBook, setLocationAddressBook] = useState<LocationAddressBookEntry[]>([]);
   const [otherTasks, setOtherTasks] = useState<OtherTask[]>([]);
@@ -5201,7 +5303,7 @@ export default function Home() {
     platformStatsData.map((platform) => ({ ...platform, profileUrl: configuredPlatformUrls[platform.slug] ?? platform.profileUrl })),
     workspaceGoogleConnection
   );
-  const dashboardPlatformStats = getDashboardPlatformStats(activePlatformStats);
+  const dashboardPlatformStats = getPlatformCardsForPreferences(platformStatsData, dashboardPreferences, true);
   const validDailyFocusProgressTaskKeys = useMemo(
     () =>
       new Set([
@@ -5229,6 +5331,61 @@ export default function Home() {
     deletedBudgetForecastIds
   );
   const workspaceDateKey = getWorkspaceDateKey(workspaceTimeZone);
+  const navigationSections = useMemo(() => {
+    const personalizedModules = dashboardPreferences.topLevelOrder.flatMap((cardId) => {
+      const section = dashboardNavigationSections[cardId];
+      return section ? [section] : [];
+    });
+    return ["Dashboard", ...personalizedModules] as Section[];
+  }, [dashboardPreferences.topLevelOrder]);
+
+  const savePersonalDashboardPreferences = useCallback(async (
+    nextPreferences: Pick<ResolvedDashboardPreferences, "cardOrder" | "visibleCards">
+  ) => {
+    const mutationVersion = ++dashboardPreferenceMutationVersion.current;
+    const previousPreferences = dashboardPreferences;
+    const optimisticPreferences = resolveDashboardPreferences(nextPreferences);
+    setDashboardPreferences(optimisticPreferences);
+    setDashboardPreferenceStatus({ message: "Saving Dashboard preferences...", state: "loading" });
+    try {
+      const result = await saveDashboardPreferences({
+        cardOrder: optimisticPreferences.cardOrder,
+        visibleCards: optimisticPreferences.visibleCards
+      });
+      if (dashboardPreferenceMutationVersion.current !== mutationVersion) return;
+      setDashboardPreferences(result.resolved);
+      setDashboardPreferenceStatus({ message: "Dashboard preferences saved.", state: "success" });
+    } catch (error) {
+      console.warn("Unable to save Dashboard preferences.", error);
+      if (dashboardPreferenceMutationVersion.current !== mutationVersion) return;
+      setDashboardPreferences(previousPreferences);
+      setDashboardPreferenceStatus({
+        message: "Dashboard preferences could not be saved. Your previous layout was restored.",
+        state: "error"
+      });
+    }
+  }, [dashboardPreferences]);
+
+  const resetPersonalDashboardPreferences = useCallback(async () => {
+    const mutationVersion = ++dashboardPreferenceMutationVersion.current;
+    const previousPreferences = dashboardPreferences;
+    setDashboardPreferences(resolveDashboardPreferences());
+    setDashboardPreferenceStatus({ message: "Resetting Dashboard preferences...", state: "loading" });
+    try {
+      const result = await resetDashboardPreferences();
+      if (dashboardPreferenceMutationVersion.current !== mutationVersion) return;
+      setDashboardPreferences(result.resolved);
+      setDashboardPreferenceStatus({ message: "Dashboard default restored.", state: "success" });
+    } catch (error) {
+      console.warn("Unable to reset Dashboard preferences.", error);
+      if (dashboardPreferenceMutationVersion.current !== mutationVersion) return;
+      setDashboardPreferences(previousPreferences);
+      setDashboardPreferenceStatus({
+        message: "Dashboard preferences could not be reset. Your previous layout was restored.",
+        state: "error"
+      });
+    }
+  }, [dashboardPreferences]);
   const resortEventEntries = useCallback(() => {
     setEventEntryDrafts((currentEntries) => sortEventEntriesByDate(currentEntries));
   }, []);
@@ -5318,26 +5475,104 @@ export default function Home() {
     }, 900);
   }
 
-  function queueEventsSnapshotSave(snapshot: EventsSnapshot) {
-    if (eventSaveTimer.current) {
-      window.clearTimeout(eventSaveTimer.current);
-    }
-
-    eventSaveTimer.current = window.setTimeout(() => {
-      eventSaveTimer.current = null;
-      const shouldAllowEmptyEvents =
-        snapshot.entries.length === 0 && pendingFinalEventDeletion.current;
-
-      void saveEventsSnapshotToSupabase({
-        ...snapshot,
-        intent: shouldAllowEmptyEvents ? "clear-events" : undefined
-      }).then((savedSnapshot) => {
-        if (savedSnapshot && shouldAllowEmptyEvents) {
-          pendingFinalEventDeletion.current = false;
+  function queueEventSave(entry: EventEntry) {
+    const mutationVersion = ++eventMutationVersion.current;
+    eventMutationVersions.current.set(entry.id, mutationVersion);
+    const timerKey = `event:${entry.id}`;
+    const existingTimer = eventSaveTimers.current[timerKey];
+    if (existingTimer) window.clearTimeout(existingTimer);
+    eventSaveTimers.current[timerKey] = window.setTimeout(() => {
+      delete eventSaveTimers.current[timerKey];
+      void mutateEventsInSupabase({ operation: "upsert-event", entry }).then((result) => {
+        if (eventMutationVersions.current.get(entry.id) !== mutationVersion) return;
+        if (!result?.event) {
+          setEventSaveError("Event could not be saved. Edit it to retry.");
+          return;
         }
+        eventMutationVersions.current.delete(entry.id);
+        setEventSaveError("");
+        setEventEntryDrafts((current) => current.map((item) => item.id === entry.id ? result.event as EventEntry : item));
       });
     }, 900);
   }
+
+  function queueLocationSave(location: LocationAddressBookEntry) {
+    const mutationVersion = ++eventMutationVersion.current;
+    locationMutationVersions.current.set(location.id, mutationVersion);
+    const timerKey = `location:${location.id}`;
+    const existingTimer = eventSaveTimers.current[timerKey];
+    if (existingTimer) window.clearTimeout(existingTimer);
+    eventSaveTimers.current[timerKey] = window.setTimeout(() => {
+      delete eventSaveTimers.current[timerKey];
+      void mutateEventsInSupabase({ operation: "upsert-location", location }).then((result) => {
+        if (locationMutationVersions.current.get(location.id) !== mutationVersion) return;
+        if (!result?.location) {
+          setEventSaveError("Location could not be saved. Edit it to retry.");
+          return;
+        }
+        locationMutationVersions.current.delete(location.id);
+        setEventSaveError("");
+        setLocationAddressBook((current) => current.map((item) => item.id === location.id ? result.location as LocationAddressBookEntry : item));
+      });
+    }, 900);
+  }
+
+  const reconcileEvents = useCallback(async () => {
+    if (eventsReconcileInFlight.current) return;
+    eventsReconcileInFlight.current = true;
+    const protectedEventIds = new Set([
+      ...eventMutationVersions.current.keys(),
+      ...deletedEventIds.current
+    ]);
+    const protectedLocationIds = new Set([
+      ...locationMutationVersions.current.keys(),
+      ...deletedLocationIds.current
+    ]);
+
+    try {
+      const snapshot = await loadEventsSnapshotFromSupabase();
+      if (!snapshot) return;
+      setEventEntryDrafts((currentEntries) => mergeEventReconciliation(
+        currentEntries,
+        snapshot.entries,
+        protectedEventIds,
+        deletedEventIds.current
+      ));
+      setLocationAddressBook((currentLocations) => mergeEventReconciliation(
+        currentLocations,
+        snapshot.locations,
+        protectedLocationIds,
+        deletedLocationIds.current
+      ));
+    } finally {
+      eventsReconcileInFlight.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    let isCancelled = false;
+    const loadVersion = dashboardPreferenceMutationVersion.current;
+    void loadDashboardPreferences()
+      .then((result) => {
+        if (!isCancelled && dashboardPreferenceMutationVersion.current === loadVersion) {
+          setDashboardPreferences(result.resolved);
+        }
+      })
+      .catch((error) => {
+        console.warn("Unable to load Dashboard preferences; using app defaults.", error);
+        if (!isCancelled && dashboardPreferenceMutationVersion.current === loadVersion) {
+          setDashboardPreferences(resolveDashboardPreferences());
+          setDashboardPreferenceStatus({
+            message: "Dashboard preferences could not be loaded. App defaults are in use.",
+            state: "error"
+          });
+        }
+      });
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeWorkspaceId]);
 
   function queueBudgetSnapshotSave(snapshot: BudgetSnapshot) {
     if (budgetSaveTimer.current) {
@@ -5377,6 +5612,8 @@ export default function Home() {
           return;
         }
 
+        otherTaskMutationVersions.current.delete(task.id);
+
         setOtherTaskSaveErrors((currentErrors) => {
           const { [task.id]: _resolvedError, ...remainingErrors } = currentErrors;
           return remainingErrors;
@@ -5384,6 +5621,38 @@ export default function Home() {
       });
     }, 650);
   }
+
+  const reconcileOtherTasks = useCallback(async () => {
+    if (otherTasksReconcileInFlight.current || !activeWorkspaceId) return;
+    otherTasksReconcileInFlight.current = true;
+    const requestedMutationVersion = otherTaskMutationVersion.current;
+    const requestedWorkspaceId = activeWorkspaceId;
+
+    try {
+      const remoteTasks = await loadOtherTasksFromSupabase();
+      if (!remoteTasks || activeWorkspaceIdRef.current !== requestedWorkspaceId) return;
+      setOtherTasks((currentTasks) => {
+        const localById = new Map(currentTasks.map((task) => [task.id, task]));
+        const remoteIds = new Set(remoteTasks.map((task) => task.id));
+        const merged = remoteTasks.flatMap((remoteTask) => {
+          if (deletedOtherTaskIds.current.has(remoteTask.id)) return [];
+          const mutationVersion = otherTaskLastMutationVersions.current.get(remoteTask.id) ?? 0;
+          const isProtected = otherTaskMutationVersions.current.has(remoteTask.id) || mutationVersion > requestedMutationVersion;
+          return [isProtected ? localById.get(remoteTask.id) ?? remoteTask : remoteTask];
+        });
+        currentTasks.forEach((localTask) => {
+          const mutationVersion = otherTaskLastMutationVersions.current.get(localTask.id) ?? 0;
+          const isProtected = otherTaskMutationVersions.current.has(localTask.id) || mutationVersion > requestedMutationVersion;
+          if (!remoteIds.has(localTask.id) && isProtected && !deletedOtherTaskIds.current.has(localTask.id)) {
+            merged.push(localTask);
+          }
+        });
+        return merged;
+      });
+    } finally {
+      otherTasksReconcileInFlight.current = false;
+    }
+  }, [activeWorkspaceId]);
 
   function queueQrCodeLinksSave(links: QrCodeLink[]) {
     if (qrCodeSaveTimer.current) {
@@ -6109,40 +6378,46 @@ export default function Home() {
   }
 
   function addEventEntry() {
-    const entryId = `event-entry-${Date.now()}`;
-    setEventFocusTarget({ entryId, token: Date.now() });
+    const entryId = createClientMutationId("event-entry");
+    setEventFocusTarget({ entryId, token: ++focusTargetToken.current });
+    const newEntry: EventEntry = {
+      id: entryId,
+      date: formatDateForInput(getTodayUtcDate()),
+      time: "",
+      name: "New event",
+      nameUrl: "",
+      locationName: "Location name",
+      locationUrl: "",
+      address: "",
+      addressUrl: "",
+      posterUrl: "",
+      budgetLines: [
+        {
+          id: `${entryId}-budget-line`,
+          amount: 0,
+          description: ""
+        }
+      ]
+    };
     setEventEntryDrafts((currentEntries) =>
       [
-        {
-          id: entryId,
-          date: formatDateForInput(getTodayUtcDate()),
-          time: "",
-          name: "New event",
-          nameUrl: "",
-          locationName: "Location name",
-          locationUrl: "",
-          address: "",
-          addressUrl: "",
-          posterUrl: "",
-          budgetLines: [
-            {
-              id: `${entryId}-budget-line`,
-              amount: 0,
-              description: ""
-            }
-          ]
-        },
+        newEntry,
         ...currentEntries
       ]
     );
+    queueEventSave(newEntry);
   }
 
-  function updateEventEntry(entryId: string, updates: Partial<EventEntry>) {
-    setEventEntryDrafts((currentEntries) =>
-      currentEntries.map((entry) =>
-        entry.id === entryId ? { ...entry, ...updates } : entry
-      )
-    );
+  function updateEventEntry(
+    entryId: string,
+    updates: Partial<EventEntry>,
+    shouldQueueSave = true
+  ) {
+    const entry = eventEntryDrafts.find((candidate) => candidate.id === entryId);
+    if (!entry) return;
+    const updatedEntry = { ...entry, ...updates };
+    setEventEntryDrafts((currentEntries) => currentEntries.map((item) => item.id === entryId ? updatedEntry : item));
+    if (shouldQueueSave) queueEventSave(updatedEntry);
   }
 
   function saveEventLocation(entryId: string) {
@@ -6170,9 +6445,10 @@ export default function Home() {
       locationId = existingLocation?.id;
     }
 
+    let newLocation: LocationAddressBookEntry | null = null;
     if (!locationId) {
       locationId = `location-${createStableId(`${entry.id}-address-book`)}`;
-      const newLocation: LocationAddressBookEntry = {
+      const locationToCreate: LocationAddressBookEntry = {
         address: entry.address === "Address" ? "" : entry.address,
         addressUrl: entry.addressUrl,
         contactName: "",
@@ -6182,10 +6458,26 @@ export default function Home() {
         locationName: entry.locationName === "Location name" ? "" : entry.locationName,
         locationUrl: entry.locationUrl
       };
-      setLocationAddressBook((currentLocations) => [newLocation, ...currentLocations]);
+      newLocation = locationToCreate;
+      setLocationAddressBook((currentLocations) => [locationToCreate, ...currentLocations]);
     }
 
-    updateEventEntry(entryId, { locationId });
+    updateEventEntry(entryId, { locationId }, !newLocation);
+    if (newLocation) {
+      const eventWithLocation = { ...entry, locationId };
+      const mutationVersion = ++eventMutationVersion.current;
+      locationMutationVersions.current.set(newLocation.id, mutationVersion);
+      void mutateEventsInSupabase({ operation: "upsert-location", location: newLocation }).then((result) => {
+        if (locationMutationVersions.current.get(newLocation!.id) !== mutationVersion) return;
+        if (!result?.location) {
+          setEventSaveError("Location could not be saved. Edit it to retry.");
+          return;
+        }
+        locationMutationVersions.current.delete(newLocation.id);
+        setLocationAddressBook((current) => current.map((item) => item.id === newLocation!.id ? result.location as LocationAddressBookEntry : item));
+        queueEventSave(eventWithLocation);
+      });
+    }
     navigateWithHistory(() => {
       setEventsNavigationContext(null);
       locationFocusToken.current += 1;
@@ -6194,19 +6486,29 @@ export default function Home() {
         token: locationFocusToken.current
       });
     });
+    resortEventEntries();
+    void reconcileEvents();
   }
 
   function deleteEventEntry(entryId: string) {
-    setEventEntryDrafts((currentEntries) => {
-      pendingFinalEventDeletion.current = currentEntries.length === 1;
-      return currentEntries.filter((entry) => entry.id !== entryId);
+    const timerKey = `event:${entryId}`;
+    if (eventSaveTimers.current[timerKey]) window.clearTimeout(eventSaveTimers.current[timerKey]);
+    delete eventSaveTimers.current[timerKey];
+    eventMutationVersions.current.delete(entryId);
+    deletedEventIds.current.add(entryId);
+    setEventEntryDrafts((currentEntries) => currentEntries.filter((entry) => entry.id !== entryId));
+    void mutateEventsInSupabase({ operation: "delete-event", id: entryId }).then((result) => {
+      if (!result?.status) setEventSaveError("Event could not be deleted. Refresh to reconcile the archive.");
+      else {
+        deletedEventIds.current.delete(entryId);
+        setEventSaveError("");
+      }
     });
   }
 
   function addLocationAddressBookEntry() {
-    setLocationAddressBook((currentLocations) => [
-      {
-        id: `location-${Date.now()}`,
+    const newLocation: LocationAddressBookEntry = {
+        id: createClientMutationId("location"),
         locationName: "New location",
         locationUrl: "",
         address: "",
@@ -6214,26 +6516,39 @@ export default function Home() {
         contactName: "",
         contactPhone: "",
         contactNotes: ""
-      },
-      ...currentLocations
-    ]);
+    };
+    setLocationAddressBook((currentLocations) => [newLocation, ...currentLocations]);
+    queueLocationSave(newLocation);
   }
 
   function updateLocationAddressBookEntry(
     locationId: string,
     updates: Partial<LocationAddressBookEntry>
   ) {
-    setLocationAddressBook((currentLocations) =>
-      currentLocations.map((location) =>
-        location.id === locationId ? { ...location, ...updates } : location
-      )
-    );
+    const location = locationAddressBook.find((candidate) => candidate.id === locationId);
+    if (!location) return;
+    const updatedLocation = { ...location, ...updates };
+    setLocationAddressBook((currentLocations) => currentLocations.map((item) => item.id === locationId ? updatedLocation : item));
+    queueLocationSave(updatedLocation);
   }
 
   function deleteLocationAddressBookEntry(locationId: string) {
+    const timerKey = `location:${locationId}`;
+    if (eventSaveTimers.current[timerKey]) window.clearTimeout(eventSaveTimers.current[timerKey]);
+    delete eventSaveTimers.current[timerKey];
+    locationMutationVersions.current.delete(locationId);
+    deletedLocationIds.current.add(locationId);
     setLocationAddressBook((currentLocations) =>
       currentLocations.filter((location) => location.id !== locationId)
     );
+    setEventEntryDrafts((currentEntries) => currentEntries.map((entry) => entry.locationId === locationId ? { ...entry, locationId: undefined } : entry));
+    void mutateEventsInSupabase({ operation: "delete-location", id: locationId }).then((result) => {
+      if (!result?.status) setEventSaveError("Location could not be deleted. Refresh to reconcile the address book.");
+      else {
+        deletedLocationIds.current.delete(locationId);
+        setEventSaveError("");
+      }
+    });
   }
 
   function addOtherTask() {
@@ -6245,7 +6560,7 @@ export default function Home() {
       return existingEmptyTask.id;
     }
 
-    const newTaskId = `other-task-${Date.now()}`;
+    const newTaskId = createClientMutationId("other-task");
     const newTask: OtherTask = {
       dueDate: formatDateForInput(
         parseCampaignDateKey(workspaceDateKey) ?? getTodayUtcDate()
@@ -6261,6 +6576,7 @@ export default function Home() {
     });
     otherTaskMutationVersion.current += 1;
     otherTaskMutationVersions.current.set(newTaskId, otherTaskMutationVersion.current);
+    otherTaskLastMutationVersions.current.set(newTaskId, otherTaskMutationVersion.current);
     queueOtherTaskSave(newTask);
 
     return newTaskId;
@@ -6277,6 +6593,7 @@ export default function Home() {
     );
     otherTaskMutationVersion.current += 1;
     otherTaskMutationVersions.current.set(taskId, otherTaskMutationVersion.current);
+    otherTaskLastMutationVersions.current.set(taskId, otherTaskMutationVersion.current);
     if (toIsoDate(updatedTask.dueDate)) {
       queueOtherTaskSave(updatedTask);
     }
@@ -6296,12 +6613,17 @@ export default function Home() {
   }
 
   function deleteOtherTask(taskId: string) {
+    const taskToDelete = otherTasks.find((task) => task.id === taskId);
     const pendingSaveTimer = otherTaskSaveTimers.current[taskId];
 
     if (pendingSaveTimer) {
       window.clearTimeout(pendingSaveTimer);
       delete otherTaskSaveTimers.current[taskId];
     }
+    otherTaskMutationVersions.current.delete(taskId);
+    otherTaskMutationVersion.current += 1;
+    otherTaskLastMutationVersions.current.set(taskId, otherTaskMutationVersion.current);
+    deletedOtherTaskIds.current.add(taskId);
 
     setOtherTasks((currentTasks) =>
       currentTasks.filter((task) => task.id !== taskId)
@@ -6313,8 +6635,34 @@ export default function Home() {
     setDailyFocusProgress((currentItems) =>
       currentItems.filter((item) => item.taskKey !== `other:${taskId}`)
     );
-    void deleteOtherTaskFromSupabase(taskId);
+    void deleteOtherTaskFromSupabase(taskId).then((deleted) => {
+      if (deleted) {
+        deletedOtherTaskIds.current.delete(taskId);
+        return;
+      }
+      if (taskToDelete) {
+        deletedOtherTaskIds.current.delete(taskId);
+        setOtherTasks((currentTasks) =>
+          currentTasks.some((task) => task.id === taskId)
+            ? currentTasks
+            : [taskToDelete, ...currentTasks]
+        );
+      }
+      setOtherTaskSaveErrors((currentErrors) => ({
+        ...currentErrors,
+        [taskId]: "Other task could not be deleted. Refresh to reconcile."
+      }));
+    });
     void deleteDailyFocusProgress(`other:${taskId}`, workspaceDateKey);
+  }
+
+  function retryOtherTaskSave(taskId: string) {
+    const task = otherTasks.find((candidate) => candidate.id === taskId);
+    if (!task || !toIsoDate(task.dueDate)) return;
+    otherTaskMutationVersion.current += 1;
+    otherTaskMutationVersions.current.set(taskId, otherTaskMutationVersion.current);
+    otherTaskLastMutationVersions.current.set(taskId, otherTaskMutationVersion.current);
+    queueOtherTaskSave(task);
   }
 
   function resetFocusQueueProgress() {
@@ -6447,6 +6795,10 @@ export default function Home() {
     }
 
     navigateWithHistory(() => {
+      if (activeSection === "Events" && section !== "Events") {
+        consumeEventFocusTarget();
+        consumeLocationFocusTarget();
+      }
       if (section === "Marketing") {
         setMarketingNavigationContext(null);
         setMarketingFocusTarget(null);
@@ -6497,7 +6849,7 @@ export default function Home() {
           day.dayNumber,
           target.extraTaskId
         ),
-        token: Date.now()
+        token: ++focusTargetToken.current
       });
       return;
     }
@@ -6517,7 +6869,7 @@ export default function Home() {
         : getProductionTaskElementId(song.id, step.id, target.extraTaskId ?? ""),
       inputId: getProductionTaskInputElementId(song.id, step.id, target),
       songId: song.id,
-      token: Date.now()
+      token: ++focusTargetToken.current
     });
   }
 
@@ -6790,6 +7142,7 @@ export default function Home() {
     const saveTimers = productionSaveTimers.current;
     const campaignBudgetTimers = marketingBudgetSaveTimers.current;
     const focusSaveTimers = otherTaskSaveTimers.current;
+    const eventTimers = eventSaveTimers.current;
 
     return () => {
       Object.values(saveTimers).forEach((timer) => window.clearTimeout(timer));
@@ -6797,9 +7150,7 @@ export default function Home() {
         window.clearTimeout(timer)
       );
       Object.values(focusSaveTimers).forEach((timer) => window.clearTimeout(timer));
-      if (eventSaveTimer.current) {
-        window.clearTimeout(eventSaveTimer.current);
-      }
+      Object.values(eventSaveTimers).forEach((timer) => window.clearTimeout(timer));
       if (budgetSaveTimer.current) {
         window.clearTimeout(budgetSaveTimer.current);
       }
@@ -7338,6 +7689,25 @@ export default function Home() {
   }, [activeWorkspaceId, hasLoadedOtherTasks, otherTasks]);
 
   useEffect(() => {
+    if (!hasLoadedOtherTasks || activeSection !== "Dashboard") return;
+    if (!hasVisitedFocusDashboard.current) {
+      hasVisitedFocusDashboard.current = true;
+      return;
+    }
+    void reconcileOtherTasks();
+  }, [activeSection, hasLoadedOtherTasks, reconcileOtherTasks]);
+
+  useEffect(() => {
+    function reconcileOtherTasksOnFocus() {
+      if (activeSection === "Dashboard" && hasLoadedOtherTasks) {
+        void reconcileOtherTasks();
+      }
+    }
+    window.addEventListener("focus", reconcileOtherTasksOnFocus);
+    return () => window.removeEventListener("focus", reconcileOtherTasksOnFocus);
+  }, [activeSection, hasLoadedOtherTasks, reconcileOtherTasks]);
+
+  useEffect(() => {
     if (
       !hasLoadedEventDrafts ||
       !hasLoadedLocationAddressBook ||
@@ -7379,25 +7749,19 @@ export default function Home() {
   ]);
 
   useEffect(() => {
-    if (
-      !hasLoadedEventDrafts ||
-      !hasLoadedLocationAddressBook ||
-      !hasLoadedEventSupabaseSnapshot
-    ) {
-      return;
-    }
+    if (activeSection !== "Events" || !hasLoadedEventSupabaseSnapshot) return;
+    void reconcileEvents();
+  }, [activeSection, hasLoadedEventSupabaseSnapshot, reconcileEvents]);
 
-    queueEventsSnapshotSave({
-      entries: eventEntryDrafts,
-      locations: locationAddressBook
-    });
-  }, [
-    eventEntryDrafts,
-    hasLoadedEventDrafts,
-    hasLoadedEventSupabaseSnapshot,
-    hasLoadedLocationAddressBook,
-    locationAddressBook
-  ]);
+  useEffect(() => {
+    function reconcileOnFocus() {
+      if (activeSection === "Events" && hasLoadedEventSupabaseSnapshot) {
+        void reconcileEvents();
+      }
+    }
+    window.addEventListener("focus", reconcileOnFocus);
+    return () => window.removeEventListener("focus", reconcileOnFocus);
+  }, [activeSection, hasLoadedEventSupabaseSnapshot, reconcileEvents]);
 
   useEffect(() => {
     async function loadMarketingCampaigns() {
@@ -7805,7 +8169,7 @@ export default function Home() {
         </div>
 
         <nav className="nav-list">
-          {sections.map((section) => (
+          {navigationSections.map((section) => (
             <button
               aria-current={activeSection === section ? "page" : undefined}
               className={`nav-module-${section.toLowerCase().replaceAll(" ", "-")}`}
@@ -7833,7 +8197,11 @@ export default function Home() {
         {settingsView === "user" ? (
           <UserSettingsView
             activeSection={activeSection}
+            dashboardPreferences={dashboardPreferences}
+            dashboardPreferenceStatus={dashboardPreferenceStatus}
             onBack={() => setSettingsView(null)}
+            onDashboardPreferencesSave={savePersonalDashboardPreferences}
+            onDashboardPreferencesReset={resetPersonalDashboardPreferences}
           />
         ) : null}
         {settingsView === "about" ? (
@@ -7915,7 +8283,8 @@ export default function Home() {
             onQrCodeChange={updateQrCodeLink}
             onRefreshPlatformStats={refreshPlatformStats}
             platformMetricRows={platformMetricRows}
-            platformStatsData={activePlatformStats}
+            platformStatsData={platformStatsData}
+            platformChildOrder={dashboardPreferences.childOrderByParent.platforms ?? []}
             qrCodeLinks={qrCodeLinks}
             refreshStatus={refreshStatus}
             workspaceTimeZone={workspaceTimeZone}
@@ -7954,8 +8323,11 @@ export default function Home() {
         {!settingsView && activeSection === "Events" ? (
           <EventsView
             entries={eventEntryDrafts}
+            saveError={eventSaveError}
             focusTarget={eventFocusTarget}
             locationFocusTarget={locationFocusTarget}
+            onEventFocusTargetConsumed={consumeEventFocusTarget}
+            onLocationFocusTargetConsumed={consumeLocationFocusTarget}
             restoreContext={eventsRestoreContext}
             isLoaded={hasLoadedEventSupabaseSnapshot}
             locations={locationAddressBook}
@@ -7966,6 +8338,7 @@ export default function Home() {
             onEntryChange={updateEventEntry}
             onLocationChange={updateLocationAddressBookEntry}
             onNavigationContextChange={setEventsNavigationContext}
+            onReconcile={reconcileEvents}
             onResortEntries={resortEventEntries}
             onSaveEventLocation={saveEventLocation}
           />
@@ -7981,6 +8354,7 @@ export default function Home() {
             budgetEntries={budgetEntriesWithForecast}
             campaigns={campaigns}
             dailyFocusProgress={validDailyFocusProgress}
+            dashboardPreferences={dashboardPreferences}
             dashboardPlatformStats={dashboardPlatformStats}
             eventEntries={eventEntryDrafts}
             eventsLoaded={hasLoadedEventSupabaseSnapshot}
@@ -7992,6 +8366,7 @@ export default function Home() {
             onDismissAppleMusicReminder={dismissAppleMusicReminderForToday}
             onOpenAppleMusicImport={openAppleMusicImport}
             onOtherTaskChange={updateOtherTask}
+            onRetryOtherTask={retryOtherTaskSave}
             onOpenFocusTaskSource={openFocusQueueSourceTask}
             focusQueueNavigationState={focusQueueNavigationState}
             onFocusQueueNavigationStateChange={setFocusQueueNavigationState}
@@ -8223,14 +8598,27 @@ function GeneralSettingsView({
     state: "loading"
   });
   const [topicChannel, setTopicChannel] = useState("");
+  const [topicStatus, setTopicStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
   const [workspaceNameDraft, setWorkspaceNameDraft] = useState(workspaceName);
+  const [workspaceNameStatus, setWorkspaceNameStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
   const [workspaceTimeZoneDraft, setWorkspaceTimeZoneDraft] = useState(workspaceTimeZone);
   const [workspaceTimeZoneStatus, setWorkspaceTimeZoneStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
   const [productionDefaultCostsDraft, setProductionDefaultCostsDraft] = useState(productionDefaultCosts);
   const [productionDefaultCostsStatus, setProductionDefaultCostsStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
   const [topicCandidate, setTopicCandidate] = useState<{ channelId: string; channelTitle: string; caution: boolean; sameAsMain: boolean } | null>(null);
   const [platformUrls, setPlatformUrls] = useState<Record<string, string>>({});
-  const [platformStatus, setPlatformStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
+  const [platformStatuses, setPlatformStatuses] = useState<Record<string, RefreshStatus>>({});
+  const [editingPlatformSlug, setEditingPlatformSlug] = useState<string | null>(null);
+  const [isWorkspaceNameEditing, setIsWorkspaceNameEditing] = useState(false);
+  const [isWorkspaceTimeZoneEditing, setIsWorkspaceTimeZoneEditing] = useState(false);
+  const [isProductionDefaultsOpen, setIsProductionDefaultsOpen] = useState(false);
+  const [isLogoOpen, setIsLogoOpen] = useState(false);
+  const [areCurrentMembersOpen, setAreCurrentMembersOpen] = useState(false);
+  const [isInviteUserOpen, setIsInviteUserOpen] = useState(false);
+  const [areInvitationsOpen, setAreInvitationsOpen] = useState(false);
+  const [areGoogleServicesOpen, setAreGoogleServicesOpen] = useState(false);
+  const [arePlatformLinksOpen, setArePlatformLinksOpen] = useState(false);
+  const [isTopicOnboardingOpen, setIsTopicOnboardingOpen] = useState(false);
   const [analyticsProperties, setAnalyticsProperties] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedAnalyticsProperty, setSelectedAnalyticsProperty] = useState("");
   const [armedSettingsAction, setArmedSettingsAction] = useState<string | null>(null);
@@ -8245,6 +8633,18 @@ function GeneralSettingsView({
   }, []);
 
   useEffect(() => {
+    if (!isWorkspaceNameEditing) return;
+    const cancel = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest("[data-workspace-name-editor]")) return;
+      setWorkspaceNameDraft(workspaceName);
+      setWorkspaceNameStatus({ message: "", state: "idle" });
+      setIsWorkspaceNameEditing(false);
+    };
+    document.addEventListener("pointerdown", cancel);
+    return () => document.removeEventListener("pointerdown", cancel);
+  }, [isWorkspaceNameEditing, workspaceName]);
+
+  useEffect(() => {
     let cancelled = false;
     void fetch("/api/workspace/platforms", { cache: "no-store" }).then((response) => response.json()).then((payload: { accounts?: Array<{ slug: string; url: string | null }> }) => {
       if (!cancelled) setPlatformUrls(Object.fromEntries((payload.accounts ?? []).map((account) => [account.slug, account.url ?? ""])));
@@ -8253,13 +8653,14 @@ function GeneralSettingsView({
   }, [workspaceId]);
 
   async function savePlatformUrl(slug: string) {
-    setPlatformStatus({ message: "Saving platform URL...", state: "loading" });
+    setPlatformStatuses((current) => ({ ...current, [slug]: { message: "Saving platform URL...", state: "loading" } }));
     try {
       const response = await fetch("/api/workspace/platforms", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slug, url: platformUrls[slug] ?? "" }) });
       const payload = await response.json() as { error?: string };
       if (!response.ok) throw new Error(payload.error || "Platform URL save failed.");
-      setPlatformStatus({ message: "Platform URL saved. QR defaults are created only when missing.", state: "success" });
-    } catch (error) { setPlatformStatus({ message: error instanceof Error ? error.message : "Platform URL save failed.", state: "error" }); }
+      setEditingPlatformSlug(null);
+      setPlatformStatuses((current) => ({ ...current, [slug]: { message: "Platform URL saved. QR defaults are created only when missing.", state: "success" } }));
+    } catch (error) { setPlatformStatuses((current) => ({ ...current, [slug]: { message: error instanceof Error ? error.message : "Platform URL save failed.", state: "error" } })); }
   }
 
   async function selectAnalyticsProperty() {
@@ -8291,8 +8692,8 @@ function GeneralSettingsView({
   }, [armedSettingsAction]);
 
   async function saveWorkspaceName() {
-    setGoogleStatus({ message: "Saving workspace name...", state: "loading" });
-    try { const response = await fetch("/api/workspace/name", { body: JSON.stringify({ name: workspaceNameDraft }), headers: { "Content-Type": "application/json" }, method: "PATCH" }); const payload = (await response.json()) as { name?: string; error?: string }; if (!response.ok) throw new Error(payload.error || "Workspace rename failed."); if (!isCurrentWorkspace.current) return; onWorkspaceNameChange(payload.name!); setWorkspaceNameDraft(payload.name!); setGoogleStatus({ message: "Workspace name saved.", state: "success" }); } catch (error) { if (!isCurrentWorkspace.current) return; setGoogleStatus({ message: error instanceof Error ? error.message : "Workspace rename failed.", state: "error" }); }
+    setWorkspaceNameStatus({ message: "Saving workspace name...", state: "loading" });
+    try { const response = await fetch("/api/workspace/name", { body: JSON.stringify({ name: workspaceNameDraft }), headers: { "Content-Type": "application/json" }, method: "PATCH" }); const payload = (await response.json()) as { name?: string; error?: string }; if (!response.ok) throw new Error(payload.error || "Workspace rename failed."); if (!isCurrentWorkspace.current) return; onWorkspaceNameChange(payload.name!); setWorkspaceNameDraft(payload.name!); setWorkspaceNameStatus({ message: "Workspace name saved.", state: "success" }); setIsWorkspaceNameEditing(false); } catch (error) { if (!isCurrentWorkspace.current) return; setWorkspaceNameStatus({ message: error instanceof Error ? error.message : "Workspace rename failed.", state: "error" }); }
   }
 
   async function saveWorkspaceTimeZone(timezone = workspaceTimeZoneDraft) {
@@ -8309,6 +8710,7 @@ function GeneralSettingsView({
       setWorkspaceTimeZoneDraft(payload.timezone);
       onWorkspaceTimeZoneChange(payload.timezone);
       setWorkspaceTimeZoneStatus({ message: "Workspace timezone saved.", state: "success" });
+      setIsWorkspaceTimeZoneEditing(false);
     } catch (error) {
       if (!isCurrentWorkspace.current) return;
       setWorkspaceTimeZoneStatus({ message: error instanceof Error ? error.message : "Workspace timezone update failed.", state: "error" });
@@ -8328,23 +8730,26 @@ function GeneralSettingsView({
       onProductionDefaultCostsChange(payload.costs);
       setProductionDefaultCostsDraft(payload.costs);
       setProductionDefaultCostsStatus({ message: "Production defaults saved.", state: "success" });
+      setIsProductionDefaultsOpen(false);
     } catch (error) {
       setProductionDefaultCostsStatus({ message: error instanceof Error ? error.message : "Production defaults update failed.", state: "error" });
     }
   }
 
   async function checkTopicChannel() {
-    setGoogleStatus({ message: "Validating Topic channel...", state: "loading" });
+    setTopicStatus({ message: "Validating Topic channel...", state: "loading" });
     try {
       const response = await fetch("/api/integrations/youtube-topic", { body: JSON.stringify({ action: "check", topicChannel }), headers: { "Content-Type": "application/json" }, method: "POST" });
       const payload = (await response.json()) as { channelId?: string; channelTitle?: string; caution?: boolean; sameAsMain?: boolean; error?: string };
       if (!response.ok) throw new Error(payload.error || "Topic configuration failed.");
       setTopicCandidate({ channelId: payload.channelId!, channelTitle: payload.channelTitle!, caution: Boolean(payload.caution), sameAsMain: Boolean(payload.sameAsMain) });
-      setGoogleStatus({ message: "", state: "idle" });
-    } catch (error) { setGoogleStatus({ message: error instanceof Error ? error.message : "Topic configuration failed.", state: "error" }); }
+      setTopicStatus({ message: "", state: "idle" });
+    } catch (error) { setTopicStatus({ message: error instanceof Error ? error.message : "Topic configuration failed.", state: "error" }); }
   }
 
-  async function confirmTopicChannel() { if (!topicCandidate) return; setGoogleStatus({ message: "Saving Topic channel...", state: "loading" }); try { const response=await fetch("/api/integrations/youtube-topic",{body:JSON.stringify({action:"confirm",candidate:topicCandidate}),headers:{"Content-Type":"application/json"},method:"POST"}); const payload=await response.json() as {error?:string}; if(!response.ok) throw new Error(payload.error||"Topic configuration failed."); setGoogleConnection((current)=>current?{...current,youtubeTopic:{channelId:topicCandidate.channelId,channelTitle:topicCandidate.channelTitle,enabled:true}}:current); setTopicCandidate(null); window.dispatchEvent(new Event("workspace-google-connection-changed")); setGoogleStatus({message:"YouTube Topic configured.",state:"success"}); } catch(error){setGoogleStatus({message:error instanceof Error?error.message:"Topic configuration failed.",state:"error"});} }
+  async function confirmTopicChannel() { if (!topicCandidate) return; setTopicStatus({ message: "Saving Topic channel...", state: "loading" }); try { const response=await fetch("/api/integrations/youtube-topic",{body:JSON.stringify({action:"confirm",candidate:topicCandidate}),headers:{"Content-Type":"application/json"},method:"POST"}); const payload=await response.json() as {error?:string}; if(!response.ok) throw new Error(payload.error||"Topic configuration failed."); setGoogleConnection((current)=>current?{...current,youtubeTopic:{channelId:topicCandidate.channelId,channelTitle:topicCandidate.channelTitle,enabled:true}}:current); setTopicCandidate(null); setTopicChannel(""); setIsTopicOnboardingOpen(false); window.dispatchEvent(new Event("workspace-google-connection-changed")); setTopicStatus({message:"YouTube Topic configured.",state:"success"}); } catch(error){setTopicStatus({message:error instanceof Error?error.message:"Topic configuration failed.",state:"error"});} }
+
+  async function disconnectTopicChannel() { setTopicStatus({ message: "Disconnecting Topic channel...", state: "loading" }); try { const response = await fetch("/api/integrations/youtube-topic", { body: JSON.stringify({ action: "disconnect" }), headers: { "Content-Type": "application/json" }, method: "POST" }); const payload = await response.json() as { error?: string }; if (!response.ok) throw new Error(payload.error || "Topic disconnect failed."); setGoogleConnection((current) => current ? { ...current, youtubeTopic: { channelId: null, channelTitle: null, enabled: false } } : current); setTopicCandidate(null); setTopicChannel(""); setIsTopicOnboardingOpen(false); setTopicStatus({ message: "", state: "idle" }); window.dispatchEvent(new Event("workspace-google-connection-changed")); } catch (error) { setTopicStatus({ message: error instanceof Error ? error.message : "Topic disconnect failed.", state: "error" }); } }
 
   useEffect(() => {
     const parameters = new URLSearchParams(window.location.search);
@@ -8740,24 +9145,18 @@ function GeneralSettingsView({
     <section className="user-settings-canvas" aria-labelledby="general-settings-title">
       <header className="user-settings-header">
         <div>
-          <p className="eyebrow">Shared workspace</p>
-          <h1 id="general-settings-title">General Settings</h1>
+          <p className="eyebrow" id="general-settings-title">General Settings</p>
         </div>
       </header>
 
-      <div className="user-settings-content">
+      <div className="user-settings-content general-settings-content">
         <section className="settings-parent-card settings-parent-members">
           <div className="settings-parent-heading">
-            <p className="eyebrow">Workspace access</p>
-            <h2>Member management</h2>
+            <p className="eyebrow">Member access</p>
           </div>
-        <article className="general-settings-card general-settings-invitations">
-          <div className="general-settings-heading">
-            <div>
-              <p className="eyebrow">Workspace access</p>
-              <h2>Invite user</h2>
-            </div>
-          </div>
+        <article className="general-settings-card general-settings-invitations settings-member-invite">
+          <SettingsDisclosure isOpen={isInviteUserOpen} onToggle={() => setIsInviteUserOpen((current) => !current)} summary="Invite a workspace member" title="Invite user" />
+          {isInviteUserOpen ? <>
 
           <form className="workspace-invitation-form" onSubmit={sendInvitation}>
             <label>
@@ -8803,15 +9202,17 @@ function GeneralSettingsView({
               {invitationStatus.message}
             </p>
           ) : null}
+          </> : null}
         </article>
 
         <article className="general-settings-card">
-          <div className="general-settings-heading">
-            <div>
-              <p className="eyebrow">Workspace access</p>
-              <h2>Invitations</h2>
-            </div>
-          </div>
+          <SettingsDisclosure
+            isOpen={areInvitationsOpen}
+            onToggle={() => setAreInvitationsOpen((current) => !current)}
+            summary={`${workspaceInvitations.filter((invitation) => invitation.status === "pending").length} pending · ${workspaceInvitations.filter((invitation) => invitation.status === "accepted").length} accepted`}
+            title="Invitations"
+          />
+          {areInvitationsOpen ? <>
           <div className="workspace-invitation-list">
             {workspaceInvitations.map((invitation) => {
               const isPending = invitation.status === "pending";
@@ -8898,18 +9299,15 @@ function GeneralSettingsView({
               {invitationLifecycleStatus.message}
             </p>
           ) : null}
+          </> : null}
         </article>
 
-        <article className="general-settings-card">
+        <article className="general-settings-card settings-current-members">
           <div className="general-settings-heading">
-            <div>
-              <p className="eyebrow">Workspace access</p>
-              <h2>Current members</h2>
-            </div>
+            <SettingsDisclosure isOpen={areCurrentMembersOpen} onToggle={() => setAreCurrentMembersOpen((current) => !current)} summary={`${workspaceMembers.length} members`} title="Current members" />
           </div>
-          <p className="settings-description">
-            Role changes and removals apply only to this workspace. Your own Admin role is protected here.
-          </p>
+          {areCurrentMembersOpen ? <>
+          <p className="settings-description">Role changes apply only to this workspace. Your Admin role is protected.</p>
           <div className="workspace-member-list">
             {workspaceMembers.map((member) => {
               const isCurrentUser = member.userId === currentMemberId;
@@ -8988,36 +9386,37 @@ function GeneralSettingsView({
               {membershipStatus.message}
             </p>
           ) : null}
+          </> : null}
         </article>
 
         </section>
 
         <section className="settings-parent-card settings-parent-identity">
           <div className="settings-parent-heading">
-            <p className="eyebrow">Workspace identity</p>
-            <h2>Artist app identity</h2>
+            <p className="eyebrow">Workspace setup</p>
           </div>
         <article className="general-settings-card">
-          <div className="general-settings-heading"><div><p className="eyebrow">Workspace identity</p><h2>Workspace name</h2></div></div>
-          <div className="google-topic-config"><input aria-label="Workspace name" onChange={(event) => setWorkspaceNameDraft(event.target.value)} value={workspaceNameDraft} /><button disabled={googleStatus.state === "loading"} onClick={() => void saveWorkspaceName()} type="button">Save</button></div>
+          <div className="settings-disclosure">
+            <div><h2>Artist / Band name</h2><p title={workspaceNameDraft}>{workspaceNameDraft}</p></div>
+            <button aria-label={isWorkspaceNameEditing ? "Save workspace name" : "Edit workspace name"} className="settings-icon-button" disabled={workspaceNameStatus.state === "loading"} onClick={() => isWorkspaceNameEditing ? void saveWorkspaceName() : setIsWorkspaceNameEditing(true)} type="button">{isWorkspaceNameEditing ? <Save aria-hidden size={16} /> : <Pencil aria-hidden size={16} />}</button>
+          </div>
+          {isWorkspaceNameEditing ? <div className="google-topic-config" data-workspace-name-editor><input aria-label="Artist / Band name" className="workspace-name-input" onChange={(event) => setWorkspaceNameDraft(event.target.value)} value={workspaceNameDraft} /></div> : null}
+          {workspaceNameStatus.message ? <p className={workspaceNameStatus.state === "error" ? "settings-error" : "settings-status"} role={workspaceNameStatus.state === "error" ? "alert" : "status"}>{workspaceNameStatus.message}</p> : null}
         </article>
         <article className="general-settings-card">
-          <div className="general-settings-heading"><div><p className="eyebrow">Workspace calendar</p><h2>Workspace time zone</h2></div></div>
-          <p className="settings-description">All members use this timezone for workspace-day calculations such as Focus Queue today.</p>
-          <div className="workspace-timezone-row"><TimeZoneSelector isSaving={workspaceTimeZoneStatus.state === "loading"} onSelect={(timezone) => void saveWorkspaceTimeZone(timezone)} value={workspaceTimeZoneDraft} /></div>
+          <SettingsDisclosure
+            actionLabel="Edit workspace time zone"
+            isOpen={isWorkspaceTimeZoneEditing}
+            onToggle={() => setIsWorkspaceTimeZoneEditing((current) => !current)}
+            summary={workspaceTimeZoneDraft}
+            title="Time zone"
+          />
+          {isWorkspaceTimeZoneEditing ? <><p className="settings-description">All members use this timezone for workspace-day calculations such as Focus Queue today.</p><div className="workspace-timezone-row"><TimeZoneSelector isSaving={workspaceTimeZoneStatus.state === "loading"} onSelect={(timezone) => void saveWorkspaceTimeZone(timezone)} value={workspaceTimeZoneDraft} /></div></> : null}
           {workspaceTimeZoneStatus.message ? <p className={workspaceTimeZoneStatus.state === "error" ? "settings-error" : "settings-status"} role={workspaceTimeZoneStatus.state === "error" ? "alert" : "status"}>{workspaceTimeZoneStatus.message}</p> : null}
         </article>
         <article className="general-settings-card">
-          <div className="general-settings-heading"><div><p className="eyebrow">Production</p><h2>Default step costs</h2></div></div>
-          <p className="settings-description">Applied only when creating future Production songs.</p>
-          <div className="google-topic-config">
-            <label>License<input aria-label="Default License cost" min="0" onChange={(event) => setProductionDefaultCostsDraft((current) => ({ ...current, license: -Math.abs(Number(event.target.value) || 0) }))} type="number" value={Math.abs(productionDefaultCostsDraft.license)} /></label>
-            <label>Distributor<input aria-label="Default Distributor cost" min="0" onChange={(event) => setProductionDefaultCostsDraft((current) => ({ ...current, distributor: -Math.abs(Number(event.target.value) || 0) }))} type="number" value={Math.abs(productionDefaultCostsDraft.distributor)} /></label>
-            <button disabled={productionDefaultCostsStatus.state === "loading"} onClick={() => void saveProductionDefaultCosts()} type="button">{productionDefaultCostsStatus.state === "loading" ? "Saving..." : "Save"}</button>
-          </div>
-          {productionDefaultCostsStatus.message ? <p className={productionDefaultCostsStatus.state === "error" ? "settings-error" : "settings-status"} role={productionDefaultCostsStatus.state === "error" ? "alert" : "status"}>{productionDefaultCostsStatus.message}</p> : null}
-        </article>
-        <article className="general-settings-card">
+          <SettingsDisclosure isOpen={isLogoOpen} onToggle={() => setIsLogoOpen((current) => !current)} summary={logoUrl ? "Current logo configured" : "No logo configured"} title="App logo" />
+          {isLogoOpen ? <>
           <div className="general-settings-heading">
             {logoUrl ? (
               <Image alt="Current app logo" className="general-settings-logo" height={72} src={logoUrl} unoptimized width={72} />
@@ -9045,22 +9444,33 @@ function GeneralSettingsView({
             </button>
             {logoStatus.message ? <p className={logoStatus.state === "error" ? "settings-error" : "settings-status"} role={logoStatus.state === "error" ? "alert" : "status"}>{logoStatus.message}</p> : null}
           </div>
+          </> : null}
         </article>
 
         </section>
 
+        <section className="settings-parent-card settings-parent-production">
+          <div className="settings-parent-heading"><p className="eyebrow">Production module</p></div>
+          <article className="general-settings-card">
+            <SettingsDisclosure isOpen={isProductionDefaultsOpen} onToggle={() => setIsProductionDefaultsOpen((current) => !current)} summary={`License: ${formatCurrency(productionDefaultCostsDraft.license)} · Distributor: ${formatCurrency(productionDefaultCostsDraft.distributor)}`} title="Default step costs" />
+            {isProductionDefaultsOpen ? <><p className="settings-description">Applied only when creating future Production songs.</p><div className="google-topic-config"><label>License<input aria-label="Default License cost" min="0" onChange={(event) => setProductionDefaultCostsDraft((current) => ({ ...current, license: -Math.abs(Number(event.target.value) || 0) }))} type="number" value={Math.abs(productionDefaultCostsDraft.license)} /></label><label>Distributor<input aria-label="Default Distributor cost" min="0" onChange={(event) => setProductionDefaultCostsDraft((current) => ({ ...current, distributor: -Math.abs(Number(event.target.value) || 0) }))} type="number" value={Math.abs(productionDefaultCostsDraft.distributor)} /></label><button disabled={productionDefaultCostsStatus.state === "loading"} onClick={() => void saveProductionDefaultCosts()} type="button">{productionDefaultCostsStatus.state === "loading" ? "Saving..." : "Save"}</button></div></> : null}
+            {productionDefaultCostsStatus.message ? <p className={productionDefaultCostsStatus.state === "error" ? "settings-error" : "settings-status"} role={productionDefaultCostsStatus.state === "error" ? "alert" : "status"}>{productionDefaultCostsStatus.message}</p> : null}
+          </article>
+        </section>
+
         <section className="settings-parent-card settings-parent-connections">
           <div className="settings-parent-heading">
-            <p className="eyebrow">Integrations</p>
-            <h2>Connections</h2>
+            <p className="eyebrow">App Integrations</p>
           </div>
         <article className="general-settings-card google-services-card settings-provider-card">
-          <div className="general-settings-heading">
-            <div>
-              <p className="eyebrow">External services</p>
-              <h2>Google services</h2>
-            </div>
-          </div>
+          <SettingsDisclosure
+            isOpen={areGoogleServicesOpen}
+            onToggle={() => setAreGoogleServicesOpen((current) => !current)}
+            summary={`Google ${googleConnection?.accountEmail ? "connected" : "not connected"} · YouTube ${googleConnection?.youtube.enabled ? "configured" : "not configured"} · Analytics ${googleConnection?.analytics.enabled ? "configured" : "not configured"}`}
+            title="Google services"
+          />
+
+          {areGoogleServicesOpen ? <>
 
           <div className="google-account-summary">
             <span>Google account</span>
@@ -9111,16 +9521,20 @@ function GeneralSettingsView({
               )}
             </div>
             <section className="google-topic-section">
-              <div className="google-topic-heading"><strong>YouTube Topic</strong><span>Optional</span></div>
-              {googleConnection?.youtubeTopic.enabled ? <p className="google-topic-current">Configured: {googleConnection.youtubeTopic.channelTitle || googleConnection.youtubeTopic.channelId}</p> : null}
-              <p className="google-topic-helper">Add a separate “Artist Name - Topic” channel if YouTube created one for your distributed music.</p>
-              <p className="google-topic-helper">If your main channel is already an Official Artist Channel, you may not need a separate Topic connection.</p>
+              <div className="google-service-row">
+                <div><strong>YouTube Topic</strong><span>{googleConnection?.youtubeTopic.enabled ? googleConnection.youtubeTopic.channelTitle || googleConnection.youtubeTopic.channelId : "Not connected"}</span></div>
+                {googleConnection?.youtubeTopic.enabled ? <button className="settings-destructive-button" disabled={topicStatus.state === "loading"} onClick={() => void disconnectTopicChannel()} type="button">Disconnect</button> : <button disabled={topicStatus.state === "loading"} onClick={() => setIsTopicOnboardingOpen((current) => !current)} type="button">{isTopicOnboardingOpen ? "Close" : "Connect"}</button>}
+              </div>
+              {!googleConnection?.youtubeTopic.enabled && isTopicOnboardingOpen ? <>
+              <p className="google-topic-helper">Add a separate “Artist Name - Topic” channel only if YouTube created one for your distributed music; Official Artist Channels may not need it.</p>
               <div className="google-topic-config">
-                <input onChange={(event) => { setTopicChannel(event.target.value); setTopicCandidate(null); }} placeholder="Topic channel URL or ID" value={topicChannel} />
-                <button disabled={googleStatus.state === "loading" || !topicChannel.trim()} onClick={() => void checkTopicChannel()} type="button">Check Topic</button>
+                <input aria-label="Topic channel URL or ID" onChange={(event) => { setTopicChannel(event.target.value); setTopicCandidate(null); setTopicStatus({ message: "", state: "idle" }); }} placeholder="Topic channel URL or ID" value={topicChannel} />
+                <button disabled={topicStatus.state === "loading" || !topicChannel.trim()} onClick={() => void checkTopicChannel()} type="button">{topicStatus.state === "loading" ? "Checking..." : "Check Topic"}</button>
               </div>
               {topicCandidate ? topicCandidate.sameAsMain ? <p className="google-topic-callout">This is the same channel as your connected YouTube channel. Your artist presence may already be consolidated, so a separate Topic connection is probably not needed.</p> : <div className="google-topic-result"><span>Found channel</span><strong>{topicCandidate.channelTitle}</strong><code>{topicCandidate.channelId}</code>{topicCandidate.caution ? <p className="google-topic-callout google-topic-caution">This channel name does not appear to match your workspace or connected YouTube channel. Please confirm that you selected the correct artist Topic channel.</p> : null}<div className="google-topic-actions"><button onClick={() => void confirmTopicChannel()} type="button">Use this Topic</button><button onClick={() => setTopicCandidate(null)} type="button">Cancel</button></div></div> : null}
-              <p className="google-topic-help">Not sure? Search YouTube for “Your Artist Name - Topic”. If there is no separate channel, leave this unconfigured. Ask your distributor or label about Official Artist Channel eligibility.</p>
+              {topicStatus.message ? <p className={topicStatus.state === "error" ? "settings-error" : "settings-status"} role={topicStatus.state === "error" ? "alert" : "status"}>{topicStatus.message}</p> : null}
+              <p className="google-topic-help">Search YouTube for “Your Artist Name - Topic”; leave this unconfigured if there is no separate channel.</p>
+              </> : null}
             </section>
 
             <div className="google-service-row google-service-placeholder">
@@ -9173,7 +9587,6 @@ function GeneralSettingsView({
                 </button>
               )}
             </div>
-            {googleConnection?.analytics.enabled ? <p className="google-analytics-current">Selected property: {googleConnection.analytics.propertyName || `Property ${googleConnection.analytics.propertyId}`}</p> : null}
             {!googleConnection?.analytics.enabled && googleConnection?.accountEmail && analyticsProperties.length > 1 ? <div className="google-analytics-property-selector"><span>Choose the Google Analytics property LS Dashboard should track.</span><div className="google-topic-config"><select aria-label="Analytics property" onChange={(event) => setSelectedAnalyticsProperty(event.target.value)} value={selectedAnalyticsProperty}><option value="">Choose Analytics property</option>{analyticsProperties.map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}</select><button disabled={!selectedAnalyticsProperty || googleStatus.state === "loading"} onClick={() => void selectAnalyticsProperty()} type="button">Use property</button></div></div> : null}
 
             <div className="google-service-row google-service-placeholder">
@@ -9192,6 +9605,7 @@ function GeneralSettingsView({
               {googleStatus.message}
             </p>
           ) : null}
+          </> : null}
         </article>
 
         <article className="general-settings-card settings-provider-card settings-provider-placeholder">
@@ -9211,17 +9625,68 @@ function GeneralSettingsView({
           <p>Connection onboarding is in development.</p>
         </article>
         <article className="general-settings-card settings-provider-card">
-          <div className="general-settings-heading"><div><p className="eyebrow">Workspace configuration</p><h2>Platform links</h2></div></div>
-          <p>These public URLs power platform cards and create a QR card only the first time a matching destination is available. QR cards remain independently editable afterwards.</p>
+          <SettingsDisclosure
+            isOpen={arePlatformLinksOpen}
+            onToggle={() => setArePlatformLinksOpen((current) => !current)}
+            summary={`${Object.values(platformUrls).filter(Boolean).length} configured`}
+            title="Platform links"
+          />
+          {arePlatformLinksOpen ? <>
           <div className="general-settings-stack">
-            {[['spotify', 'Spotify'], ['apple-music', 'Apple Music'], ['instagram', 'Instagram'], ['amazon-music', 'Amazon Music'], ['deezer', 'Deezer'], ['google-analytics', 'Website']].map(([slug, label]) => <div className="general-settings-row" key={slug}><label>{label}<input aria-label={`${label} public URL`} onChange={(event) => setPlatformUrls((current) => ({ ...current, [slug]: event.target.value }))} placeholder="https://" value={platformUrls[slug] ?? ""} /></label><button disabled={platformStatus.state === "loading"} onClick={() => void savePlatformUrl(slug)} type="button">Save</button></div>)}
+            {[['spotify', 'Spotify'], ['apple-music', 'Apple Music'], ['instagram', 'Instagram'], ['amazon-music', 'Amazon Music'], ['deezer', 'Deezer'], ['google-analytics', 'Website']].map(([slug, label]) => {
+              const isEditing = editingPlatformSlug === slug;
+              const status = platformStatuses[slug];
+              return <div className="settings-link-row" key={slug}>
+                <div className="settings-link-summary">
+                  <div><strong>{label}</strong><span title={platformUrls[slug] || undefined}>{platformUrls[slug] || "Not configured"}</span></div>
+                  <button aria-label={`Edit ${label} public URL`} className="settings-icon-button" onClick={() => setEditingPlatformSlug(slug)} type="button"><Pencil aria-hidden size={16} /></button>
+                </div>
+                {isEditing ? <div className="settings-link-editor"><input aria-label={`${label} public URL`} onChange={(event) => setPlatformUrls((current) => ({ ...current, [slug]: event.target.value }))} placeholder="https://" value={platformUrls[slug] ?? ""} /><button disabled={status?.state === "loading"} onClick={() => void savePlatformUrl(slug)} type="button">{status?.state === "loading" ? "Saving..." : "Save"}</button></div> : null}
+                {status?.message ? <p className={status.state === "error" ? "settings-error" : "settings-status"} role={status.state === "error" ? "alert" : "status"}>{status.message}</p> : null}
+              </div>;
+            })}
           </div>
-          {platformStatus.message ? <p className={platformStatus.state === "error" ? "settings-error" : "settings-status"} role={platformStatus.state === "error" ? "alert" : "status"}>{platformStatus.message}</p> : null}
+          </> : null}
         </article>
         </section>
 
       </div>
     </section>
+  );
+}
+
+function SettingsDisclosure({
+  actionLabel,
+  isOpen,
+  onToggle,
+  summary,
+  title
+}: {
+  actionLabel?: string;
+  isOpen?: boolean;
+  onToggle?: () => void;
+  summary: string;
+  title: string;
+}) {
+  const isCollapsible = typeof isOpen === "boolean";
+  return (
+    <div className="settings-disclosure">
+      <div>
+        <h2>{title}</h2>
+        <p title={summary}>{summary}</p>
+      </div>
+      {isCollapsible ? (
+        <button
+          aria-expanded={isOpen}
+          aria-label={actionLabel ?? `${isOpen ? "Collapse" : "Expand"} ${title}`}
+          className={actionLabel ? "settings-icon-button" : "settings-disclosure-button"}
+          onClick={onToggle}
+          type="button"
+        >
+          <Pencil aria-hidden size={16} />
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -9304,10 +9769,6 @@ function PlatformAdministrationView({
           <p className="eyebrow">Platform administration</p>
           <h1 id="platform-administration-title">Workspace provisioning</h1>
         </div>
-        <button className="user-settings-back" onClick={onBack} type="button">
-          <ArrowLeft aria-hidden size={18} />
-          <span>Back to {activeSection}</span>
-        </button>
       </header>
       <div className="user-settings-content">
         {accessChecked && !canCreateWorkspaces ? (
@@ -9424,10 +9885,20 @@ function AboutDashboardView({
 
 function UserSettingsView({
   activeSection,
-  onBack
+  dashboardPreferences,
+  dashboardPreferenceStatus,
+  onBack,
+  onDashboardPreferencesReset,
+  onDashboardPreferencesSave
 }: {
   activeSection: Section;
+  dashboardPreferences: ResolvedDashboardPreferences;
+  dashboardPreferenceStatus: RefreshStatus;
   onBack: () => void;
+  onDashboardPreferencesReset: () => Promise<void>;
+  onDashboardPreferencesSave: (
+    preferences: Pick<ResolvedDashboardPreferences, "cardOrder" | "visibleCards">
+  ) => Promise<void>;
 }) {
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
@@ -9655,12 +10126,14 @@ function UserSettingsView({
           <p className="eyebrow">Individual account</p>
           <h1 id="user-settings-title">User settings</h1>
         </div>
-        <button className="user-settings-back" onClick={onBack} type="button">
-          <ArrowLeft aria-hidden size={18} />
-          <span>Back to {activeSection}</span>
-        </button>
       </header>
       <div className="user-settings-content">
+        <DashboardPersonalizationSettings
+          preferences={dashboardPreferences}
+          saveStatus={dashboardPreferenceStatus}
+          onReset={onDashboardPreferencesReset}
+          onSave={onDashboardPreferencesSave}
+        />
         <article className="user-profile-settings">
           <div className="user-profile-heading">
             <div className="user-profile-avatar-control">
@@ -9761,6 +10234,150 @@ function UserSettingsView({
   );
 }
 
+function DashboardPersonalizationSettings({
+  onReset,
+  onSave,
+  preferences,
+  saveStatus
+}: {
+  onReset: () => Promise<void>;
+  onSave: (
+    preferences: Pick<ResolvedDashboardPreferences, "cardOrder" | "visibleCards">
+  ) => Promise<void>;
+  preferences: ResolvedDashboardPreferences;
+  saveStatus: RefreshStatus;
+}) {
+  const isSaving = saveStatus.state === "loading";
+
+  function serializeOrder(
+    topLevelOrder: DashboardCardId[],
+    childrenByParent = preferences.childOrderByParent
+  ) {
+    return topLevelOrder.flatMap((parentId) => [parentId, ...(childrenByParent[parentId] ?? [])]);
+  }
+
+  function saveTopLevelOrder(nextTopLevelOrder: DashboardCardId[]) {
+    void onSave({
+      cardOrder: serializeOrder(nextTopLevelOrder),
+      visibleCards: preferences.visibleCards
+    });
+  }
+
+  function moveCard(cardId: DashboardCardId, direction: -1 | 1) {
+    const currentIndex = preferences.topLevelOrder.indexOf(cardId);
+    const nextIndex = currentIndex + direction;
+    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= preferences.topLevelOrder.length) return;
+    const nextOrder = [...preferences.topLevelOrder];
+    [nextOrder[currentIndex], nextOrder[nextIndex]] = [nextOrder[nextIndex], nextOrder[currentIndex]];
+    saveTopLevelOrder(nextOrder);
+  }
+
+  function toggleVisibility(cardId: DashboardCardId) {
+    const isVisible = preferences.visibleCards.includes(cardId);
+    const visibleCards = isVisible
+      ? preferences.visibleCards.filter((currentId) => currentId !== cardId)
+      : [...preferences.visibleCards, cardId];
+    void onSave({ cardOrder: preferences.cardOrder, visibleCards });
+  }
+
+  function moveChild(parentId: DashboardCardId, cardId: DashboardCardId, direction: -1 | 1) {
+    const currentOrder = preferences.childOrderByParent[parentId] ?? [];
+    const currentIndex = currentOrder.indexOf(cardId);
+    const nextIndex = currentIndex + direction;
+    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= currentOrder.length) return;
+    const nextOrder = [...currentOrder];
+    [nextOrder[currentIndex], nextOrder[nextIndex]] = [nextOrder[nextIndex], nextOrder[currentIndex]];
+    void onSave({
+      cardOrder: serializeOrder(preferences.topLevelOrder, {
+        ...preferences.childOrderByParent,
+        [parentId]: nextOrder
+      }),
+      visibleCards: preferences.visibleCards
+    });
+  }
+
+  return (
+    <article className="user-dashboard-settings" aria-labelledby="my-dashboard-title">
+      <div className="user-dashboard-heading">
+        <div>
+          <p className="eyebrow">Personal layout</p>
+          <h2 id="my-dashboard-title">My Dashboard</h2>
+          <p>Choose which cards appear on your Dashboard and arrange their order. This does not change app access.</p>
+        </div>
+        <button
+          className="user-dashboard-reset"
+          disabled={isSaving}
+          onClick={() => void onReset()}
+          type="button"
+        >
+          Reset to default
+        </button>
+      </div>
+      <div className="user-dashboard-list" aria-label="Dashboard sections">
+        {preferences.topLevelOrder.map((cardId, index) => {
+          const card = dashboardCardRegistryById(cardId);
+          const isVisible = preferences.visibleCards.includes(cardId);
+          const children = preferences.childOrderByParent[cardId] ?? [];
+          return (
+            <div className="user-dashboard-group" key={cardId}>
+            <div className="user-dashboard-row">
+              <div className="user-dashboard-reorder" aria-label={`Reorder ${card.label}`}>
+                <button
+                  aria-label={`Move ${card.label} up`}
+                  disabled={isSaving || index === 0}
+                  onClick={() => moveCard(cardId, -1)}
+                  type="button"
+                >
+                  <ArrowUp aria-hidden size={16} />
+                </button>
+                <button
+                  aria-label={`Move ${card.label} down`}
+                  disabled={isSaving || index === preferences.topLevelOrder.length - 1}
+                  onClick={() => moveCard(cardId, 1)}
+                  type="button"
+                >
+                  <ArrowDown aria-hidden size={16} />
+                </button>
+              </div>
+              <strong>{card.label}</strong>
+              <button
+                aria-pressed={isVisible}
+                className={`user-dashboard-visibility${isVisible ? " is-on" : ""}`}
+                disabled={isSaving}
+                onClick={() => toggleVisibility(cardId)}
+                type="button"
+              >
+                {isVisible ? "ON" : "OFF"}
+              </button>
+            </div>
+            {children.map((childId, childIndex) => {
+              const child = dashboardCardRegistryById(childId);
+              const childVisible = preferences.visibleCards.includes(childId);
+              return <div className="user-dashboard-row user-dashboard-row-child" key={childId}>
+                <div className="user-dashboard-reorder" aria-label={`Reorder ${child.label}`}>
+                  <button aria-label={`Move ${child.label} up`} disabled={isSaving || childIndex === 0} onClick={() => moveChild(cardId, childId, -1)} type="button"><ArrowUp aria-hidden size={16} /></button>
+                  <button aria-label={`Move ${child.label} down`} disabled={isSaving || childIndex === children.length - 1} onClick={() => moveChild(cardId, childId, 1)} type="button"><ArrowDown aria-hidden size={16} /></button>
+                </div>
+                <strong>{child.label}</strong>
+                <button aria-pressed={childVisible} className={`user-dashboard-visibility${childVisible ? " is-on" : ""}`} disabled={isSaving} onClick={() => toggleVisibility(childId)} type="button">{childVisible ? "ON" : "OFF"}</button>
+              </div>;
+            })}
+            </div>
+          );
+        })}
+      </div>
+      {saveStatus.message ? (
+        <p
+          className={saveStatus.state === "error" ? "settings-error" : "settings-status"}
+          role={saveStatus.state === "error" ? "alert" : "status"}
+        >
+          {saveStatus.message}
+        </p>
+      ) : null}
+    </article>
+  );
+}
+
 function FloatingNavigationBackButton({
   isVisible,
   onBack
@@ -9785,6 +10402,7 @@ function FloatingNavigationBackButton({
 
 function EventsView({
   entries,
+  saveError,
   focusTarget,
   isLoaded,
   locationFocusTarget,
@@ -9794,13 +10412,17 @@ function EventsView({
   onDeleteEntry,
   onDeleteLocation,
   onEntryChange,
+  onEventFocusTargetConsumed,
   onLocationChange,
+  onLocationFocusTargetConsumed,
   onNavigationContextChange,
+  onReconcile,
   onResortEntries,
   onSaveEventLocation,
   restoreContext
 }: {
   entries: EventEntry[];
+  saveError: string;
   focusTarget: { entryId: string; token: number } | null;
   isLoaded: boolean;
   locationFocusTarget: { locationId: string; token: number } | null;
@@ -9810,11 +10432,14 @@ function EventsView({
   onDeleteEntry: (entryId: string) => void;
   onDeleteLocation: (locationId: string) => void;
   onEntryChange: (entryId: string, updates: Partial<EventEntry>) => void;
+  onEventFocusTargetConsumed: () => void;
   onLocationChange: (
     locationId: string,
     updates: Partial<LocationAddressBookEntry>
   ) => void;
+  onLocationFocusTargetConsumed: () => void;
   onNavigationContextChange: (context: EventsNavigationContext | null) => void;
+  onReconcile: () => Promise<void>;
   onResortEntries: () => void;
   onSaveEventLocation: (entryId: string) => void;
   restoreContext: { context: EventsNavigationContext; token: number } | null;
@@ -9824,10 +10449,15 @@ function EventsView({
   const nextEventDaysLeft = nextEventDate ? getDaysUntilDate(nextEventDate) : null;
   const eventElementRefs = useRef<Record<string, HTMLElement | null>>({});
   const activeEventEditorId = useRef<string | null>(restoreContext?.context.eventId ?? null);
+  const handleAddressBookOpen = useCallback(() => {
+    onResortEntries();
+    void onReconcile();
+  }, [onReconcile, onResortEntries]);
 
   function handleEventEditorChange(entryId: string, isOpening: boolean) {
     if (isOpening && activeEventEditorId.current && activeEventEditorId.current !== entryId) {
       onResortEntries();
+      void onReconcile();
     }
 
     activeEventEditorId.current = isOpening ? entryId : null;
@@ -9839,6 +10469,7 @@ function EventsView({
     }
 
     activeEventEditorId.current = focusTarget.entryId;
+    onEventFocusTargetConsumed();
 
     window.setTimeout(() => {
       eventElementRefs.current[focusTarget.entryId]?.scrollIntoView({
@@ -9846,7 +10477,7 @@ function EventsView({
         block: "start"
       });
     }, 80);
-  }, [focusTarget]);
+  }, [focusTarget, onEventFocusTargetConsumed]);
 
   return (
     <>
@@ -9857,6 +10488,7 @@ function EventsView({
         </div>
         <ModuleHeaderDate />
       </header>
+      {saveError ? <p className="settings-error" role="alert">{saveError}</p> : null}
 
       <section className="events-summary-grid" aria-label="Events summary">
         <article className="metric-card event-summary-card module-accent module-accent-events">
@@ -9895,8 +10527,9 @@ function EventsView({
         locations={locations}
         onAddLocation={onAddLocation}
         onDeleteLocation={onDeleteLocation}
-        onEnterAddressBook={onResortEntries}
+        onEnterAddressBook={handleAddressBookOpen}
         onLocationChange={onLocationChange}
+        onFocusTargetConsumed={onLocationFocusTargetConsumed}
       />
 
       <section className="events-panel panel module-accent module-accent-events" aria-label="Events list">
@@ -9946,6 +10579,7 @@ function LocationAddressBook({
   onAddLocation,
   onDeleteLocation,
   onEnterAddressBook,
+  onFocusTargetConsumed,
   onLocationChange
 }: {
   events: EventEntry[];
@@ -9954,6 +10588,7 @@ function LocationAddressBook({
   onAddLocation: () => void;
   onDeleteLocation: (locationId: string) => void;
   onEnterAddressBook: () => void;
+  onFocusTargetConsumed: () => void;
   onLocationChange: (
     locationId: string,
     updates: Partial<LocationAddressBookEntry>
@@ -9961,22 +10596,22 @@ function LocationAddressBook({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const locationElementRefs = useRef<Record<string, HTMLElement | null>>({});
+  const locationNameInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   useEffect(() => {
     if (!focusTarget) return;
 
+    const { locationId } = focusTarget;
+    onFocusTargetConsumed();
     const focusTimer = window.setTimeout(() => {
-      onEnterAddressBook();
       setIsOpen(true);
-      window.setTimeout(() => {
-        const locationElement = locationElementRefs.current[focusTarget.locationId];
-        locationElement?.scrollIntoView({ behavior: "smooth", block: "center" });
-        locationElement?.focus({ preventScroll: true });
-      }, 0);
+      const locationElement = locationElementRefs.current[locationId];
+      locationElement?.scrollIntoView({ behavior: "smooth", block: "center" });
+      locationNameInputRefs.current[locationId]?.focus({ preventScroll: true });
     }, 0);
 
     return () => window.clearTimeout(focusTimer);
-  }, [focusTarget, onEnterAddressBook]);
+  }, [focusTarget, onFocusTargetConsumed]);
 
   return (
     <section className="location-address-book module-accent module-accent-events" aria-label="Location address book">
@@ -10016,6 +10651,9 @@ function LocationAddressBook({
                 location={location}
                 onDeleteLocation={onDeleteLocation}
                 onLocationChange={onLocationChange}
+                nameInputRef={(element) => {
+                  locationNameInputRefs.current[location.id] = element;
+                }}
                 refCallback={(element) => {
                   locationElementRefs.current[location.id] = element;
                 }}
@@ -10033,6 +10671,7 @@ function LocationAddressBookCard({
   location,
   onDeleteLocation,
   onLocationChange,
+  nameInputRef,
   refCallback
 }: {
   events: EventEntry[];
@@ -10042,6 +10681,7 @@ function LocationAddressBookCard({
     locationId: string,
     updates: Partial<LocationAddressBookEntry>
   ) => void;
+  nameInputRef: (element: HTMLInputElement | null) => void;
   refCallback: (element: HTMLElement | null) => void;
 }) {
   const pastEvents = getPastEventsForLocation(location, events);
@@ -10111,6 +10751,7 @@ function LocationAddressBookCard({
             onChange={(event) =>
               onLocationChange(location.id, { locationName: event.target.value })
             }
+            ref={nameInputRef}
             value={location.locationName}
           />
         </label>
@@ -10715,16 +11356,20 @@ function BudgetView({
   }, [entries, ledgerEntryOrder]);
 
   useEffect(() => {
-    setLedgerEntryOrder((currentOrder) => {
-      const entryIds = new Set(entries.map((entry) => entry.id));
-      const retainedOrder = currentOrder.filter((entryId) => entryIds.has(entryId));
-      const orderedIds = new Set(retainedOrder);
-      const appendedIds = entries
-        .map((entry) => entry.id)
-        .filter((entryId) => !orderedIds.has(entryId));
+    const syncTimer = window.setTimeout(() => {
+      setLedgerEntryOrder((currentOrder) => {
+        const entryIds = new Set(entries.map((entry) => entry.id));
+        const retainedOrder = currentOrder.filter((entryId) => entryIds.has(entryId));
+        const orderedIds = new Set(retainedOrder);
+        const appendedIds = entries
+          .map((entry) => entry.id)
+          .filter((entryId) => !orderedIds.has(entryId));
 
-      return appendedIds.length > 0 ? [...retainedOrder, ...appendedIds] : retainedOrder;
-    });
+        return appendedIds.length > 0 ? [...retainedOrder, ...appendedIds] : retainedOrder;
+      });
+    }, 0);
+
+    return () => window.clearTimeout(syncTimer);
   }, [entries]);
   const { historicalEntries, upcomingEntries } = useMemo(() => {
     const todayTime = getTodayUtcDate().getTime();
@@ -14660,16 +15305,59 @@ function StatusDot({
   return <span aria-label={label} className={`status-dot status-dot-${status}`} />;
 }
 
+function formatFocusQueueDueDate(task: FocusQueueItem) {
+  const value = task.dueDate ?? task.displayLabel?.date ?? "";
+  const date = parseFlexibleBudgetDate(value) ?? parseFocusQueueLabelDate(task.label);
+  if (!date) return null;
+
+  const day = date.toLocaleDateString("en-GB", { day: "numeric", timeZone: "UTC" });
+  const month = date.toLocaleDateString("en-GB", { month: "short", timeZone: "UTC" });
+  const weekday = date.toLocaleDateString("en-GB", { weekday: "short", timeZone: "UTC" });
+  return `${day} ${month}, ${weekday}`;
+}
+
+function parseFocusQueueLabelDate(label: string) {
+  const match = label.match(/(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+([A-Z][a-z]{2})\s+(\d{1,2})/);
+  if (!match) return null;
+
+  const monthIndex = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].indexOf(match[1]);
+  if (monthIndex < 0) return null;
+
+  const today = getTodayUtcDate();
+  let date = new Date(Date.UTC(today.getUTCFullYear(), monthIndex, Number(match[2])));
+  const sixMonths = 183 * 86400000;
+  if (date.getTime() - today.getTime() > sixMonths) {
+    date = new Date(Date.UTC(today.getUTCFullYear() - 1, monthIndex, Number(match[2])));
+  } else if (today.getTime() - date.getTime() > sixMonths) {
+    date = new Date(Date.UTC(today.getUTCFullYear() + 1, monthIndex, Number(match[2])));
+  }
+  return date;
+}
+
+function FocusQueueTaskMeta({ task }: { task: FocusQueueItem }) {
+  const sourceLabel = task.source === "Marketing" ? "Markt." : task.source === "Production" ? "Prod." : "Other";
+  const dueDate = formatFocusQueueDueDate(task);
+
+  return (
+    <span className="dashboard-focus-task-meta">
+      <span className="dashboard-focus-task-header">
+        <span className="dashboard-focus-source">{sourceLabel}</span>
+        <StatusDot status={task.status} label={statusLabels[task.status]} />
+      </span>
+      {dueDate ? <span className="dashboard-focus-task-due-date">{dueDate}</span> : null}
+    </span>
+  );
+}
+
 function FocusQueueTaskLabel({ task }: { task: FocusQueueItem }) {
   if (!task.displayLabel) {
-    return <span className="dashboard-focus-task-label">{task.label}</span>;
+    const label = task.source === "Other" ? task.label.replace(/^[^-]+\s-\s/, "") : task.label;
+    return <span className="dashboard-focus-task-label">{label}</span>;
   }
 
-  const { date, song, task: taskText } = task.displayLabel;
+  const { song, task: taskText } = task.displayLabel;
   return (
     <span className="dashboard-focus-task-label dashboard-focus-task-label-context" title={task.label}>
-      {date ? <span className="dashboard-focus-task-date">{date}</span> : null}
-      {date ? <span aria-hidden> - </span> : null}
       <span className="dashboard-focus-task-song" title={song}>{song}</span>
       <span aria-hidden> - </span>
       <span className="dashboard-focus-task-text" title={taskText}>{taskText}</span>
@@ -14741,6 +15429,7 @@ function DashboardView({
   budgetEntries,
   campaigns,
   dailyFocusProgress,
+  dashboardPreferences,
   dashboardPlatformStats,
   eventEntries,
   eventsLoaded,
@@ -14754,6 +15443,7 @@ function DashboardView({
   onFocusQueueNavigationStateChange,
   onOpenAppleMusicImport,
   onOtherTaskChange,
+  onRetryOtherTask,
   onOpenFocusTaskSource,
   onReconfirmFocusTaskStatus,
   onReconfirmOtherTaskStatus,
@@ -14773,6 +15463,7 @@ function DashboardView({
   budgetEntries: BudgetEntry[];
   campaigns: MarketingCampaignConfig[];
   dailyFocusProgress: DailyFocusProgressItem[];
+  dashboardPreferences: ResolvedDashboardPreferences;
   dashboardPlatformStats: typeof platformStats;
   eventEntries: EventEntry[];
   eventsLoaded: boolean;
@@ -14786,6 +15477,7 @@ function DashboardView({
   onFocusQueueNavigationStateChange: (state: FocusQueueNavigationState) => void;
   onOpenAppleMusicImport: () => void;
   onOtherTaskChange: (taskId: string, updates: Partial<OtherTask>) => void;
+  onRetryOtherTask: (taskId: string) => void;
   onOpenFocusTaskSource: (task: FocusQueueItem) => void;
   onReconfirmFocusTaskStatus: (task: FocusQueueItem, status: MarketingStatus) => void;
   onReconfirmOtherTaskStatus: (task: OtherTask) => void;
@@ -14913,19 +15605,10 @@ function DashboardView({
     onProductionSongChange(song.id, { steps: nextSteps });
   }
 
-  return (
-    <>
-      <header className="topbar dashboard-main-topbar">
-        <div className="topbar-title-block">
-          <p className="eyebrow">Daily command screen</p>
-          <h1 className="dashboard-main-title">{workspaceName} Dashboard</h1>
-        </div>
-        <ModuleHeaderDate />
-      </header>
-
-      <DashboardNextEventCard event={nextEvent} isLoaded={eventsLoaded} />
-
-      <DashboardFocusQueueCard
+  const dashboardSections: Partial<Record<DashboardCardId, ReactNode>> = {
+    events: <DashboardNextEventCard event={nextEvent} isLoaded={eventsLoaded} key="events" />,
+    focus: <DashboardFocusQueueCard
+        key="focus"
         dailyProgress={dailyFocusProgress}
         focusQueue={focusQueue}
         isTaskListOpen={focusQueueNavigationState.detailsOpen}
@@ -14946,6 +15629,7 @@ function DashboardView({
         }
         onOpenAppleMusicImport={onOpenAppleMusicImport}
         onOtherTaskChange={onOtherTaskChange}
+        onRetryOtherTask={onRetryOtherTask}
         onOpenTaskSource={onOpenFocusTaskSource}
         onReconfirmFocusTaskStatus={onReconfirmFocusTaskStatus}
         onReconfirmOtherTaskStatus={onReconfirmOtherTaskStatus}
@@ -14955,9 +15639,9 @@ function DashboardView({
         otherTaskSaveErrors={otherTaskSaveErrors}
         showCompletedOtherTasks={focusQueueNavigationState.completedTasksOpen}
         workspaceTimeZone={workspaceTimeZone}
-      />
-
-      <PlatformStatsSection
+      />,
+    platforms: <PlatformStatsSection
+        key="platforms"
         hideHeading
         platforms={dashboardPlatformStats}
         title="Platform Snapshot"
@@ -14978,63 +15662,99 @@ function DashboardView({
             </span>
           ) : null;
         }}
-      />
-
-      <DashboardCampaignPreview
+      />,
+    marketing: <DashboardCampaignPreview
+        key="marketing"
+        childOrder={dashboardPreferences.childOrderByParent.marketing ?? []}
         preview={campaignPreview}
         productionSongs={productionSongs}
-      />
-
-      <DashboardProductionPreview preview={productionPreview} />
-
-      <DashboardBudgetPreview summary={budgetSummary} />
-
-      {phaseOne ? <DashboardRoadmapPhasePreview phase={phaseOne} songs={productionSongs} /> : null}
-
-      <QrCodeLinksSection
+        visibleChildren={dashboardPreferences.visibleCards}
+      />,
+    production: <DashboardProductionPreview key="production" childOrder={dashboardPreferences.childOrderByParent.production ?? []} preview={productionPreview} visibleChildren={dashboardPreferences.visibleCards} />,
+    budget: <DashboardBudgetPreview key="budget" summary={budgetSummary} />,
+    roadmap: phaseOne ? <DashboardRoadmapPhasePreview key="roadmap" phase={phaseOne} songs={productionSongs} /> : null,
+    "qr-codes": <QrCodeLinksSection
+        key="qr-codes"
         links={qrCodeLinks}
         onAddLink={onAddQrCode}
         onDeleteLink={onDeleteQrCode}
         onLinkChange={onQrCodeChange}
       />
+  };
+
+  return (
+    <>
+      <header className="topbar dashboard-main-topbar">
+        <div className="topbar-title-block">
+          <p className="eyebrow">Daily command screen</p>
+          <h1 className="dashboard-main-title">{workspaceName} Dashboard</h1>
+        </div>
+        <ModuleHeaderDate />
+      </header>
+
+      {dashboardPreferences.topLevelOrder
+        .filter((cardId) => dashboardPreferences.visibleCards.includes(cardId))
+        .map((cardId) => (
+          <Fragment key={cardId}>{dashboardSections[cardId]}</Fragment>
+        ))}
     </>
   );
 }
 
+function DashboardAudienceCard() {
+  return (
+    <section className="platform-section module-accent module-accent-platforms" aria-label="Audience">
+      <div className="platform-grid platform-grid-dashboard">
+        <article className="platform-card platform-card-audience">
+          <div className="platform-card-header"><div className="platform-card-title"><Headphones size={20} aria-hidden /><h3>Audience</h3></div></div>
+          <p className="platform-card-placeholder"><strong>Audience estimate coming soon</strong><span>Combined audience insights will appear here when aggregation is available.</span></p>
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function DashboardDisconnectedPlatformCard({ label }: { label: string }) {
+  return (
+    <section className="platform-section module-accent module-accent-platforms" aria-label={label}>
+      <div className="platform-grid platform-grid-dashboard"><article className="platform-card">
+        <div className="platform-card-header"><div className="platform-card-title"><Headphones size={20} aria-hidden /><h3>{label}</h3></div></div>
+        <p className="platform-card-placeholder"><strong>Not connected</strong><span>Connect this service in Settings to start collecting data.</span></p>
+      </article></div>
+    </section>
+  );
+}
+
 function DashboardCampaignPreview({
+  childOrder,
+  visibleChildren,
   preview,
   productionSongs
 }: {
+  childOrder: DashboardCardId[];
+  visibleChildren: DashboardCardId[];
   preview: {
     benchmark: MarketingCampaignConfig | null;
+    benchmarkGeneral: MarketingCampaignConfig | null;
     current: MarketingCampaignConfig | null;
+    currentGeneral: MarketingCampaignConfig | null;
     next: MarketingCampaignConfig | null;
+    nextGeneral: MarketingCampaignConfig | null;
   };
   productionSongs: ProductionSongConfig[];
 }) {
+  const cards: Partial<Record<DashboardCardId, ReactNode>> = {
+    "marketing.benchmark-song": <DashboardCampaignCard campaign={preview.benchmark} emptyText="No benchmark campaign yet." label="Benchmark campaign" productionSongs={productionSongs} showDate={false} showTasks={false} />,
+    "marketing.benchmark-general": <DashboardCampaignCard campaign={preview.benchmarkGeneral} emptyText="No benchmark general campaign yet." label="Benchmark general" productionSongs={productionSongs} showDate={false} showTasks={false} />,
+    "marketing.current-song": <DashboardCampaignCard campaign={preview.current} emptyText="No campaign is currently running." label="Current" productionSongs={productionSongs} />,
+    "marketing.current-general": <DashboardCampaignCard campaign={preview.currentGeneral} emptyText="No general campaign is currently running." label="Current general" productionSongs={productionSongs} />,
+    "marketing.next-song": <DashboardCampaignCard campaign={preview.next} emptyText="No upcoming campaign is scheduled." label="Next" productionSongs={productionSongs} />,
+    "marketing.next-general": <DashboardCampaignCard campaign={preview.nextGeneral} emptyText="No upcoming general campaign is scheduled." label="Next general" productionSongs={productionSongs} />
+  };
   return (
     <section className="dashboard-campaigns module-accent module-accent-marketing" aria-label="Campaign preview">
       <div className="dashboard-campaign-grid">
-        <DashboardCampaignCard
-          campaign={preview.benchmark}
-          emptyText="No benchmark campaign yet."
-          label="Benchmark campaign"
-          productionSongs={productionSongs}
-          showDate={false}
-          showTasks={false}
-        />
-        <DashboardCampaignCard
-          campaign={preview.current}
-          emptyText="No campaign is currently running."
-          label="Current"
-          productionSongs={productionSongs}
-        />
-        <DashboardCampaignCard
-          campaign={preview.next}
-          emptyText="No upcoming campaign is scheduled."
-          label="Next"
-          productionSongs={productionSongs}
-        />
+        {childOrder.filter((id) => visibleChildren.includes(id)).map((id) => <Fragment key={id}>{cards[id]}</Fragment>)}
       </div>
     </section>
   );
@@ -15167,27 +15887,39 @@ function DashboardNextEventCard({
           <MapPin size={18} aria-hidden />
           <span>Next event</span>
         </div>
-        {!isLoaded ? (
-          <p className="event-card-loading">Loading events...</p>
-        ) : eventDate ? (
-          <strong>{formatCampaignDate(eventDate)}</strong>
-        ) : (
-          <p className="dashboard-event-empty">No upcoming events planned yet</p>
-        )}
-        {isLoaded && event && daysLeft !== null ? (
-          <p>
-            <>
-              <EventMaybeLink label={event.name} url={event.nameUrl} />
-              <span className="dashboard-event-location">
-                <EventMaybeLink
-                  label={event.locationName || "Location TBD"}
-                  url={event.locationUrl}
-                />
-                {` - ${formatEventDaysLeft(daysLeft)}`}
-              </span>
-            </>
-          </p>
-        ) : null}
+        <div className={event?.posterUrl ? "dashboard-event-card-content has-poster" : "dashboard-event-card-content"}>
+          {event?.posterUrl ? (
+            <span
+              aria-label={`${event.name} poster`}
+              className="dashboard-event-poster"
+              role="img"
+              style={{ backgroundImage: `url("${getDashboardImageUrl(event.posterUrl, 180)}")` }}
+            />
+          ) : null}
+          <div className="dashboard-event-card-details">
+            {!isLoaded ? (
+              <p className="event-card-loading">Loading events...</p>
+            ) : eventDate ? (
+              <strong>{formatCampaignDate(eventDate)}</strong>
+            ) : (
+              <p className="dashboard-event-empty">No upcoming events planned yet</p>
+            )}
+            {isLoaded && event && daysLeft !== null ? (
+              <p>
+                <>
+                  <EventMaybeLink label={event.name} url={event.nameUrl} />
+                  <span className="dashboard-event-location">
+                    <EventMaybeLink
+                      label={event.locationName || "Location TBD"}
+                      url={event.locationUrl}
+                    />
+                    {` - ${formatEventDaysLeft(daysLeft)}`}
+                  </span>
+                </>
+              </p>
+            ) : null}
+          </div>
+        </div>
       </article>
     </section>
   );
@@ -15204,6 +15936,7 @@ function DashboardFocusQueueCard({
   onTaskListOpenChange,
   onOpenAppleMusicImport,
   onOtherTaskChange,
+  onRetryOtherTask,
   onOpenTaskSource,
   onReconfirmFocusTaskStatus,
   onReconfirmOtherTaskStatus,
@@ -15228,6 +15961,7 @@ function DashboardFocusQueueCard({
   onTaskListOpenChange: (isOpen: boolean) => void;
   onOpenAppleMusicImport: () => void;
   onOtherTaskChange: (taskId: string, updates: Partial<OtherTask>) => void;
+  onRetryOtherTask: (taskId: string) => void;
   onOpenTaskSource: (task: FocusQueueItem) => void;
   onReconfirmFocusTaskStatus: (task: FocusQueueItem, status: MarketingStatus) => void;
   onReconfirmOtherTaskStatus: (task: OtherTask) => void;
@@ -15239,6 +15973,10 @@ function DashboardFocusQueueCard({
   workspaceTimeZone: string;
 }) {
   const [editingOtherTaskId, setEditingOtherTaskId] = useState<string | null>(null);
+  const [editingOtherTaskPlacement, setEditingOtherTaskPlacement] = useState<{
+    group: "collapsed" | "details" | "completed";
+    index: number;
+  } | null>(null);
   const [openStatusTaskId, setOpenStatusTaskId] = useState<string | null>(null);
   const [isResetMenuOpen, setIsResetMenuOpen] = useState(false);
   const statusMenuRef = useRef<HTMLDivElement | null>(null);
@@ -15284,6 +16022,39 @@ function DashboardFocusQueueCard({
     };
   }, [openStatusTaskId]);
   const tasks = focusQueue.visibleTasks;
+  const getEditableOtherTaskId = (task: FocusQueueItem) =>
+    task.source === "Other" && task.id.startsWith("other-other-task-")
+      ? task.id.replace(/^other-/, "")
+      : null;
+  const closeOtherTaskEdit = () => {
+    setEditingOtherTaskId(null);
+    setEditingOtherTaskPlacement(null);
+  };
+  const startOtherTaskEdit = (
+    taskId: string,
+    placement: { group: "collapsed" | "details" | "completed"; index: number }
+  ) => {
+    setEditingOtherTaskId(taskId);
+    setEditingOtherTaskPlacement(placement);
+    onTaskListOpenChange(true);
+  };
+  const editingOtherTask = editingOtherTaskId
+    ? otherTasks.find((task) => task.id === editingOtherTaskId) ?? null
+    : null;
+  const displayedFocusTasks =
+    editingOtherTask && editingOtherTaskPlacement?.group === "collapsed"
+      ? (() => {
+          const unpinnedTasks = tasks.filter(
+            (task) => getEditableOtherTaskId(task) !== editingOtherTask.id
+          );
+          unpinnedTasks.splice(
+            Math.min(editingOtherTaskPlacement.index, unpinnedTasks.length),
+            0,
+            toOtherFocusQueueItem(editingOtherTask)
+          );
+          return unpinnedTasks.slice(0, tasks.length);
+        })()
+      : tasks;
   const eligibleDailyProgress = dailyProgress.filter(
     (item) => item.status !== "irrelevant"
   );
@@ -15322,27 +16093,37 @@ function DashboardFocusQueueCard({
     ...baselineProgress,
     ...extraStartedProgress
   ];
-  const activeOtherTasks = otherTasks
-    .filter((task) => task.status !== "done" && task.status !== "irrelevant")
-    .sort(
-      (firstTask, secondTask) =>
-        getBudgetDateSortTime(firstTask.dueDate) -
-          getBudgetDateSortTime(secondTask.dueDate) ||
-        firstTask.title.localeCompare(secondTask.title)
-    );
-  const headerOtherTasks = activeOtherTasks.filter((task) =>
-    isOtherTaskDueToday(task.dueDate, workspaceTimeZone)
+  const activeOtherTasks = getSortedActiveOtherTasks(otherTasks, workspaceTimeZone);
+  const eligibleOtherTasks = activeOtherTasks.filter((task) =>
+    isFocusQueueEligibleOtherTask(task, workspaceTimeZone)
   );
-  const expandedOtherTasks = activeOtherTasks.filter(
-    (task) => !isOtherTaskDueToday(task.dueDate, workspaceTimeZone)
+  const visibleOtherTaskIds = new Set(
+    focusQueue.visibleTasks
+      .filter((task) => task.source === "Other")
+      .map((task) => task.id.replace(/^other-/, ""))
   );
-  const editingActiveHeaderTask =
-    editingOtherTaskId && !expandedOtherTasks.some((task) => task.id === editingOtherTaskId)
-      ? headerOtherTasks.find((task) => task.id === editingOtherTaskId) ?? null
-      : null;
-  const displayedExpandedOtherTasks = editingActiveHeaderTask
-    ? [editingActiveHeaderTask, ...expandedOtherTasks]
-    : expandedOtherTasks;
+  const overflowEligibleOtherTasks = eligibleOtherTasks.filter(
+    (task) => !visibleOtherTaskIds.has(task.id)
+  );
+  const deferredOtherTasks = activeOtherTasks.filter(
+    (task) => !isFocusQueueEligibleOtherTask(task, workspaceTimeZone)
+  );
+  const unpinnedExpandedOtherTasks = [
+    ...overflowEligibleOtherTasks,
+    ...deferredOtherTasks
+  ].filter((task) => task.id !== editingOtherTaskId);
+  const displayedExpandedOtherTasks =
+    editingOtherTask && editingOtherTaskPlacement?.group === "details"
+      ? (() => {
+          const pinnedTasks = [...unpinnedExpandedOtherTasks];
+          pinnedTasks.splice(
+            Math.min(editingOtherTaskPlacement.index, pinnedTasks.length),
+            0,
+            editingOtherTask
+          );
+          return pinnedTasks;
+        })()
+      : unpinnedExpandedOtherTasks;
   const completedOtherTasks = otherTasks
     .filter((task) => task.status === "done" || task.status === "irrelevant")
     .sort(
@@ -15351,10 +16132,20 @@ function DashboardFocusQueueCard({
           getBudgetDateSortTime(firstTask.dueDate) ||
         firstTask.title.localeCompare(secondTask.title)
     );
-  const getEditableOtherTaskId = (task: FocusQueueItem) =>
-    task.source === "Other" && task.id.startsWith("other-other-task-")
-      ? task.id.replace(/^other-/, "")
-      : null;
+  const displayedCompletedOtherTasks =
+    editingOtherTask && editingOtherTaskPlacement?.group === "completed"
+      ? (() => {
+          const unpinnedTasks = completedOtherTasks.filter(
+            (task) => task.id !== editingOtherTask.id
+          );
+          unpinnedTasks.splice(
+            Math.min(editingOtherTaskPlacement.index, unpinnedTasks.length),
+            0,
+            editingOtherTask
+          );
+          return unpinnedTasks;
+        })()
+      : completedOtherTasks;
   const isCompletedSegmentVisible =
     isTaskListOpen && completedOtherTasks.length > 0 && showCompletedOtherTasks;
   const mainSegmentClass = `fq-segment ${
@@ -15424,20 +16215,33 @@ function DashboardFocusQueueCard({
             <strong>{dailyPercent}%</strong>
           </div>
         </div>
-        {tasks.length > 0 ? (
+        {displayedFocusTasks.length > 0 ? (
           <ul className="dashboard-focus-list">
-            {tasks.map((task) => (
+            {displayedFocusTasks.map((task, index) => (
               <li
                 className={`dashboard-focus-task-card dashboard-focus-task-card-${task.source.toLowerCase()}${
                   openStatusTaskId === task.id ? " is-status-menu-open" : ""
                 }`}
                 key={task.id}
               >
+                {editingOtherTask &&
+                editingOtherTaskPlacement?.group === "collapsed" &&
+                getEditableOtherTaskId(task) === editingOtherTask.id ? (
+                  <OtherTaskEditor
+                    autoFocusTitle
+                    onClose={closeOtherTaskEdit}
+                    onDeleteTask={(taskId) => {
+                      onDeleteOtherTask(taskId);
+                      closeOtherTaskEdit();
+                    }}
+                    onRetryTask={onRetryOtherTask}
+                    onTaskChange={onOtherTaskChange}
+                    saveError={otherTaskSaveErrors[editingOtherTask.id]}
+                    task={editingOtherTask}
+                  />
+                ) : (
                 <div className="dashboard-focus-task-topline">
-                  <span className="dashboard-focus-task-header">
-                    <span className="dashboard-focus-source">{task.source}</span>
-                    <StatusDot status={task.status} label={statusLabels[task.status]} />
-                  </span>
+                  <FocusQueueTaskMeta task={task} />
                   <FocusQueueTaskLabel task={task} />
                   <div
                     className="dashboard-focus-status-menu-wrap"
@@ -15503,8 +16307,10 @@ function DashboardFocusQueueCard({
                               <button
                                 className="dashboard-focus-status-option"
                                 onClick={() => {
-                                  setEditingOtherTaskId(getEditableOtherTaskId(task));
-                                  onTaskListOpenChange(true);
+                                  startOtherTaskEdit(getEditableOtherTaskId(task)!, {
+                                    group: "collapsed",
+                                    index
+                                  });
                                   setOpenStatusTaskId(null);
                                 }}
                                 type="button"
@@ -15555,6 +16361,7 @@ function DashboardFocusQueueCard({
                     ) : null}
                   </div>
                 </div>
+                )}
               </li>
             ))}
           </ul>
@@ -15575,8 +16382,7 @@ function DashboardFocusQueueCard({
             className="dashboard-other-add dashboard-other-add-compact"
             onClick={() => {
               const newTaskId = onAddOtherTask();
-              setEditingOtherTaskId(newTaskId);
-              onTaskListOpenChange(true);
+              startOtherTaskEdit(newTaskId, { group: "details", index: 0 });
             }}
             type="button"
           >
@@ -15601,10 +16407,19 @@ function DashboardFocusQueueCard({
                   ? "No future active other tasks."
                   : "No active other tasks yet."
               }
-              onDeleteTask={onDeleteOtherTask}
-              onEditTask={setEditingOtherTaskId}
+              onDeleteTask={(taskId) => {
+                onDeleteOtherTask(taskId);
+                closeOtherTaskEdit();
+              }}
+              onEditTask={(taskId, index) =>
+                taskId === null
+                  ? closeOtherTaskEdit()
+                  : startOtherTaskEdit(taskId, { group: "details", index: index ?? 0 })
+              }
               onTaskChange={onOtherTaskChange}
+              onRetryTask={onRetryOtherTask}
               onTaskStatusReconfirm={onReconfirmOtherTaskStatus}
+              saveErrors={otherTaskSaveErrors}
               tasks={displayedExpandedOtherTasks}
             />
             {completedOtherTasks.length > 0 ? (
@@ -15629,11 +16444,20 @@ function DashboardFocusQueueCard({
             <OtherTaskList
               editingTaskId={editingOtherTaskId}
               emptyText=""
-              onDeleteTask={onDeleteOtherTask}
-              onEditTask={setEditingOtherTaskId}
+              onDeleteTask={(taskId) => {
+                onDeleteOtherTask(taskId);
+                closeOtherTaskEdit();
+              }}
+              onEditTask={(taskId, index) =>
+                taskId === null
+                  ? closeOtherTaskEdit()
+                  : startOtherTaskEdit(taskId, { group: "completed", index: index ?? 0 })
+              }
               onTaskChange={onOtherTaskChange}
+              onRetryTask={onRetryOtherTask}
               onTaskStatusReconfirm={onReconfirmOtherTaskStatus}
-              tasks={completedOtherTasks}
+              saveErrors={otherTaskSaveErrors}
+              tasks={displayedCompletedOtherTasks}
             />
           </div>
         ) : null}
@@ -15647,16 +16471,20 @@ function OtherTaskList({
   emptyText,
   onDeleteTask,
   onEditTask,
+  onRetryTask,
   onTaskChange,
   onTaskStatusReconfirm,
+  saveErrors,
   tasks
 }: {
   editingTaskId: string | null;
   emptyText: string;
   onDeleteTask: (taskId: string) => void;
-  onEditTask: (taskId: string | null) => void;
+  onEditTask: (taskId: string | null, index?: number) => void;
+  onRetryTask: (taskId: string) => void;
   onTaskChange: (taskId: string, updates: Partial<OtherTask>) => void;
   onTaskStatusReconfirm: (task: OtherTask) => void;
+  saveErrors: Record<string, string>;
   tasks: OtherTask[];
 }) {
   const [openOtherMenuTaskId, setOpenOtherMenuTaskId] = useState<string | null>(null);
@@ -15689,14 +16517,16 @@ function OtherTaskList({
 
   return (
     <div className="dashboard-other-task-list">
-      {tasks.map((task) =>
+      {tasks.map((task, index) =>
         editingTaskId === task.id ? (
           <OtherTaskEditor
             autoFocusTitle
             key={task.id}
             onClose={() => onEditTask(null)}
             onDeleteTask={onDeleteTask}
+            onRetryTask={onRetryTask}
             onTaskChange={onTaskChange}
+            saveError={saveErrors[task.id]}
             task={task}
           />
         ) : (
@@ -15707,13 +16537,8 @@ function OtherTaskList({
             key={task.id}
           >
             <div className="dashboard-focus-task-topline">
-              <span className="dashboard-focus-task-header">
-                <span className="dashboard-focus-source">Other</span>
-                <StatusDot status={task.status} label={statusLabels[task.status]} />
-              </span>
-              <span className="dashboard-focus-task-label">
-                {toOtherFocusQueueItem(task).label}
-              </span>
+              <FocusQueueTaskMeta task={toOtherFocusQueueItem(task)} />
+              <FocusQueueTaskLabel task={toOtherFocusQueueItem(task)} />
               <div
                 className="dashboard-focus-status-menu-wrap"
                 ref={openOtherMenuTaskId === task.id ? menuRef : undefined}
@@ -15737,7 +16562,7 @@ function OtherTaskList({
                     <button
                       className="dashboard-focus-status-option"
                       onClick={() => {
-                        onEditTask(task.id);
+                        onEditTask(task.id, index);
                         setOpenOtherMenuTaskId(null);
                       }}
                       type="button"
@@ -15777,19 +16602,23 @@ const OtherTaskEditor = forwardRef<HTMLDivElement, {
   autoFocusTitle?: boolean;
   onClose: () => void;
   onDeleteTask: (taskId: string) => void;
+  onRetryTask: (taskId: string) => void;
   onTaskChange: (taskId: string, updates: Partial<OtherTask>) => void;
+  saveError?: string;
   task: OtherTask;
 }>(function OtherTaskEditor({
   autoFocusTitle = false,
   onClose,
   onDeleteTask,
+  onRetryTask,
   onTaskChange,
+  saveError,
   task
 }, ref) {
   const [isDeleteArmed, setIsDeleteArmed] = useState(false);
   const [dueDateDraft, setDueDateDraft] = useState(task.dueDate);
   const deleteRef = useRef<HTMLButtonElement>(null);
-  const titleInputRef = useRef<HTMLInputElement>(null);
+  const titleInputRef = useRef<HTMLTextAreaElement>(null);
   const canSaveDueDate = Boolean(toIsoDate(dueDateDraft));
 
   useEffect(() => {
@@ -15823,14 +16652,16 @@ const OtherTaskEditor = forwardRef<HTMLDivElement, {
     <div className="dashboard-other-task-editor" ref={ref}>
       <label>
         <span>Task</span>
-        <input
-          onChange={(event) =>
-            onTaskChange(task.id, { title: event.target.value })
-          }
-          placeholder="Short description"
-          ref={titleInputRef}
-          value={task.title}
-        />
+          <textarea
+            className="dashboard-other-task-title-input"
+            onChange={(event) =>
+              onTaskChange(task.id, { title: event.target.value })
+            }
+            placeholder="Short description"
+            ref={titleInputRef}
+            rows={2}
+            value={task.title}
+          />
       </label>
       <label>
         <span>Due date</span>
@@ -15872,6 +16703,11 @@ const OtherTaskEditor = forwardRef<HTMLDivElement, {
           value={task.notes}
         />
       </label>
+      {saveError ? (
+        <p className="dashboard-focus-save-error" role="alert">
+          {saveError} <button onClick={() => onRetryTask(task.id)} type="button">Retry</button>
+        </p>
+      ) : null}
       <div className="dashboard-other-task-editor-actions">
         <button
           aria-label={isDeleteArmed ? `Confirm delete ${task.title || "other task"}` : `Delete ${task.title || "other task"}`}
@@ -15905,29 +16741,23 @@ function getFocusQueueStatusOptions(task: FocusQueueItem) {
 }
 
 function DashboardProductionPreview({
+  childOrder,
+  visibleChildren,
   preview
 }: {
+  childOrder: DashboardCardId[];
+  visibleChildren: DashboardCardId[];
   preview: ReturnType<typeof getDashboardProductionPreview>;
 }) {
+  const cards: Partial<Record<DashboardCardId, ReactNode>> = {
+    "production.benchmark": <DashboardProductionCard compact emptyText="No benchmark production song yet." label="Benchmark production" song={preview.benchmark} />,
+    "production.current-song": <DashboardProductionCard emptyText="No current production song yet." label="Current song" song={preview.current} />,
+    "production.next-song": <DashboardProductionCard emptyText="No next production song yet." label="Next song" song={preview.next} />
+  };
   return (
     <section className="dashboard-production module-accent module-accent-production" aria-label="Production preview">
       <div className="dashboard-production-grid">
-        <DashboardProductionCard
-          compact
-          emptyText="No benchmark production song yet."
-          label="Benchmark production"
-          song={preview.benchmark}
-        />
-        <DashboardProductionCard
-          emptyText="No current production song yet."
-          label="Current song"
-          song={preview.current}
-        />
-        <DashboardProductionCard
-          emptyText="No next production song yet."
-          label="Next song"
-          song={preview.next}
-        />
+        {childOrder.filter((id) => visibleChildren.includes(id)).map((id) => <Fragment key={id}>{cards[id]}</Fragment>)}
       </div>
     </section>
   );
@@ -16141,6 +16971,7 @@ function PlatformsView({
   onQrCodeChange,
   onRefreshPlatformStats,
   platformMetricRows,
+  platformChildOrder,
   platformStatsData,
   qrCodeLinks,
   refreshStatus,
@@ -16154,6 +16985,7 @@ function PlatformsView({
   onQrCodeChange: (linkId: string, updates: Partial<QrCodeLink>) => void;
   onRefreshPlatformStats: () => void;
   platformMetricRows: MetricRow[];
+  platformChildOrder: DashboardCardId[];
   platformStatsData: typeof platformStats;
   qrCodeLinks: QrCodeLink[];
   refreshStatus: RefreshStatus;
@@ -16266,7 +17098,7 @@ function PlatformsView({
 
       <PlatformStatsSection
         hideHeading
-        platforms={getPlatformsViewStats(platformStatsData)}
+        platforms={getPlatformCardsForPreferences(platformStatsData, { childOrderByParent: { platforms: platformChildOrder }, visibleCards: [], cardOrder: [], isPersonalized: true, topLevelOrder: [] }, false)}
         title="All Platform Metrics"
         description="Daily platform snapshots collected into the shared Supabase history."
         variant="full"
@@ -17465,17 +18297,60 @@ function getMetricSourcePriority(row: MetricRow) {
   return row.source?.includes("manual") ? 0 : 1;
 }
 
-function getDashboardPlatformStats(stats: typeof platformStats) {
-  const dashboardOrder = [
-    "instagram",
-    "youtube",
-    "youtube-music",
-    "apple-music"
-  ];
+type PlatformDisplayCard = (typeof platformStats)[number] & {
+  isAudiencePlaceholder?: boolean;
+  isDisconnected?: boolean;
+};
 
-  return dashboardOrder
-    .map((slug) => stats.find((platform) => platform.slug === slug))
-    .filter((platform): platform is (typeof platformStats)[number] => Boolean(platform));
+const platformChildSlugs: Partial<Record<DashboardCardId, string>> = {
+    "platforms.amazon": "amazon-music",
+    "platforms.apple-music": "apple-music",
+    "platforms.deezer": "deezer",
+    "platforms.instagram": "instagram",
+    "platforms.spotify": "spotify",
+    "platforms.website": "google-analytics",
+    "platforms.youtube": "youtube",
+    "platforms.youtube-topic": "youtube-music"
+};
+
+function getPlatformCardsForPreferences(
+  stats: typeof platformStats,
+  preferences: ResolvedDashboardPreferences,
+  dashboardOnly: boolean
+): PlatformDisplayCard[] {
+  const childOrder = preferences.childOrderByParent.platforms ?? [];
+  return childOrder
+    .filter((cardId) => !dashboardOnly || preferences.visibleCards.includes(cardId))
+    .flatMap((cardId) => {
+      if (cardId === "platforms.audience") {
+        return [{
+          icon: Headphones,
+          dashboard: true,
+          isAudiencePlaceholder: true,
+          metrics: [],
+          platform: "Audience",
+          profileUrl: "",
+          slug: "audience"
+        } as PlatformDisplayCard];
+      }
+      if (cardId === "platforms.youtube-music") {
+        return [{
+          dashboard: true,
+          icon: Headphones,
+          isDisconnected: true,
+          metrics: [],
+          platform: "YouTube Music",
+          profileUrl: "",
+          slug: "youtube-music-service"
+        } as PlatformDisplayCard];
+      }
+      const slug = platformChildSlugs[cardId];
+      if (!slug) return [];
+      const savedCard = stats.find((platform) => platform.slug === slug);
+      const canonicalCard = platformStats.find((platform) => platform.slug === slug);
+      if (!canonicalCard) return [];
+      return [{ ...(savedCard ?? canonicalCard), isDisconnected: !savedCard } as PlatformDisplayCard];
+    });
 }
 
 function getActivePlatformStats(
@@ -17498,22 +18373,6 @@ function getPlatformMetric(stats: typeof platformStats, platformSlug: string, me
     ?.metrics.find((metric) => metric.metricName === metricName);
 }
 
-function getPlatformsViewStats(stats: typeof platformStats) {
-  const platformOrder = [
-    "instagram",
-    "youtube",
-    "google-analytics",
-    "youtube-music",
-    "spotify",
-    "apple-music",
-    "deezer",
-    "amazon-music"
-  ];
-
-  return platformOrder
-    .map((slug) => stats.find((platform) => platform.slug === slug))
-    .filter((platform): platform is (typeof platformStats)[number] => Boolean(platform));
-}
 
 function getSingle<T>(value: T | T[] | null) {
   return Array.isArray(value) ? value[0] : value;
@@ -18030,12 +18889,12 @@ function PlatformStatsSection({
 }: {
   description: string;
   hideHeading?: boolean;
-  platforms: Array<(typeof platformStats)[number]>;
+  platforms: PlatformDisplayCard[];
   renderCardAddon?: (
-    platform: (typeof platformStats)[number]
+    platform: PlatformDisplayCard
   ) => ReactNode;
   renderCardHeaderMeta?: (
-    platform: (typeof platformStats)[number]
+    platform: PlatformDisplayCard
   ) => ReactNode;
   title: string;
   variant: "dashboard" | "full";
@@ -18083,6 +18942,9 @@ function PlatformStatsSection({
                 </div>
                 {cardHeaderMeta}
               </div>
+              {platform.isAudiencePlaceholder ? <p className="platform-card-placeholder"><strong>Audience estimate coming soon</strong><span>Combined audience insights will appear here when aggregation is available.</span></p> : null}
+              {platform.isDisconnected ? <p className="platform-card-placeholder"><strong>Not connected</strong><span>Connect this service in Settings to start collecting data.</span></p> : null}
+              {!platform.isAudiencePlaceholder && !platform.isDisconnected ? <>
               <dl className="platform-metrics">
                 {platform.metrics
                   .filter(
@@ -18131,6 +18993,7 @@ function PlatformStatsSection({
                 ) : null}
               </dl>
               {cardAddon}
+              </> : null}
             </article>
           );
         })}

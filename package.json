@@ -1,6 +1,6 @@
 {
   "name": "love-strings-dashboard",
-  "version": "1.18.0-beta.1",
+  "version": "1.19.0-beta.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
+    "test:dashboard-preferences": "node --experimental-strip-types scripts/test-dashboard-preferences.mjs",
     "test:date-input": "node --experimental-strip-types scripts/test-date-input.mjs",
     "test:metric-collector-eligibility": "node --experimental-strip-types scripts/test-metric-collector-eligibility.mjs",
     "check:instagram": "node scripts/import-instagram-metrics.mjs",

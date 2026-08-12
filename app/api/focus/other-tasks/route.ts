@@ -29,18 +29,21 @@ const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 export async function GET(request: NextRequest) {
   if (!isAuthorizedRequest(request, false)) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    return noStore({ error: "Unauthorized." }, 401);
   }
 
   try {
     const { workspaceId } = await requireWorkspaceAccess(request);
-    return NextResponse.json({ status: "ok", tasks: await loadTasks(workspaceId) });
+    return noStore({ status: "ok", tasks: await loadTasks(workspaceId) });
   } catch (error) {
-    return NextResponse.json(
-      { error: getErrorMessage(error, "Other tasks load failed.") },
-      { status: 500 }
-    );
+    return noStore({ error: getErrorMessage(error, "Other tasks load failed.") }, 500);
   }
+}
+
+function noStore(body: object, status = 200) {
+  const response = NextResponse.json(body, { status });
+  response.headers.set("Cache-Control", "private, no-store, max-age=0");
+  return response;
 }
 
 export async function POST(request: NextRequest) {

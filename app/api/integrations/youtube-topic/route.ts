@@ -7,11 +7,16 @@ type Candidate = { channelId: string; channelTitle: string; caution: boolean; sa
 export async function POST(request: NextRequest) {
   try {
     if (!sameOrigin(request)) return json({ error: "Unauthorized request." }, 401);
-    const payload = (await request.json()) as { action?: "check" | "confirm"; topicChannel?: string; candidate?: Candidate };
+    const payload = (await request.json()) as { action?: "check" | "confirm" | "disconnect"; topicChannel?: string; candidate?: Candidate };
     const { serviceClient, workspaceId } = await requireWorkspaceAdministrator(request);
     const { data: connection, error } = await serviceClient.from("app_google_connections").select("youtube_channel_id, youtube_channel_title").eq("workspace_id", workspaceId).maybeSingle();
     if (error) throw error;
     if (!connection?.youtube_channel_id) return json({ error: "Connect your main YouTube Channel first, then add a separate Topic channel if you have one." }, 400);
+    if (payload.action === "disconnect") {
+      const { error: updateError } = await serviceClient.from("app_google_connections").update({ youtube_topic_channel_id: null, youtube_topic_channel_title: null }).eq("workspace_id", workspaceId);
+      if (updateError) throw updateError;
+      return json({ status: "disconnected" });
+    }
     if (payload.action === "confirm") {
       const candidate = payload.candidate;
       if (!candidate?.channelId || candidate.sameAsMain || candidate.channelId === connection.youtube_channel_id) return json({ error: "Choose a separate Topic channel before confirming." }, 400);

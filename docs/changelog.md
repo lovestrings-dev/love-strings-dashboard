@@ -580,6 +580,53 @@ Still deferred:
   YouTube collection, Gmail/CRM, Spotify, Deezer, Amazon, and workspace
   archive/delete workflows.
 
+## Beta 1.19 — Personal Dashboard & Daily Workflow Reliability (Prepared for deployment)
+
+Headline: **Each workspace member can now make the shared operating dashboard
+their own without changing app access, operational data, or anyone else’s view.**
+
+Includes:
+
+- Hardened Events and Focus Queue freshness with targeted persistence,
+  reconciliation, safe optimistic updates, and compact accepted task-card
+  presentation.
+- Added per-user, per-workspace Dashboard personalization: top-level order and
+  Dashboard-only visibility, navigation order mirroring, reset-safe defaults,
+  and a compact My Dashboard control surface.
+- Extended personalization to Platform, Marketing, and Production child cards.
+  The Platforms module mirrors personal platform ordering while retaining all
+  supported cards regardless of Dashboard visibility.
+- Added Audience and disconnected-platform placeholders, plus Benchmark,
+  Current, and Next General Campaign Dashboard cards.
+- Refined General Settings hierarchy and YouTube Topic connected/onboarding
+  presentation; added the Dashboard next-event poster treatment.
+- Reconciled the three already-applied Beta 1.18 migration filenames with the
+  remote Supabase migration history; no schema or data was changed.
+
+Manual acceptance completed:
+
+- Viewer personalization retained read-only operational permissions.
+- Dashboard layouts remained isolated by user and workspace.
+- Nested child ordering, Dashboard-only visibility, reset behavior, and mobile
+  360px layout were verified.
+
+Release checks:
+
+- Supabase local/remote migration history is synchronized through the three
+  timestamped Beta 1.18 migrations.
+- Dashboard preference tests, TypeScript, production build, and
+  `git diff --check` pass locally.
+- Lint passes with no warnings; the release-only lint reconciliation removed the
+  three historical `app/page.tsx` findings and the newer Events/Focus findings.
+
+Deferred next direction:
+
+- Remaining API collectors are tomorrow’s preferred priority.
+- Mobile Production observations, a Loading workspace boundary, blank-workspace
+  onboarding, multi-workspace metric scheduling, Drive/EPK/CRM attachments,
+  a generic asset registry, Cloudinary orphan cleanup, platform multi-account
+  UX, and future Focus Queue corner controls remain deferred.
+
 ## Beta 1.18 — Workspace Configuration & Release Readiness (Prepared for deployment)
 
 Headline: **The dashboard now treats each workspace as its own configurable
