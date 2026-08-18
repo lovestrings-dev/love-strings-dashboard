@@ -10,6 +10,7 @@ assert.deepEqual(canonical.topLevelOrder, ["events", "focus", "platforms", "mark
 assert.deepEqual(canonical.childOrderByParent.platforms, [
   "platforms.audience",
   "platforms.instagram",
+  "platforms.facebook",
   "platforms.youtube",
   "platforms.youtube-topic",
   "platforms.youtube-music",
@@ -24,6 +25,7 @@ assert.deepEqual(
   [
     "platforms.audience",
     "platforms.instagram",
+    "platforms.facebook",
     "platforms.youtube",
     "platforms.youtube-topic",
     "platforms.apple-music",
@@ -34,6 +36,19 @@ assert.equal(canonical.visibleCards.includes("platforms.youtube-music"), false);
 assert.equal(canonical.visibleCards.includes("platforms.spotify"), false);
 assert.equal(canonical.visibleCards.includes("platforms.deezer"), false);
 assert.equal(canonical.visibleCards.includes("platforms.amazon"), false);
+assert.equal(canonical.visibleCards.includes("platforms.facebook"), true);
+
+const facebookOff = resolveDashboardPreferences({
+  cardOrder: canonical.cardOrder,
+  visibleCards: canonical.visibleCards.filter((id) => id !== "platforms.facebook")
+});
+assert.equal(facebookOff.visibleCards.includes("platforms.facebook"), false, "Facebook OFF is a Dashboard visibility preference");
+assert.equal(facebookOff.childOrderByParent.platforms.includes("platforms.facebook"), true, "Facebook remains a Platforms child when Dashboard visibility is OFF");
+const facebookFirst = resolveDashboardPreferences({
+  cardOrder: ["platforms.facebook", ...canonical.cardOrder.filter((id) => id !== "platforms.facebook")],
+  visibleCards: canonical.visibleCards
+});
+assert.equal(facebookFirst.childOrderByParent.platforms?.[0], "platforms.facebook", "one child order controls Facebook positioning");
 
 const customized = resolveDashboardPreferences({
   cardOrder: ["marketing", "events", "marketing.current-song", "platforms.spotify", "platforms", "events", "retired-card"],

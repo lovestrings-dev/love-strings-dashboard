@@ -28,6 +28,7 @@ import {
   Save,
   Send,
   Trash2,
+  Users,
   Video
 } from "lucide-react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
@@ -505,6 +506,18 @@ const platformStats = [
         metricName: "latest_reel_post_views",
         value: "—"
       }
+    ]
+  },
+  {
+    platform: "Facebook Page",
+    slug: "facebook",
+    profileUrl: "",
+    icon: Users,
+    dashboard: true,
+    metrics: [
+      { label: "Followers", metricName: "followers", value: "—", context: "" },
+      { label: "Yesterday's engagements", metricName: "post_engagements_daily", value: "—" },
+      { label: "Yesterday's reactions", metricName: "post_reactions_daily", value: "—" }
     ]
   },
   {
@@ -17011,6 +17024,10 @@ function PlatformsView({
     platformMetricRows,
     "instagram"
   );
+  const facebookFollowerTrend = getPlatformMetricTrend(platformMetricRows, "facebook", "followers", []);
+  const facebookEngagementTrend = getPlatformMetricTrend(platformMetricRows, "facebook", "post_engagements_daily", []);
+  const facebookReactionTrend = getPlatformMetricTrend(platformMetricRows, "facebook", "post_reactions_daily", []);
+  const facebookLastUpdate = getPlatformLastSnapshotDate(platformMetricRows, "facebook");
   const youtubeSubscriberTrend = getYouTubeSubscriberTrend(platformMetricRows);
   const youtubeTotalViewsTrend = getPlatformMetricTrend(
     platformMetricRows,
@@ -17124,6 +17141,16 @@ function PlatformsView({
                 title="Evolution graphs"
               />
             ) : null}
+            {platform.slug === "facebook" ? (
+              <PlatformTrendPanelGroup
+                charts={[
+                  { color: "#1f7a58", label: "Followers", points: facebookFollowerTrend },
+                  { color: "#c79522", label: "Daily engagements", points: facebookEngagementTrend },
+                  { color: "#2f75a8", label: "Daily reactions", points: facebookReactionTrend }
+                ]}
+                title="Evolution graphs"
+              />
+            ) : null}
             {platform.slug === "youtube" ? (
               <PlatformTrendPanelGroup
                 charts={[
@@ -17196,6 +17223,13 @@ function PlatformsView({
               Last update: {formatPlatformUpdateTimestamp(
                 instagramLastUpdate,
                 getPlatformLastSnapshotImportedAt(platformMetricRows, "instagram")
+              )}
+            </span>
+          ) : platform.slug === "facebook" && facebookLastUpdate ? (
+            <span className="platform-card-header-meta">
+              Last update: {formatPlatformUpdateTimestamp(
+                facebookLastUpdate,
+                getPlatformLastSnapshotImportedAt(platformMetricRows, "facebook")
               )}
             </span>
           ) : platform.slug === "youtube" && youtubeLastUpdate ? (
@@ -17940,6 +17974,9 @@ function getNeutralPlatformStatsTemplate(rows: MetricRow[]): typeof platformStat
 }
 
 const platformMetricDeltaKeys = new Set([
+  "facebook:followers",
+  "facebook:post_engagements_daily",
+  "facebook:post_reactions_daily",
   "instagram:followers",
   "instagram:accounts_reached_30d",
   "instagram:views_30d",
@@ -18317,6 +18354,7 @@ const platformChildSlugs: Partial<Record<DashboardCardId, string>> = {
     "platforms.amazon": "amazon-music",
     "platforms.apple-music": "apple-music",
     "platforms.deezer": "deezer",
+    "platforms.facebook": "facebook",
     "platforms.instagram": "instagram",
     "platforms.spotify": "spotify",
     "platforms.website": "google-analytics",

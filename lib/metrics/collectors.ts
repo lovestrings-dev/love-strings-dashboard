@@ -1,6 +1,10 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import {
+  hasEligibleMetaFstatsFacebookPageBinding,
+  refreshMetaFstatsFacebookPageMetrics
+} from "@/lib/metrics/meta-fstats-facebook-page-collector";
+import {
   decryptGoogleRefreshToken,
   fetchGoogleJson,
   refreshGoogleAccessToken
@@ -20,7 +24,7 @@ type CollectorStatus = "fulfilled" | "rejected" | "skipped";
 
 type MetricCollectorResult = {
   metrics?: Record<string, number | string | null>;
-  name: "google-analytics" | "instagram" | "spotify" | "youtube" | "youtube-music";
+  name: "facebook" | "google-analytics" | "instagram" | "spotify" | "youtube" | "youtube-music";
   reason?: string;
   status: CollectorStatus;
 };
@@ -84,6 +88,7 @@ export async function refreshAllMetricCollectors(workspaceId = defaultWorkspaceI
     refresh: () => Promise<MetricCollectorResult>;
   }> = [
     { name: "google-analytics", refresh: () => refreshGoogleAnalyticsMetrics(workspaceId) },
+    { name: "facebook", refresh: () => refreshMetaFstatsFacebookPageMetrics(workspaceId, createServiceSupabaseClient()) },
     { name: "youtube", refresh: () => refreshYouTubeMetrics(workspaceId) },
     {
       name: "instagram",
@@ -137,11 +142,13 @@ async function getEnabledCollectorsForWorkspace(workspaceId: string) {
   if (error) throw error;
 
   const instagramConfigured = await hasEligibleMetaFstatsInstagramBinding(workspaceId, supabase);
+  const facebookConfigured = await hasEligibleMetaFstatsFacebookPageBinding(workspaceId, supabase);
 
   return getWorkspaceEnabledCollectors({
     analyticsConfigured: Boolean(
       connection?.analytics_enabled && connection.analytics_property_id
     ),
+    facebookConfigured,
     instagramConfigured,
     isLegacyWorkspace: workspaceId === defaultWorkspaceId,
     youtubeConfigured: Boolean(connection?.youtube_enabled && connection.youtube_channel_id),

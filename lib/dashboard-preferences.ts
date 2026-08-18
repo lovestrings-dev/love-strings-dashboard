@@ -4,6 +4,7 @@ export const dashboardCardRegistry = [
   { id: "platforms", label: "Platforms", visibleByDefault: true },
   { id: "platforms.audience", label: "Audience", parentId: "platforms", visibleByDefault: true },
   { id: "platforms.instagram", label: "Instagram", parentId: "platforms", visibleByDefault: true },
+  { id: "platforms.facebook", label: "Facebook Page", parentId: "platforms", visibleByDefault: true },
   { id: "platforms.youtube", label: "YouTube Channel", parentId: "platforms", visibleByDefault: true },
   { id: "platforms.youtube-topic", label: "YouTube Topic", parentId: "platforms", visibleByDefault: true },
   { id: "platforms.youtube-music", label: "YouTube Music", parentId: "platforms", visibleByDefault: false },
