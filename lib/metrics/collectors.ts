@@ -9,6 +9,10 @@ import {
   getWorkspaceEnabledCollectors,
   type MetricCollectorName
 } from "@/lib/metrics/collector-eligibility";
+import {
+  hasEligibleMetaFstatsInstagramBinding,
+  refreshMetaFstatsInstagramMetrics
+} from "@/lib/metrics/meta-fstats-instagram-collector";
 import { defaultWorkspaceId } from "@/lib/workspace";
 import { defaultWorkspaceTimeZone, getWorkspaceDateKey, resolveTimeZone } from "@/lib/workspace-time";
 
@@ -81,7 +85,13 @@ export async function refreshAllMetricCollectors(workspaceId = defaultWorkspaceI
   }> = [
     { name: "google-analytics", refresh: () => refreshGoogleAnalyticsMetrics(workspaceId) },
     { name: "youtube", refresh: () => refreshYouTubeMetrics(workspaceId) },
-    { name: "instagram", refresh: () => refreshInstagramMetrics(workspaceId) },
+    {
+      name: "instagram",
+      refresh: async () => ({
+        ...(await refreshMetaFstatsInstagramMetrics(workspaceId, createServiceSupabaseClient())),
+        name: "instagram" as const
+      })
+    },
     { name: "youtube-music", refresh: () => refreshYouTubeMusicMetrics(workspaceId) },
     { name: "spotify", refresh: () => refreshSpotifyMetrics(workspaceId) }
   ];
@@ -126,10 +136,13 @@ async function getEnabledCollectorsForWorkspace(workspaceId: string) {
 
   if (error) throw error;
 
+  const instagramConfigured = await hasEligibleMetaFstatsInstagramBinding(workspaceId, supabase);
+
   return getWorkspaceEnabledCollectors({
     analyticsConfigured: Boolean(
       connection?.analytics_enabled && connection.analytics_property_id
     ),
+    instagramConfigured,
     isLegacyWorkspace: workspaceId === defaultWorkspaceId,
     youtubeConfigured: Boolean(connection?.youtube_enabled && connection.youtube_channel_id),
     youtubeTopicConfigured: Boolean(connection?.youtube_topic_channel_id)
@@ -603,6 +616,7 @@ async function upsertPlatformMetricSnapshots(
 ) {
   const supabase = createServiceSupabaseClient();
   const snapshotDate = await getWorkspaceSnapshotDate(supabase, workspaceId);
+  const importedAt = new Date().toISOString();
   const { data: platform, error: platformError } = await supabase
     .from("platforms")
     .upsert(
@@ -658,6 +672,7 @@ async function upsertPlatformMetricSnapshots(
       .upsert(
         {
           content_post_id: contentPostId,
+          imported_at: importedAt,
           metric_name: snapshot.metricName,
           metric_unit: snapshot.metricUnit,
           metric_value: snapshot.metricValue,

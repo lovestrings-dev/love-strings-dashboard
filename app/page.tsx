@@ -18218,17 +18218,24 @@ function formatAppleUploadTimestamp(timestamp: string, workspaceTimeZone: string
 }
 
 function formatPlatformUpdateTimestamp(date: string, importedAt?: string) {
-  const formattedDate = formatDateWithDots(date);
+  const fallbackDate = formatDateWithDots(date);
 
   if (!importedAt) {
-    return formattedDate;
+    return fallbackDate;
   }
 
   const timestamp = new Date(importedAt);
 
   if (Number.isNaN(timestamp.getTime())) {
-    return formattedDate;
+    return fallbackDate;
   }
+
+  const formattedDate = timestamp.toLocaleDateString("de-AT", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "Europe/Vienna"
+  });
 
   const formattedTime = timestamp.toLocaleTimeString("de-AT", {
     hour: "2-digit",
@@ -18246,7 +18253,7 @@ function formatDashboardPlatformUpdateTimestamp(date: string, importedAt?: strin
     : date.split("-");
   const [year, month, day] = dateParts.map(Number);
   const timestampDate = new Date(Date.UTC(year, month - 1, day));
-  const formattedDate = Number.isNaN(timestampDate.getTime())
+  const fallbackDate = Number.isNaN(timestampDate.getTime())
     ? date
     : timestampDate.toLocaleDateString("en-GB", {
         day: "numeric",
@@ -18255,14 +18262,20 @@ function formatDashboardPlatformUpdateTimestamp(date: string, importedAt?: strin
       });
 
   if (!importedAt) {
-    return formattedDate;
+    return fallbackDate;
   }
 
   const importedTimestamp = new Date(importedAt);
 
   if (Number.isNaN(importedTimestamp.getTime())) {
-    return formattedDate;
+    return fallbackDate;
   }
+
+  const formattedDate = importedTimestamp.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    timeZone: "Europe/Vienna"
+  });
 
   const formattedTime = importedTimestamp.toLocaleTimeString("de-AT", {
     hour: "2-digit",
