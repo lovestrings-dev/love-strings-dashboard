@@ -580,6 +580,47 @@ Still deferred:
   YouTube collection, Gmail/CRM, Spotify, Deezer, Amazon, and workspace
   archive/delete workflows.
 
+## Beta 1.20 — Meta App B Page & Instagram Onboarding (Prepared for deployment)
+
+Headline: **A workspace can now authorize Meta, explicitly bind its Facebook
+Page, and choose how to handle the Page-linked Instagram account without
+sharing or destructively changing another workspace's connection.**
+
+Includes:
+
+- Facebook Login for Business authorization and safe reconnect, using the
+  configured App B flow.
+- Authorized Facebook Page candidate discovery and explicit workspace Page
+  selection, including a transactional cross-workspace Page uniqueness guard.
+- Page-scoped linked Instagram discovery with explicit Connect or Skip,
+  persistent Skip state, and a later Connect path.
+- Local Instagram-only and Page-local disconnect actions: both preserve Meta
+  authorization, while Page disconnect also cleans up dependent Instagram
+  state.
+- Non-destructive Manage Facebook access and Refresh Pages controls, with
+  fail-closed authoritative server state and clearer attention/error handling.
+- Human-readable connected identities, compact collapsed summaries, mobile
+  workflow controls, and one-shot OAuth return/focus cleanup.
+
+Database and security state:
+
+- The Meta migration chain is synchronized remotely through
+  `202608180001_meta_local_disconnect_actions.sql`.
+- Server mutations bind expected connections and use protected service-role
+  paths; anonymous and authenticated roles do not receive RPC execution.
+
+Release checks:
+
+- Focused OAuth, connection-foundation, authoritative-state, Page/linked
+  Instagram selection, onboarding UI, and OAuth-return UI checks pass.
+- TypeScript, ESLint, production build, diff/whitespace, and remote migration
+  status checks pass.
+
+Important limitation:
+
+- This release does not claim general external-user readiness. Meta App Review
+  and live-mode requirements remain outside the deployed application change.
+
 ## Beta 1.19 — Personal Dashboard & Daily Workflow Reliability (Prepared for deployment)
 
 Headline: **Each workspace member can now make the shared operating dashboard

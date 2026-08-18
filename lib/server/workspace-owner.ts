@@ -20,8 +20,10 @@ export class WorkspaceAccessError extends Error {
   }
 }
 
+export type WorkspaceRole = "admin" | "member" | "viewer";
+
 export async function requirePlatformOwner(request: NextRequest) {
-  const user = await getAuthenticatedUser(request);
+  const user = await requireAuthenticatedUser(request);
   const serviceClient = createServiceSupabaseClient();
   const { data: operator, error } = await serviceClient
     .from("app_platform_operators")
@@ -49,7 +51,7 @@ export async function requireWorkspaceAdministrator(request: NextRequest) {
 }
 
 export async function requireWorkspaceAccess(request: NextRequest) {
-  const user = await getAuthenticatedUser(request);
+  const user = await requireAuthenticatedUser(request);
   const serviceClient = createServiceSupabaseClient();
   const { data: memberships, error: membershipError } = await serviceClient
     .from("app_workspace_members")
@@ -68,10 +70,10 @@ export async function requireWorkspaceAccess(request: NextRequest) {
     throw new WorkspaceAccessError("Workspace access denied.", 403);
   }
 
-  return { role: membership.role, serviceClient, user, workspaceId: membership.workspace_id };
+  return { role: membership.role as WorkspaceRole, serviceClient, user, workspaceId: membership.workspace_id };
 }
 
-async function getAuthenticatedUser(request: NextRequest) {
+export async function requireAuthenticatedUser(request: NextRequest) {
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error("Supabase authentication is not configured.");
   }

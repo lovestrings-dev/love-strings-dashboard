@@ -808,6 +808,181 @@ button {
   margin: 0;
 }
 
+.meta-settings-card:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.meta-settings-card .settings-disclosure {
+  align-items: flex-start;
+}
+
+.meta-settings-card .settings-disclosure p {
+  overflow: visible;
+  white-space: normal;
+}
+
+.meta-onboarding-panel {
+  display: grid;
+  gap: 0;
+  margin-top: 12px;
+}
+
+.meta-page-choices {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-top: 12px;
+  overflow: hidden;
+}
+
+.meta-page-choices h4 {
+  background: #fbfaf7;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  margin: 0;
+  padding: 10px 12px;
+  text-transform: uppercase;
+}
+
+.meta-page-choices .settings-description {
+  margin: 12px;
+}
+
+.meta-loading-state,
+.meta-attention-state,
+.meta-info-state {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+}
+
+.meta-info-state {
+  background: #f4f8ff;
+  border-color: #a9bdd9;
+  margin-top: 12px;
+}
+
+.meta-info-state strong {
+  color: var(--text);
+}
+
+.meta-attention-state {
+  background: #fff8ed;
+  border-color: #dfbd79;
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.meta-attention-state strong {
+  color: var(--text);
+}
+
+.meta-attention-actions,
+.meta-access-actions,
+.meta-row-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.google-service-row > .meta-row-actions {
+  display: flex;
+  flex-direction: row;
+}
+
+.meta-attention-actions,
+.meta-access-actions {
+  margin-top: 12px;
+}
+
+.meta-access-actions a,
+.meta-access-actions button,
+.meta-attention-actions button {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--accent-strong);
+  display: inline-flex;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 7px;
+  min-height: 38px;
+  padding: 8px 12px;
+  text-decoration: none;
+}
+
+.meta-access-helper {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding: 14px 12px 2px;
+}
+
+.meta-access-helper h4 {
+  font-size: 14px;
+  margin: 0 0 5px;
+}
+
+.meta-access-helper p,
+.google-service-row small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.meta-access-helper p {
+  max-width: 720px;
+}
+
+.meta-account-identity {
+  color: var(--text) !important;
+  font-size: 14px !important;
+  font-weight: 800;
+}
+
+.meta-diagnostic-id {
+  opacity: 0.78;
+}
+
+.meta-loading-icon {
+  animation: meta-spin 1.2s linear infinite;
+  color: var(--muted);
+  flex: 0 0 auto;
+  margin-right: 12px;
+}
+
+.meta-secondary-button {
+  background: var(--surface) !important;
+  border-color: var(--line) !important;
+  color: var(--accent-strong) !important;
+}
+
+@keyframes meta-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 640px) {
+  .meta-row-actions,
+  .google-service-row > .meta-row-actions {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .meta-onboarding-panel .google-service-row > button,
+  .meta-row-actions button {
+    flex: 1 1 auto;
+    min-height: 44px;
+    width: 100%;
+  }
+}
+
 .settings-provider-placeholder {
   color: var(--muted);
   display: grid;

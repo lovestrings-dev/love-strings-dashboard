@@ -36,6 +36,7 @@ import { DateInput } from "./date-input";
 import { toDisplayDate, toIsoDate } from "@/lib/date-input";
 import { defaultWorkspaceTimeZone, getWorkspaceDateKey } from "@/lib/workspace-time";
 import { defaultWorkspaceId } from "@/lib/workspace";
+import { MetaPageConnectionSettings } from "./meta-page-connection-settings";
 import {
   dashboardCardRegistry,
   resolveDashboardPreferences,
@@ -632,7 +633,7 @@ const platformStats = [
   }
 ];
 
-const appVersionLabel = "Beta 1.19";
+const appVersionLabel = "Beta 1.20";
 const defaultAppLogoUrl = "";
 
 const sections = [
@@ -9608,10 +9609,7 @@ function GeneralSettingsView({
           </> : null}
         </article>
 
-        <article className="general-settings-card settings-provider-card settings-provider-placeholder">
-          <h3>Meta</h3>
-          <p>Instagram and Facebook onboarding is under construction.</p>
-        </article>
+        <MetaPageConnectionSettings />
         <article className="general-settings-card settings-provider-card settings-provider-placeholder">
           <h3>Spotify</h3>
           <p>Connection onboarding is in development.</p>
