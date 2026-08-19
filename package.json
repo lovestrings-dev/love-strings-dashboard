@@ -16,6 +16,7 @@
     "test:meta-connection-foundation": "node --experimental-strip-types scripts/test-meta-connection-foundation.mjs",
     "test:meta-fstats-login-oauth": "node --experimental-strip-types scripts/test-meta-fstats-login-oauth.mjs",
     "test:meta-creator-instagram-oauth": "node --experimental-strip-types scripts/test-meta-creator-instagram-oauth.mjs",
+    "test:meta-creator-threads-oauth": "node --experimental-strip-types scripts/test-meta-creator-threads-oauth.mjs",
     "test:meta-creator-instagram-ui": "node scripts/test-meta-creator-instagram-ui.mjs",
     "test:meta-authoritative-state": "node --experimental-strip-types scripts/test-meta-authoritative-state.mjs",
     "test:meta-onboarding-ui": "node --experimental-strip-types scripts/test-meta-onboarding-ui.mjs",

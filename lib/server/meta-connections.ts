@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { metaPlatformSlugForAccountType, toSafeMetaConnectionStatus, type MetaAccountType } from "@/lib/meta/foundation";
 import { resolveCreatorSocialInstagramState } from "@/lib/meta/creator-instagram-state";
+import { resolveCreatorSocialThreadsState } from "@/lib/meta/creator-threads-state";
 import { normalizeMetaPageSelectionError } from "@/lib/meta/selection-error";
 import { hasRequiredMetaScopes, metaAppKindForConnectionKind, type MetaConnectionKind } from "@/lib/meta/scopes";
 import { createServiceSupabaseClient } from "@/lib/server/workspace-owner";
@@ -48,6 +49,42 @@ export async function readCreatorSocialInstagramState(client: SupabaseClient, wo
     .order("updated_at", { ascending: false });
   if (error) throw error;
   return resolveCreatorSocialInstagramState((data ?? []) as any[]);
+}
+
+export async function bindCreatorSocialThreads(input: {
+  workspaceId: string;
+  connectedBy: string;
+  authorizationUserExternalId: string | null;
+  encryptedTokenPayload: string;
+  tokenExpiresAt: string | null;
+  tokenType: string;
+  grantedScopes: string[];
+  identity: { externalId: string; displayName: string; username: string | null };
+}) {
+  const client = createServiceSupabaseClient();
+  const { data, error } = await (client as any).rpc("bind_creator_social_threads", {
+    p_authorization_user_external_id: input.authorizationUserExternalId,
+    p_connected_by: input.connectedBy,
+    p_display_name: input.identity.displayName,
+    p_encrypted_token_payload: input.encryptedTokenPayload,
+    p_external_id: input.identity.externalId,
+    p_granted_scopes: Array.from(new Set(input.grantedScopes)),
+    p_token_expires_at: input.tokenExpiresAt,
+    p_token_type: input.tokenType,
+    p_username: input.identity.username,
+    p_workspace_id: input.workspaceId
+  }).single();
+  if (error || !data) throw error ?? new Error("Threads could not be bound.");
+  return data as { connection_id: string; platform_account_id: string };
+}
+
+export async function readCreatorSocialThreadsState(client: SupabaseClient, workspaceId: string) {
+  const { data, error } = await client.from("app_meta_connections")
+    .select("id, connection_state, token_expires_at, last_error_code, last_error_summary, updated_at, app_meta_connection_accounts!inner(is_selected, asset_state, account_type, platform_accounts!app_meta_connection_accounts_platform_account_id_fkey!inner(meta_external_id, account_name, url))")
+    .eq("workspace_id", workspaceId).eq("connection_kind", "creator_social_threads")
+    .order("updated_at", { ascending: false });
+  if (error) throw error;
+  return resolveCreatorSocialThreadsState((data ?? []) as any[]);
 }
 
 export async function saveMetaConnection(client: SupabaseClient, input: {
