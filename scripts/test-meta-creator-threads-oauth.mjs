@@ -56,7 +56,14 @@ assert.deepEqual(resolveCreatorSocialThreadsState([
   { id: "active", connection_state: "connected", token_expires_at: "2026-10-19T00:00:00Z", app_meta_connection_accounts: [{ account_type: "threads_profile", is_selected: true, platform_accounts: { meta_external_id: "threads-1", account_name: "@lovestrings", url: "https://www.threads.com/@lovestrings" } }] }
 ]), { state: "connected", connectionId: "active", tokenExpiresAt: "2026-10-19T00:00:00Z", account: { externalId: "threads-1", displayName: "@lovestrings", url: "https://www.threads.com/@lovestrings" } });
 assert.deepEqual(resolveCreatorSocialThreadsState([
-  { id: "inactive", connection_state: "no_data", token_expires_at: null, app_meta_connection_accounts: [] }
-]), { state: "degraded", connectionId: "inactive", account: undefined });
+  { id: "disconnected", connection_state: "no_data", token_expires_at: null, app_meta_connection_accounts: [{ account_type: "threads_profile", is_selected: false, platform_accounts: { meta_external_id: "threads-1", account_name: "@lovestrings", url: "https://www.threads.com/@lovestrings" } }] }
+]), { state: "disconnected" }, "deliberate disconnect retains canonical history without becoming degraded");
+assert.deepEqual(resolveCreatorSocialThreadsState([
+  { id: "prior-disconnected", connection_state: "no_data", token_expires_at: null, app_meta_connection_accounts: [{ account_type: "threads_profile", is_selected: false, platform_accounts: { meta_external_id: "threads-1", account_name: "@lovestrings", url: "https://www.threads.com/@lovestrings" } }] },
+  { id: "reactivated", connection_state: "connected", token_expires_at: "2026-10-19T00:00:00Z", app_meta_connection_accounts: [{ account_type: "threads_profile", is_selected: true, platform_accounts: { meta_external_id: "threads-1", account_name: "@lovestrings", url: "https://www.threads.com/@lovestrings" } }] }
+]), { state: "connected", connectionId: "reactivated", tokenExpiresAt: "2026-10-19T00:00:00Z", account: { externalId: "threads-1", displayName: "@lovestrings", url: "https://www.threads.com/@lovestrings" } }, "same stable provider identity returns to connected after reactivation");
+assert.deepEqual(resolveCreatorSocialThreadsState([
+  { id: "broken", connection_state: "reauthorization_required", token_expires_at: null, app_meta_connection_accounts: [] }
+]), { state: "degraded", connectionId: "broken", account: undefined }, "non-disconnect inactive states remain degraded");
 
 console.log("Meta creator Threads OAuth/binding tests passed.");
