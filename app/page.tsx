@@ -5319,7 +5319,8 @@ export default function Home() {
   );
   const dashboardPlatformStats = [
     ...getPlatformCardsForPreferences(platformStatsData, dashboardPreferences, true),
-    ...getStandaloneInstagramCard(platformMetricRows)
+    ...getStandaloneInstagramCard(platformMetricRows),
+    ...getThreadsCard(platformMetricRows)
   ];
   const validDailyFocusProgressTaskKeys = useMemo(
     () =>
@@ -17121,7 +17122,8 @@ function PlatformsView({
         hideHeading
         platforms={[
           ...getPlatformCardsForPreferences(platformStatsData, { childOrderByParent: { platforms: platformChildOrder }, visibleCards: [], cardOrder: [], isPersonalized: true, topLevelOrder: [] }, false),
-          ...getStandaloneInstagramCard(platformMetricRows)
+          ...getStandaloneInstagramCard(platformMetricRows),
+          ...getThreadsCard(platformMetricRows)
         ]}
         title="All Platform Metrics"
         description="Daily platform snapshots collected into the shared Supabase history."
@@ -17156,6 +17158,15 @@ function PlatformsView({
                   { color: "#1f7a58", label: "Followers", points: getPlatformMetricTrend(platformMetricRows, "instagram", "followers", [], "instagram-login-api") },
                   { color: "#c79522", label: "Accounts reached, last 30 days", points: getPlatformMetricTrend(platformMetricRows, "instagram", "accounts_reached_30d", [], "instagram-login-api") },
                   { color: "#2f75a8", label: "Views, last 30 days", points: getPlatformMetricTrend(platformMetricRows, "instagram", "views_30d", [], "instagram-login-api") }
+                ]}
+                title="Evolution graphs"
+              />
+            ) : null}
+            {platform.slug === "threads" ? (
+              <PlatformTrendPanelGroup
+                charts={[
+                  { color: "#2f75a8", label: "Profile views", points: getPlatformMetricTrend(platformMetricRows, "threads", "views_daily", [], "threads-api") },
+                  { color: "#1f7a58", label: "Followers", points: getPlatformMetricTrend(platformMetricRows, "threads", "followers", [], "threads-api") }
                 ]}
                 title="Evolution graphs"
               />
@@ -17249,6 +17260,13 @@ function PlatformsView({
               Last update: {formatPlatformUpdateTimestamp(
                 getPlatformLastSnapshotDate(platformMetricRows, "instagram", "instagram-login-api")!,
                 getPlatformLastSnapshotImportedAt(platformMetricRows, "instagram", "instagram-login-api")
+              )}
+            </span>
+          ) : platform.slug === "threads" && getPlatformLastSnapshotDate(platformMetricRows, "threads", "threads-api") ? (
+            <span className="platform-card-header-meta">
+              Last update: {formatPlatformUpdateTimestamp(
+                getPlatformLastSnapshotDate(platformMetricRows, "threads", "threads-api")!,
+                getPlatformLastSnapshotImportedAt(platformMetricRows, "threads", "threads-api")
               )}
             </span>
           ) : platform.slug === "facebook" && facebookLastUpdate ? (
@@ -18010,6 +18028,13 @@ const platformMetricDeltaKeys = new Set([
   "instagram:followers",
   "instagram:accounts_reached_30d",
   "instagram:views_30d",
+  "threads:views_daily",
+  "threads:followers",
+  "threads:likes_daily",
+  "threads:replies_daily",
+  "threads:reposts_daily",
+  "threads:quotes_daily",
+  "threads:clicks_daily",
   "youtube:subscribers",
   "youtube:total_channel_views",
   "youtube-music:subscribers",
@@ -18396,6 +18421,34 @@ function getStandaloneInstagramCard(rows: MetricRow[]): PlatformDisplayCard[] {
       if (!row) return metric;
       const dailyDelta = getPlatformMetricDelta("instagram", metric.metricName, row, rows, source);
       return { ...metric, value: getMetricDisplayValue(metric.metricName, row), context: getMetricDisplayContext("instagram", metric.metricName, row, metric.context), ...(dailyDelta ? { dailyDelta } : {}) };
+    })
+  } as PlatformDisplayCard];
+}
+
+function getThreadsCard(rows: MetricRow[]): PlatformDisplayCard[] {
+  const source = "threads-api";
+  if (!rows.some((row) => getSingle(row.platforms)?.slug === "threads" && row.source === source)) return [];
+  const template = platformStats[0];
+  const metrics = [
+    { label: "Profile Views", metricName: "views_daily", value: "—" },
+    { label: "Followers", metricName: "followers", value: "—" },
+    { label: "Likes", metricName: "likes_daily", value: "—" },
+    { label: "Replies", metricName: "replies_daily", value: "—" },
+    { label: "Reposts", metricName: "reposts_daily", value: "—" },
+    { label: "Quotes", metricName: "quotes_daily", value: "—" },
+    { label: "Link Clicks", metricName: "clicks_daily", value: "—" }
+  ];
+  return [{
+    ...template,
+    platform: "Threads",
+    profileUrl: "",
+    slug: "threads",
+    icon: Send,
+    metrics: metrics.map((metric) => {
+      const row = rows.filter((candidate) => getSingle(candidate.platforms)?.slug === "threads" && candidate.source === source && candidate.metric_name === metric.metricName).sort(compareMetricRows)[0];
+      if (!row) return metric;
+      const dailyDelta = getPlatformMetricDelta("threads", metric.metricName, row, rows, source);
+      return { ...metric, value: getMetricDisplayValue(metric.metricName, row), context: getMetricDisplayContext("threads", metric.metricName, row), ...(dailyDelta ? { dailyDelta } : {}) };
     })
   } as PlatformDisplayCard];
 }

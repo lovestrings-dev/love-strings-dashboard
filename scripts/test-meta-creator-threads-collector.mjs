@@ -1,0 +1,17 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { stripTypeScriptTypes } from "node:module";
+
+process.env.META_TOKEN_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString("base64url");
+const { decryptMetaTokenPayload, encryptMetaTokenPayload } = await import("../lib/meta/tokens.ts");
+globalThis.__collectorDeps = { decryptMetaTokenPayload, defaultWorkspaceTimeZone: "Europe/Vienna", getWorkspaceDateKey: () => "2026-08-19", resolveTimeZone: (value) => value ?? null };
+let source = await readFile(new URL("../lib/metrics/meta-creator-threads-collector.ts", import.meta.url), "utf8");
+source = source.replace(/import type[^\n]+\n/, "").replace(/import \{ decryptMetaTokenPayload \}[^\n]+\n/, "const { decryptMetaTokenPayload } = globalThis.__collectorDeps;\n").replace(/import \{ defaultWorkspaceTimeZone, getWorkspaceDateKey, resolveTimeZone \}[^\n]+\n/, "const { defaultWorkspaceTimeZone, getWorkspaceDateKey, resolveTimeZone } = globalThis.__collectorDeps;\n");
+const { MetaCreatorThreadsCollectorError, refreshMetaCreatorThreadsMetrics } = await import(`data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(source,{mode:"strip"})).toString("base64")}`);
+const workspace="workspace-threads", account="threads-account", externalId="threads-user";
+function fixture(overrides={}) { const state={snapshots:[]}; const rows={connections:[{id:"threads-connection",encrypted_token_payload:encryptMetaTokenPayload({accessToken:"threads-token"})}],mappings:[{account_type:"threads_profile",platform_account_id:account,is_selected:true,asset_state:"selected"}],accounts:[{id:account,workspace_id:workspace,platform_id:"threads-platform",meta_external_id:externalId}],...overrides}; function result(table,op){if(table==="app_meta_connections")return{data:rows.connections,error:null};if(table==="app_meta_connection_accounts")return{data:rows.mappings,error:null};if(table==="platform_accounts")return{data:rows.accounts,error:null};if(table==="platforms")return{data:{slug:"threads"},error:null};if(table==="app_workspace_settings")return{data:{timezone:"Europe/Vienna"},error:null};return{data:null,error:null};} const client={from(table){let op="await";const b={select(){return b},eq(){return b},limit(){return b},maybeSingle(){op="maybeSingle";return Promise.resolve(result(table,op))},upsert(values){if(table==="platform_metric_snapshots")state.snapshots.push(...values);return b},then(resolve,reject){return Promise.resolve(result(table,op)).then(resolve,reject)}};return b}};return{client,state}; }
+function graph(responses){let i=0;return async()=>new Response(JSON.stringify(responses[i++]),{status:200});}
+const ok=fixture(); const result=await refreshMetaCreatorThreadsMetrics(workspace,ok.client,graph([{id:externalId},{data:[{name:"views",values:[{value:7,end_time:"2026-08-19T07:00:00+0000"}]},{name:"likes",values:[]},{name:"replies",values:[]},{name:"reposts",values:[]},{name:"quotes",values:[]},{name:"clicks",values:[]},{name:"followers_count",values:[]}]}]),new Date("2026-08-19T10:00:00Z"));
+assert.equal(result.accountId,account);assert.deepEqual(result.metrics,{views_daily:7});assert.equal(ok.state.snapshots.length,1);assert.equal(ok.state.snapshots[0].source,"threads-api");assert.equal(ok.state.snapshots[0].metric_name,"views_daily");
+await assert.rejects(()=>refreshMetaCreatorThreadsMetrics(workspace,fixture({connections:[]}).client,graph([])),MetaCreatorThreadsCollectorError);
+console.log("Meta App A Threads collector tests passed.");

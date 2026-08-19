@@ -71,5 +71,10 @@ assert.deepEqual(
   ["standalone-instagram"],
   "a connected App A Instagram account collects independently from App B"
 );
+assert.deepEqual(
+  [...getWorkspaceEnabledCollectors({ analyticsConfigured: false, facebookConfigured: false, instagramConfigured: false, standaloneInstagramConfigured: false, threadsConfigured: true, isLegacyWorkspace: false, youtubeConfigured: false, youtubeTopicConfigured: false })],
+  ["threads"],
+  "a connected Threads account collects independently from both Instagram integrations"
+);
 
 console.log("Metric collector eligibility checks passed.");

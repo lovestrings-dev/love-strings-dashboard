@@ -21,6 +21,10 @@ import {
   hasEligibleMetaCreatorInstagramBinding,
   refreshMetaCreatorInstagramMetrics
 } from "@/lib/metrics/meta-creator-instagram-collector";
+import {
+  hasEligibleMetaCreatorThreadsBinding,
+  refreshMetaCreatorThreadsMetrics
+} from "@/lib/metrics/meta-creator-threads-collector";
 import { defaultWorkspaceId } from "@/lib/workspace";
 import { defaultWorkspaceTimeZone, getWorkspaceDateKey, resolveTimeZone } from "@/lib/workspace-time";
 
@@ -28,7 +32,7 @@ type CollectorStatus = "fulfilled" | "rejected" | "skipped";
 
 type MetricCollectorResult = {
   metrics?: Record<string, number | string | null>;
-  name: "facebook" | "google-analytics" | "instagram" | "standalone-instagram" | "spotify" | "youtube" | "youtube-music";
+  name: "facebook" | "google-analytics" | "instagram" | "standalone-instagram" | "threads" | "spotify" | "youtube" | "youtube-music";
   reason?: string;
   status: CollectorStatus;
 };
@@ -102,6 +106,7 @@ export async function refreshAllMetricCollectors(workspaceId = defaultWorkspaceI
       })
     },
     { name: "standalone-instagram", refresh: () => refreshMetaCreatorInstagramMetrics(workspaceId, createServiceSupabaseClient()) },
+    { name: "threads", refresh: () => refreshMetaCreatorThreadsMetrics(workspaceId, createServiceSupabaseClient()) },
     { name: "youtube-music", refresh: () => refreshYouTubeMusicMetrics(workspaceId) },
     { name: "spotify", refresh: () => refreshSpotifyMetrics(workspaceId) }
   ];
@@ -148,6 +153,7 @@ async function getEnabledCollectorsForWorkspace(workspaceId: string) {
 
   const instagramConfigured = await hasEligibleMetaFstatsInstagramBinding(workspaceId, supabase);
   const standaloneInstagramConfigured = await hasEligibleMetaCreatorInstagramBinding(workspaceId, supabase);
+  const threadsConfigured = await hasEligibleMetaCreatorThreadsBinding(workspaceId, supabase);
   const facebookConfigured = await hasEligibleMetaFstatsFacebookPageBinding(workspaceId, supabase);
 
   return getWorkspaceEnabledCollectors({
@@ -157,6 +163,7 @@ async function getEnabledCollectorsForWorkspace(workspaceId: string) {
     facebookConfigured,
     instagramConfigured,
     standaloneInstagramConfigured,
+    threadsConfigured,
     isLegacyWorkspace: workspaceId === defaultWorkspaceId,
     youtubeConfigured: Boolean(connection?.youtube_enabled && connection.youtube_channel_id),
     youtubeTopicConfigured: Boolean(connection?.youtube_topic_channel_id)
