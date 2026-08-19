@@ -8,6 +8,7 @@ const migration = await readFile(new URL("../supabase/migrations/202608190002_bi
 const standaloneBindingMigration = await readFile(new URL("../supabase/migrations/202608190003_allow_standalone_instagram_active_binding.sql", import.meta.url), "utf8");
 const ambiguityFixMigration = await readFile(new URL("../supabase/migrations/202608190004_fix_creator_social_instagram_connection_id_ambiguity.sql", import.meta.url), "utf8");
 const reconnectFixMigration = await readFile(new URL("../supabase/migrations/202608190005_preserve_creator_instagram_reconnect_state.sql", import.meta.url), "utf8");
+const reactivationAmbiguityFixMigration = await readFile(new URL("../supabase/migrations/202608190006_fix_creator_instagram_reactivation_column_ambiguity.sql", import.meta.url), "utf8");
 const oauth = await readFile(new URL("../lib/meta/instagram-oauth.ts", import.meta.url), "utf8");
 const connections = await readFile(new URL("../lib/server/meta-connections.ts", import.meta.url), "utf8");
 assert.match(oauth, /https:\/\/www\.instagram\.com\/oauth\/authorize/);
@@ -52,6 +53,10 @@ assert.match(reconnectFixMigration, /Prefer the currently active App A binding/)
 assert.match(reconnectFixMigration, /connection\.id <> v_connection_id/);
 assert.match(reconnectFixMigration, /Make the replacement mapping valid first/);
 assert.match(reconnectFixMigration, /on conflict on constraint app_meta_connection_accounts_connection_id_platform_account_key/);
+assert.match(reactivationAmbiguityFixMigration, /mapping\.connection_id = v_connection_id/);
+assert.doesNotMatch(reactivationAmbiguityFixMigration, /\nand connection_id = v_connection_id/);
+assert.match(reactivationAmbiguityFixMigration, /on conflict on constraint app_meta_connection_accounts_connection_id_platform_account_key/);
+assert.doesNotMatch(reactivationAmbiguityFixMigration, /on conflict \(connection_id, platform_account_id\)/);
 assert.match(reconnectFixMigration, /return query select v_connection_id, v_account_id/);
 assert.doesNotMatch(connections, /\.limit\(1\)\.maybeSingle\(\)/);
 assert.match(connections, /resolveCreatorSocialInstagramState/);
