@@ -159,7 +159,7 @@ Reason:
 
 Implementation notes:
 
-- Local CLI importers still exist for direct testing: `pnpm run import:youtube`, `pnpm run check:instagram`, and `pnpm run import:instagram`.
+- The YouTube CLI importer remains available for direct testing: `pnpm run import:youtube`. Instagram collection runs through the App B Page-linked collector.
 - A server-side refresh endpoint exists at `/api/metrics/refresh` for the Dashboard refresh button and future scheduler.
 - Server refresh requires `SUPABASE_SERVICE_ROLE_KEY` because it writes metric snapshots with service-role privileges.
 - The scheduler calls `https://love-strings-dashboard.vercel.app/api/metrics/refresh?scheduled=1` at `23:05/23:20/23:35/23:50 UTC` for daylight saving time and `00:05/00:20/00:35/00:50 UTC` for standard time.

@@ -9,3 +9,18 @@ const uuidPattern =
 export function parseWorkspaceId(value?: string | null) {
   return value && uuidPattern.test(value) ? value.toLowerCase() : null;
 }
+
+type WorkspaceMembership = {
+  workspace_id: string;
+};
+
+export function resolveWorkspaceMembership<T extends WorkspaceMembership>(
+  memberships: readonly T[] | null | undefined,
+  requestedWorkspaceId?: string | null
+) {
+  const requestedMembership = requestedWorkspaceId
+    ? memberships?.find((membership) => membership.workspace_id === requestedWorkspaceId)
+    : undefined;
+
+  return requestedMembership ?? memberships?.[0] ?? null;
+}

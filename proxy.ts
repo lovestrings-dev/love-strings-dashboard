@@ -2,7 +2,8 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import {
   activeWorkspaceCookieName,
-  parseWorkspaceId
+  parseWorkspaceId,
+  resolveWorkspaceMembership
 } from "@/lib/workspace";
 
 const cronSecret = process.env.CRON_SECRET;
@@ -60,9 +61,7 @@ export async function proxy(request: NextRequest) {
   const requestedWorkspaceId = parseWorkspaceId(
     request.cookies.get(activeWorkspaceCookieName)?.value
   );
-  const membership = requestedWorkspaceId
-    ? memberships?.find((item) => item.workspace_id === requestedWorkspaceId)
-    : memberships?.[0];
+  const membership = resolveWorkspaceMembership(memberships, requestedWorkspaceId);
 
   if (membershipError || !membership) {
     if (request.nextUrl.pathname.startsWith("/api/")) {

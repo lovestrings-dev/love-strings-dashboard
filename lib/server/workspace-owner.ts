@@ -3,7 +3,8 @@ import { createClient } from "@supabase/supabase-js";
 import type { NextRequest } from "next/server";
 import {
   activeWorkspaceCookieName,
-  parseWorkspaceId
+  parseWorkspaceId,
+  resolveWorkspaceMembership
 } from "@/lib/workspace";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -63,9 +64,7 @@ export async function requireWorkspaceAccess(request: NextRequest) {
   const requestedWorkspaceId = parseWorkspaceId(
     request.cookies.get(activeWorkspaceCookieName)?.value
   );
-  const membership = requestedWorkspaceId
-    ? memberships?.find((item) => item.workspace_id === requestedWorkspaceId)
-    : memberships?.[0];
+  const membership = resolveWorkspaceMembership(memberships, requestedWorkspaceId);
   if (!membership) {
     throw new WorkspaceAccessError("Workspace access denied.", 403);
   }

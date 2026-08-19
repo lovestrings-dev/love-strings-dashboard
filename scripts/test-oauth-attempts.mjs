@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+process.env.APP_CANONICAL_ORIGIN = "https://love-strings-dashboard.vercel.app";
 import {
+  createOAuthResultReturnUrl,
   defaultOAuthReturnPath,
+  getAllowedOAuthReturnOrigin,
   getSafeOAuthReturnPath,
   hashOAuthState,
   validateOAuthAttemptRecord
@@ -46,5 +50,41 @@ assert.equal(getSafeOAuthReturnPath("/platforms?view=all", origin), "/platforms?
 assert.equal(getSafeOAuthReturnPath(`${origin}/?settings=general`, origin), "/?settings=general");
 assert.equal(getSafeOAuthReturnPath("https://evil.example/steal", origin), defaultOAuthReturnPath);
 assert.equal(getSafeOAuthReturnPath("//evil.example/steal", origin), defaultOAuthReturnPath);
+assert.equal(getSafeOAuthReturnPath("/%2f%2fevil.example/steal", origin), defaultOAuthReturnPath);
+assert.equal(getSafeOAuthReturnPath("javascript:alert(1)", origin), defaultOAuthReturnPath);
+
+assert.equal(getAllowedOAuthReturnOrigin("http://localhost:3000"), "http://localhost:3000");
+assert.equal(getAllowedOAuthReturnOrigin("https://love-strings-dashboard.vercel.app"), "https://love-strings-dashboard.vercel.app");
+assert.throws(() => getAllowedOAuthReturnOrigin("https://evil.example"));
+assert.throws(() => getAllowedOAuthReturnOrigin("https://evil.love-strings-dashboard.vercel.app"));
+assert.throws(() => getAllowedOAuthReturnOrigin("http://localhost:3001"));
+assert.throws(() => getAllowedOAuthReturnOrigin("not a url"));
+assert.throws(() => getAllowedOAuthReturnOrigin("https://user:pass@love-strings-dashboard.vercel.app"));
+assert.throws(() => getAllowedOAuthReturnOrigin("https://love-strings-dashboard.vercel.app/callback"));
+assert.throws(() => getAllowedOAuthReturnOrigin("https://love-strings-dashboard.vercel.app/?next=x"));
+
+const resultUrl = createOAuthResultReturnUrl({
+  origin: "http://localhost:3000",
+  returnPath: "/?settings=general",
+  result: "creator-social-instagram-connected"
+});
+assert.equal(resultUrl.toString(), "http://localhost:3000/?settings=general&oauth=creator-social-instagram-connected");
+assert.throws(() => createOAuthResultReturnUrl({ origin: "https://evil.example", returnPath: "/", result: "ok" }));
+assert.throws(() => createOAuthResultReturnUrl({ origin: "http://localhost:3000", returnPath: "//evil.example", result: "ok" }));
+assert.throws(() => createOAuthResultReturnUrl({ origin: "http://localhost:3000", returnPath: "/", result: "token=secret" }));
+
+const migration = await readFile(new URL("../supabase/migrations/202608190001_add_fixed_callback_oauth_attempts.sql", import.meta.url), "utf8");
+assert.match(migration, /return_origin in \([\s\S]*http:\/\/localhost:3000[\s\S]*https:\/\/love-strings-dashboard\.vercel\.app/);
+assert.match(migration, /attempt\.integration_kind <> p_integration_kind/);
+assert.match(migration, /attempt\.consumed_at is not null/);
+assert.match(migration, /attempt\.expires_at <= now\(\)/);
+assert.match(migration, /membership\.workspace_id = attempt\.workspace_id/);
+assert.match(migration, /membership\.user_id = attempt\.user_id/);
+const serverSource = await readFile(new URL("../lib/server/oauth-attempts.ts", import.meta.url), "utf8");
+assert.match(serverSource, /createFixedCallbackOAuthAttempt/);
+assert.match(serverSource, /returnOrigin = getAllowedOAuthReturnOrigin\(origin\)/);
+assert.match(serverSource, /requiredWorkspaceRole = "admin"/);
+assert.match(serverSource, /consumeFixedCallbackOAuthAttempt/);
+assert.match(serverSource, /consume_app_oauth_attempt_for_fixed_callback/);
 
 console.log("OAuth attempt helper tests passed.");

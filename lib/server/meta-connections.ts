@@ -3,9 +3,54 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { metaPlatformSlugForAccountType, toSafeMetaConnectionStatus, type MetaAccountType } from "@/lib/meta/foundation";
 import { normalizeMetaPageSelectionError } from "@/lib/meta/selection-error";
 import { hasRequiredMetaScopes, metaAppKindForConnectionKind, type MetaConnectionKind } from "@/lib/meta/scopes";
+import { createServiceSupabaseClient } from "@/lib/server/workspace-owner";
 
 export { toSafeMetaConnectionStatus, type MetaAccountType } from "@/lib/meta/foundation";
 export { MetaPageSelectionError } from "@/lib/meta/selection-error";
+
+export class CreatorSocialInstagramDuplicateError extends Error {
+  constructor() { super("This Instagram account is already connected through Facebook."); }
+}
+
+export async function bindCreatorSocialInstagram(input: {
+  workspaceId: string;
+  connectedBy: string;
+  authorizationUserExternalId: string | null;
+  encryptedTokenPayload: string;
+  tokenExpiresAt: string | null;
+  tokenType: string;
+  grantedScopes: string[];
+  identity: { externalId: string; displayName: string; username: string | null };
+}) {
+  const client = createServiceSupabaseClient();
+  const { data, error } = await (client as any).rpc("bind_creator_social_instagram", {
+    p_authorization_user_external_id: input.authorizationUserExternalId,
+    p_connected_by: input.connectedBy,
+    p_display_name: input.identity.displayName,
+    p_encrypted_token_payload: input.encryptedTokenPayload,
+    p_external_id: input.identity.externalId,
+    p_granted_scopes: Array.from(new Set(input.grantedScopes)),
+    p_token_expires_at: input.tokenExpiresAt,
+    p_token_type: input.tokenType,
+    p_username: input.identity.username,
+    p_workspace_id: input.workspaceId
+  }).single();
+  if (error?.code === "P2101") throw new CreatorSocialInstagramDuplicateError();
+  if (error || !data) throw error ?? new Error("Standalone Instagram could not be bound.");
+  return data as { connection_id: string; platform_account_id: string };
+}
+
+export async function readCreatorSocialInstagramState(client: SupabaseClient, workspaceId: string) {
+  const { data, error } = await client.from("app_meta_connections")
+    .select("id, connection_state, token_expires_at, last_error_code, last_error_summary, updated_at, app_meta_connection_accounts!inner(is_selected, asset_state, account_type, platform_accounts!app_meta_connection_accounts_platform_account_id_fkey!inner(meta_external_id, account_name, url))")
+    .eq("workspace_id", workspaceId).eq("connection_kind", "creator_social_instagram")
+    .order("updated_at", { ascending: false }).limit(1).maybeSingle();
+  if (error) throw error;
+  if (!data) return { state: "disconnected" as const };
+  const mapping = (data as any).app_meta_connection_accounts?.find((row: any) => row.account_type === "instagram_professional" && row.is_selected);
+  if (data.connection_state !== "connected" || !mapping) return { state: "degraded" as const, connectionId: data.id, account: mapping ? { externalId: mapping.platform_accounts.meta_external_id, displayName: mapping.platform_accounts.account_name, url: mapping.platform_accounts.url } : undefined };
+  return { state: "connected" as const, connectionId: data.id, tokenExpiresAt: data.token_expires_at, account: { externalId: mapping.platform_accounts.meta_external_id, displayName: mapping.platform_accounts.account_name, url: mapping.platform_accounts.url } };
+}
 
 export async function saveMetaConnection(client: SupabaseClient, input: {
   workspaceId: string;

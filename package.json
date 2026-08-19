@@ -12,8 +12,11 @@
     "test:facebook-page-ui": "node scripts/test-facebook-page-ui.mjs",
     "test:date-input": "node --experimental-strip-types scripts/test-date-input.mjs",
     "test:metric-collector-eligibility": "node --experimental-strip-types scripts/test-metric-collector-eligibility.mjs",
+    "test:workspace-resolution": "node --experimental-strip-types scripts/test-workspace-resolution.mjs",
     "test:meta-connection-foundation": "node --experimental-strip-types scripts/test-meta-connection-foundation.mjs",
     "test:meta-fstats-login-oauth": "node --experimental-strip-types scripts/test-meta-fstats-login-oauth.mjs",
+    "test:meta-creator-instagram-oauth": "node --experimental-strip-types scripts/test-meta-creator-instagram-oauth.mjs",
+    "test:meta-creator-instagram-ui": "node scripts/test-meta-creator-instagram-ui.mjs",
     "test:meta-authoritative-state": "node --experimental-strip-types scripts/test-meta-authoritative-state.mjs",
     "test:meta-onboarding-ui": "node --experimental-strip-types scripts/test-meta-onboarding-ui.mjs",
     "test:meta-oauth-return-ui": "node --experimental-strip-types scripts/test-meta-oauth-return-ui.mjs",
@@ -22,10 +25,8 @@
     "test:meta-fstats-instagram-collector": "node --experimental-strip-types scripts/test-meta-fstats-instagram-collector.mjs",
     "test:meta-fstats-facebook-page-collector": "node --experimental-strip-types scripts/test-meta-fstats-facebook-page-collector.mjs",
     "test:platform-last-update": "node scripts/test-platform-last-update.mjs",
-    "test:meta-fstats-instagram-switchover": "node scripts/test-meta-fstats-instagram-switchover.mjs",
+    "test:meta-fstats-instagram-collector:live": "node --experimental-strip-types scripts/run-meta-fstats-instagram-collector.mjs --apply",
     "test:oauth-attempts": "node --experimental-strip-types scripts/test-oauth-attempts.mjs",
-    "check:instagram": "node scripts/import-instagram-metrics.mjs",
-    "import:instagram": "node scripts/import-instagram-metrics.mjs --apply",
     "import:youtube": "node scripts/import-youtube-metrics.mjs --apply"
   },
   "dependencies": {

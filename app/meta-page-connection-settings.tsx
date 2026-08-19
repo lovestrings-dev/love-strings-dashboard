@@ -6,9 +6,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { cleanConsumedFstatsLoginContinuation, hasFstatsLoginContinuation } from "@/lib/meta/fstats-login-continuation";
 import type { FstatsLoginState, InstagramIdentity } from "@/lib/meta/fstats-login-state";
 import { deriveFstatsLoginUiModel } from "@/lib/meta/fstats-login-ui";
+import { cleanCreatorInstagramContinuation, hasCreatorInstagramContinuation } from "@/lib/meta/creator-instagram-continuation";
 
 type RequestState = "idle" | "loading" | "error";
 type MetaAction = "select_page" | "refresh_pages" | "connect_instagram" | "skip_instagram" | "retry_instagram_discovery" | "disconnect_instagram" | "disconnect_page";
+type CreatorInstagramState = { state: "disconnected" | "connected" | "degraded"; connectionId?: string; tokenExpiresAt?: string | null; account?: { externalId: string; displayName: string; url: string | null } };
 
 const manageFacebookAccessUrl = "https://www.facebook.com/settings?tab=business_tools";
 
@@ -29,12 +31,24 @@ export function MetaPageConnectionSettings() {
   const [message, setMessage] = useState("");
   const [isOpen, setIsOpen] = useState(false);
   const [armedAction, setArmedAction] = useState<"disconnect_instagram" | "disconnect_page" | null>(null);
+  const [creatorInstagram, setCreatorInstagram] = useState<CreatorInstagramState | null>(null);
+  const [creatorInstagramBusy, setCreatorInstagramBusy] = useState(false);
+  const [creatorInstagramMessage, setCreatorInstagramMessage] = useState("");
   const [hasMetaContinuation, setHasMetaContinuation] = useState(
     () => typeof window !== "undefined" && hasFstatsLoginContinuation(window.location.href),
   );
   const sectionRef = useRef<HTMLElement>(null);
   const metaContinuationConsumed = useRef(false);
   const requestVersion = useRef(0);
+
+  const loadCreatorInstagram = useCallback(async () => {
+    try {
+      const response = await fetch("/api/integrations/meta/instagram", { cache: "no-store" });
+      const body = await response.json();
+      if (!response.ok || !body.state) throw new Error(body.error ?? "Standalone Instagram status failed.");
+      setCreatorInstagram(body.state);
+    } catch (error) { setCreatorInstagramMessage(error instanceof Error ? error.message : "Standalone Instagram status failed."); }
+  }, []);
 
   const load = useCallback(async () => {
     const version = ++requestVersion.current;
@@ -57,6 +71,17 @@ export function MetaPageConnectionSettings() {
   }, []);
 
   useEffect(() => { queueMicrotask(() => void load()); }, [load]);
+  useEffect(() => { queueMicrotask(() => void loadCreatorInstagram()); }, [loadCreatorInstagram]);
+  useEffect(() => {
+    if (!hasCreatorInstagramContinuation(window.location.href)) return;
+    queueMicrotask(async () => {
+      const result = new URL(window.location.href).searchParams.get("oauth");
+      await loadCreatorInstagram();
+      if (result === "creator-social-instagram-duplicate") setCreatorInstagramMessage("This Instagram account is already connected through your Facebook Page.");
+      else if (result === "creator-social-instagram-error") setCreatorInstagramMessage("Instagram connection could not be completed. Reconnect and try again.");
+      window.history.replaceState(window.history.state, "", cleanCreatorInstagramContinuation(window.location.href));
+    });
+  }, [loadCreatorInstagram]);
   useEffect(() => {
     if (!hasMetaContinuation) return;
     queueMicrotask(() => setIsOpen(true));
@@ -109,6 +134,22 @@ export function MetaPageConnectionSettings() {
 
   function authorizeFacebook() {
     window.location.assign("/api/integrations/meta/fstats-login/connect?return=/?settings=general");
+  }
+
+  function connectCreatorInstagram() {
+    window.location.assign("/api/integrations/meta/instagram/connect?return=/?settings=general");
+  }
+
+  async function disconnectCreatorInstagram() {
+    setCreatorInstagramBusy(true); setCreatorInstagramMessage("");
+    try {
+      const response = await fetch("/api/integrations/meta/instagram", { method: "DELETE" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Standalone Instagram could not be disconnected.");
+      await loadCreatorInstagram();
+      setCreatorInstagramMessage("Standalone Instagram disconnected.");
+    } catch (error) { setCreatorInstagramMessage(error instanceof Error ? error.message : "Standalone Instagram could not be disconnected."); }
+    finally { setCreatorInstagramBusy(false); }
   }
 
   function confirmDisconnect(action: "disconnect_instagram" | "disconnect_page", details: Record<string, string>) {
@@ -179,10 +220,25 @@ export function MetaPageConnectionSettings() {
           onRefresh={data.connection.authorization === "valid" ? () => void performAction("refresh_pages") : undefined}
         /> : null}
 
+        <StandaloneInstagramRow
+          busy={creatorInstagramBusy}
+          message={creatorInstagramMessage}
+          onConnect={connectCreatorInstagram}
+          onDisconnect={() => void disconnectCreatorInstagram()}
+          state={creatorInstagram}
+        />
+
         {message ? <p className={requestState === "error" ? "settings-error" : "settings-status"} role={requestState === "error" ? "alert" : "status"}>{message}</p> : null}
       </div>}
     </article>
   );
+}
+
+function StandaloneInstagramRow({ busy, message, onConnect, onDisconnect, state }: { busy: boolean; message: string; onConnect: () => void; onDisconnect: () => void; state: CreatorInstagramState | null }) {
+  const account = state?.state === "connected" ? state.account ?? null : null;
+  const connected = Boolean(account);
+  const identity = account ? account.displayName.startsWith("@") ? account.displayName : `@${account.displayName}` : null;
+  return <div className="google-service-row standalone-instagram-row"><div><strong>Standalone Instagram</strong>{!state ? <span>Checking connection…</span> : connected ? <><span className="meta-account-identity">{identity}</span><span>Connected</span><small>Connected directly through Instagram and independent from your Facebook Page.</small></> : state.state === "degraded" ? <><span>Needs reconnection</span><small>Reconnect this professional Instagram account to restore access.</small></> : <><span>Not connected</span><small>Connect an additional professional Instagram account directly through Instagram. This account is independent from the Instagram linked to your Facebook Page.</small></>}</div><div className="meta-row-actions">{connected ? <><button disabled={busy} onClick={onConnect} type="button">Reconnect Instagram</button><button className="settings-destructive-button" disabled={busy} onClick={onDisconnect} type="button">Disconnect Instagram</button></> : <button disabled={busy || !state} onClick={onConnect} type="button">Connect standalone Instagram</button>}</div>{message ? <small className="settings-status">{message}</small> : null}</div>;
 }
 
 function FacebookConnectedRow({ armed, busy, name, onDisconnect }: { armed: boolean; busy: boolean; name: string; onDisconnect: () => void }) {
