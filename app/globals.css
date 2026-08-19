@@ -895,6 +895,14 @@ button {
   flex-direction: row;
 }
 
+.standalone-instagram-row {
+  flex-wrap: wrap;
+}
+
+.standalone-instagram-row > small {
+  flex: 1 0 100%;
+}
+
 .meta-attention-actions,
 .meta-access-actions {
   margin-top: 12px;
