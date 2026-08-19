@@ -484,7 +484,7 @@ type EventsSaveSnapshot = EventsSnapshot & {
 
 const platformStats = [
   {
-    platform: "Instagram",
+    platform: "Instagram via Facebook Page",
     slug: "instagram",
     profileUrl: "",
     icon: Camera,
@@ -5317,7 +5317,10 @@ export default function Home() {
     platformStatsData.map((platform) => ({ ...platform, profileUrl: configuredPlatformUrls[platform.slug] ?? platform.profileUrl })),
     workspaceGoogleConnection
   );
-  const dashboardPlatformStats = getPlatformCardsForPreferences(platformStatsData, dashboardPreferences, true);
+  const dashboardPlatformStats = [
+    ...getPlatformCardsForPreferences(platformStatsData, dashboardPreferences, true),
+    ...getStandaloneInstagramCard(platformMetricRows)
+  ];
   const validDailyFocusProgressTaskKeys = useMemo(
     () =>
       new Set([
@@ -17006,19 +17009,22 @@ function PlatformsView({
     platformMetricRows,
     "instagram",
     "followers",
-    instagramFollowerHistory
+    instagramFollowerHistory,
+    "instagram-api"
   );
   const instagramReachTrend = getPlatformMetricTrend(
     platformMetricRows,
     "instagram",
     "accounts_reached_30d",
-    []
+    [],
+    "instagram-api"
   );
   const instagramViewsTrend = getPlatformMetricTrend(
     platformMetricRows,
     "instagram",
     "views_30d",
-    []
+    [],
+    "instagram-api"
   );
   const instagramLastUpdate = getPlatformLastSnapshotDate(
     platformMetricRows,
@@ -17113,7 +17119,10 @@ function PlatformsView({
 
       <PlatformStatsSection
         hideHeading
-        platforms={getPlatformCardsForPreferences(platformStatsData, { childOrderByParent: { platforms: platformChildOrder }, visibleCards: [], cardOrder: [], isPersonalized: true, topLevelOrder: [] }, false)}
+        platforms={[
+          ...getPlatformCardsForPreferences(platformStatsData, { childOrderByParent: { platforms: platformChildOrder }, visibleCards: [], cardOrder: [], isPersonalized: true, topLevelOrder: [] }, false),
+          ...getStandaloneInstagramCard(platformMetricRows)
+        ]}
         title="All Platform Metrics"
         description="Daily platform snapshots collected into the shared Supabase history."
         variant="full"
@@ -17137,6 +17146,16 @@ function PlatformsView({
                     label: "Views, last 30 days",
                     points: instagramViewsTrend
                   }
+                ]}
+                title="Evolution graphs"
+              />
+            ) : null}
+            {platform.slug === "instagram-standalone" ? (
+              <PlatformTrendPanelGroup
+                charts={[
+                  { color: "#1f7a58", label: "Followers", points: getPlatformMetricTrend(platformMetricRows, "instagram", "followers", [], "instagram-login-api") },
+                  { color: "#c79522", label: "Accounts reached, last 30 days", points: getPlatformMetricTrend(platformMetricRows, "instagram", "accounts_reached_30d", [], "instagram-login-api") },
+                  { color: "#2f75a8", label: "Views, last 30 days", points: getPlatformMetricTrend(platformMetricRows, "instagram", "views_30d", [], "instagram-login-api") }
                 ]}
                 title="Evolution graphs"
               />
@@ -17223,6 +17242,13 @@ function PlatformsView({
               Last update: {formatPlatformUpdateTimestamp(
                 instagramLastUpdate,
                 getPlatformLastSnapshotImportedAt(platformMetricRows, "instagram")
+              )}
+            </span>
+          ) : platform.slug === "instagram-standalone" && getPlatformLastSnapshotDate(platformMetricRows, "instagram", "instagram-login-api") ? (
+            <span className="platform-card-header-meta">
+              Last update: {formatPlatformUpdateTimestamp(
+                getPlatformLastSnapshotDate(platformMetricRows, "instagram", "instagram-login-api")!,
+                getPlatformLastSnapshotImportedAt(platformMetricRows, "instagram", "instagram-login-api")
               )}
             </span>
           ) : platform.slug === "facebook" && facebookLastUpdate ? (
@@ -17531,7 +17557,8 @@ function getPlatformMetricTrend(
   rows: MetricRow[],
   platformSlug: string,
   metricName: string,
-  manualHistory: MetricTrendPoint[]
+  manualHistory: MetricTrendPoint[],
+  source?: string
 ) {
   const pointsByDate = new Map<string, MetricTrendPoint>();
 
@@ -17544,6 +17571,7 @@ function getPlatformMetricTrend(
       (row) =>
         getSingle(row.platforms)?.slug === platformSlug &&
         row.metric_name === metricName &&
+        (!source || row.source === source) &&
         (manualHistory.length === 0 || row.snapshot_date > "2026-06-14")
     )
     .forEach((row) => {
@@ -17565,19 +17593,20 @@ function getPlatformMetricTrend(
   );
 }
 
-function getPlatformLastSnapshotDate(rows: MetricRow[], platformSlug: string) {
+function getPlatformLastSnapshotDate(rows: MetricRow[], platformSlug: string, source?: string) {
   return rows
-    .filter((row) => getSingle(row.platforms)?.slug === platformSlug)
+    .filter((row) => getSingle(row.platforms)?.slug === platformSlug && (!source || row.source === source))
     .map((row) => row.snapshot_date)
     .sort((firstDate, secondDate) => secondDate.localeCompare(firstDate))[0];
 }
 
 function getPlatformLastSnapshotImportedAt(
   rows: MetricRow[],
-  platformSlug: string
+  platformSlug: string,
+  source?: string
 ) {
   return [...rows]
-    .filter((row) => getSingle(row.platforms)?.slug === platformSlug)
+    .filter((row) => getSingle(row.platforms)?.slug === platformSlug && (!source || row.source === source))
     .sort((firstRow, secondRow) => {
       const snapshotDateDifference = secondRow.snapshot_date.localeCompare(
         firstRow.snapshot_date
@@ -17933,6 +17962,7 @@ function mergePlatformMetricRows(
         .filter(
           (candidate) =>
             getSingle(candidate.platforms)?.slug === platform.slug &&
+            (platform.slug !== "instagram" || candidate.source !== "instagram-login-api") &&
             candidate.metric_name === metric.metricName
         )
         .sort(compareMetricRows)[0];
@@ -17942,7 +17972,7 @@ function mergePlatformMetricRows(
       }
 
       const context = getMetricDisplayContext(platform.slug, metric.metricName, row, metric.context);
-      const dailyDelta = getPlatformMetricDelta(platform.slug, metric.metricName, row, rows);
+      const dailyDelta = getPlatformMetricDelta(platform.slug, metric.metricName, row, rows, platform.slug === "instagram" ? row.source ?? undefined : undefined);
 
       return {
         ...metric,
@@ -17992,7 +18022,8 @@ function getPlatformMetricDelta(
   platformSlug: string,
   metricName: string,
   currentRow: MetricRow,
-  rows: MetricRow[]
+  rows: MetricRow[],
+  source?: string
 ): PlatformMetricDelta | null {
   if (!platformMetricDeltaKeys.has(`${platformSlug}:${metricName}`)) {
     return null;
@@ -18009,6 +18040,7 @@ function getPlatformMetricDelta(
       (candidate) =>
         getSingle(candidate.platforms)?.slug === platformSlug &&
         candidate.metric_name === metricName &&
+        (!source || candidate.source === source) &&
         candidate.snapshot_date < currentRow.snapshot_date &&
         Number.isFinite(Number(candidate.metric_value))
     )
@@ -18349,6 +18381,24 @@ type PlatformDisplayCard = (typeof platformStats)[number] & {
   isAudiencePlaceholder?: boolean;
   isDisconnected?: boolean;
 };
+
+function getStandaloneInstagramCard(rows: MetricRow[]): PlatformDisplayCard[] {
+  const source = "instagram-login-api";
+  if (!rows.some((row) => getSingle(row.platforms)?.slug === "instagram" && row.source === source)) return [];
+  const template = platformStats[0];
+  return [{
+    ...template,
+    platform: "Standalone Instagram",
+    profileUrl: "",
+    slug: "instagram-standalone",
+    metrics: template.metrics.map((metric) => {
+      const row = rows.filter((candidate) => getSingle(candidate.platforms)?.slug === "instagram" && candidate.source === source && candidate.metric_name === metric.metricName).sort(compareMetricRows)[0];
+      if (!row) return metric;
+      const dailyDelta = getPlatformMetricDelta("instagram", metric.metricName, row, rows, source);
+      return { ...metric, value: getMetricDisplayValue(metric.metricName, row), context: getMetricDisplayContext("instagram", metric.metricName, row, metric.context), ...(dailyDelta ? { dailyDelta } : {}) };
+    })
+  } as PlatformDisplayCard];
+}
 
 const platformChildSlugs: Partial<Record<DashboardCardId, string>> = {
     "platforms.amazon": "amazon-music",

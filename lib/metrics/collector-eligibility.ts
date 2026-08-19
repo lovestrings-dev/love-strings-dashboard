@@ -2,6 +2,7 @@ export type MetricCollectorName =
   | "facebook"
   | "google-analytics"
   | "instagram"
+  | "standalone-instagram"
   | "spotify"
   | "youtube"
   | "youtube-music";
@@ -10,6 +11,7 @@ export function getWorkspaceEnabledCollectors({
   analyticsConfigured,
   facebookConfigured,
   instagramConfigured,
+  standaloneInstagramConfigured,
   isLegacyWorkspace,
   youtubeConfigured,
   youtubeTopicConfigured
@@ -17,6 +19,7 @@ export function getWorkspaceEnabledCollectors({
   analyticsConfigured: boolean;
   facebookConfigured: boolean;
   instagramConfigured: boolean;
+  standaloneInstagramConfigured: boolean;
   isLegacyWorkspace: boolean;
   youtubeConfigured: boolean;
   youtubeTopicConfigured: boolean;
@@ -31,6 +34,7 @@ export function getWorkspaceEnabledCollectors({
   if (analyticsConfigured) enabledCollectors.add("google-analytics");
   if (facebookConfigured) enabledCollectors.add("facebook");
   if (instagramConfigured) enabledCollectors.add("instagram");
+  if (standaloneInstagramConfigured) enabledCollectors.add("standalone-instagram");
   if (youtubeConfigured) enabledCollectors.add("youtube");
   if (youtubeTopicConfigured) enabledCollectors.add("youtube-music");
   return enabledCollectors;
