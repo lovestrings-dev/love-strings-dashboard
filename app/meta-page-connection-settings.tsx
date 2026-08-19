@@ -1,12 +1,13 @@
 "use client";
 
 import { Link as LinkIcon, Pencil, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
 import { cleanConsumedFstatsLoginContinuation, hasFstatsLoginContinuation } from "@/lib/meta/fstats-login-continuation";
 import type { FstatsLoginState, InstagramIdentity } from "@/lib/meta/fstats-login-state";
 import { deriveFstatsLoginUiModel } from "@/lib/meta/fstats-login-ui";
-import { cleanCreatorInstagramContinuation, hasCreatorInstagramContinuation, readCreatorInstagramContinuationResult, type CreatorInstagramContinuationResult } from "@/lib/meta/creator-instagram-continuation";
+import { cleanCreatorSocialContinuation, readCreatorSocialContinuation, type CreatorSocialContinuation } from "@/lib/meta/creator-social-continuation";
+import type { CreatorInstagramContinuationResult } from "@/lib/meta/creator-instagram-continuation";
 
 type RequestState = "idle" | "loading" | "error";
 type MetaAction = "select_page" | "refresh_pages" | "connect_instagram" | "skip_instagram" | "retry_instagram_discovery" | "disconnect_instagram" | "disconnect_page";
@@ -39,13 +40,21 @@ export function MetaPageConnectionSettings() {
   const [creatorThreadsBusy, setCreatorThreadsBusy] = useState(false);
   const [creatorThreadsMessage, setCreatorThreadsMessage] = useState("");
   const [creatorInstagramReturnResult, setCreatorInstagramReturnResult] = useState<CreatorInstagramContinuationResult>(
-    () => typeof window === "undefined" ? null : readCreatorInstagramContinuationResult(window.location.href),
+    () => null,
   );
+  const [creatorSocialContinuation, setCreatorSocialContinuation] = useState<CreatorSocialContinuation>(
+    () => typeof window === "undefined" ? null : readCreatorSocialContinuation(window.location.href),
+  );
+  const [creatorSocialReturnReady, setCreatorSocialReturnReady] = useState(false);
   const [hasMetaContinuation, setHasMetaContinuation] = useState(
     () => typeof window !== "undefined" && hasFstatsLoginContinuation(window.location.href),
   );
   const sectionRef = useRef<HTMLElement>(null);
+  const creatorInstagramRef = useRef<HTMLDivElement>(null);
+  const creatorThreadsRef = useRef<HTMLDivElement>(null);
   const metaContinuationConsumed = useRef(false);
+  const creatorSocialContinuationStarted = useRef(false);
+  const creatorSocialContinuationConsumed = useRef(false);
   const requestVersion = useRef(0);
 
   const loadCreatorInstagram = useCallback(async () => {
@@ -90,15 +99,35 @@ export function MetaPageConnectionSettings() {
   useEffect(() => { queueMicrotask(() => void loadCreatorInstagram()); }, [loadCreatorInstagram]);
   useEffect(() => { queueMicrotask(() => void loadCreatorThreads()); }, [loadCreatorThreads]);
   useEffect(() => {
-    if (!hasCreatorInstagramContinuation(window.location.href)) return;
+    if (!creatorSocialContinuation || creatorSocialContinuationStarted.current) return;
+    creatorSocialContinuationStarted.current = true;
     queueMicrotask(async () => {
-      const result = readCreatorInstagramContinuationResult(window.location.href);
-      await loadCreatorInstagram();
-      setCreatorInstagramReturnResult(result);
-      if (result === "error") setCreatorInstagramMessage("Instagram connection could not be completed. Reconnect and try again.");
-      window.history.replaceState(window.history.state, "", cleanCreatorInstagramContinuation(window.location.href));
+      setIsOpen(true);
+      try {
+        if (creatorSocialContinuation.target === "standalone-instagram") {
+          setCreatorInstagramReturnResult(creatorSocialContinuation.result === "duplicate" ? "duplicate" : creatorSocialContinuation.result === "error" ? "error" : null);
+          if (creatorSocialContinuation.result === "error") setCreatorInstagramMessage("Instagram connection could not be completed. Reconnect and try again.");
+          await loadCreatorInstagram();
+        } else {
+          if (creatorSocialContinuation.result === "error") setCreatorThreadsMessage("Threads connection could not be completed. Reconnect and try again.");
+          await loadCreatorThreads();
+        }
+      } finally { setCreatorSocialReturnReady(true); }
     });
-  }, [loadCreatorInstagram]);
+  }, [creatorSocialContinuation, loadCreatorInstagram, loadCreatorThreads]);
+  useEffect(() => {
+    if (!creatorSocialContinuation || creatorSocialContinuationConsumed.current || !creatorSocialReturnReady || !isOpen || !creatorSocialContinuationStarted.current) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = creatorSocialContinuation.target === "standalone-instagram" ? creatorInstagramRef.current : creatorThreadsRef.current;
+      if (!target || creatorSocialContinuationConsumed.current) return;
+      target.focus({ preventScroll: true });
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      creatorSocialContinuationConsumed.current = true;
+      window.history.replaceState(window.history.state, "", cleanCreatorSocialContinuation(window.location.href));
+      setCreatorSocialContinuation(null);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [creatorSocialContinuation, creatorInstagram, creatorSocialReturnReady, creatorThreads, isOpen]);
   useEffect(() => {
     if (!hasMetaContinuation) return;
     queueMicrotask(() => setIsOpen(true));
@@ -260,6 +289,7 @@ export function MetaPageConnectionSettings() {
           onDisconnect={() => void disconnectCreatorInstagram()}
           returnResult={creatorInstagramReturnResult}
           state={creatorInstagram}
+          focusRef={creatorInstagramRef}
         />
 
         <ThreadsRow
@@ -268,6 +298,7 @@ export function MetaPageConnectionSettings() {
           onConnect={connectCreatorThreads}
           onDisconnect={() => void disconnectCreatorThreads()}
           state={creatorThreads}
+          focusRef={creatorThreadsRef}
         />
 
         {message ? <p className={requestState === "error" ? "settings-error" : "settings-status"} role={requestState === "error" ? "alert" : "status"}>{message}</p> : null}
@@ -276,18 +307,18 @@ export function MetaPageConnectionSettings() {
   );
 }
 
-function StandaloneInstagramRow({ busy, message, onConnect, onDisconnect, returnResult, state }: { busy: boolean; message: string; onConnect: () => void; onDisconnect: () => void; returnResult: CreatorInstagramContinuationResult; state: CreatorInstagramState | null }) {
+function StandaloneInstagramRow({ busy, focusRef, message, onConnect, onDisconnect, returnResult, state }: { busy: boolean; focusRef: RefObject<HTMLDivElement | null>; message: string; onConnect: () => void; onDisconnect: () => void; returnResult: CreatorInstagramContinuationResult; state: CreatorInstagramState | null }) {
   const account = state?.state === "connected" ? state.account ?? null : null;
   const connected = Boolean(account);
   const identity = account ? account.displayName.startsWith("@") ? account.displayName : `@${account.displayName}` : null;
   const duplicate = returnResult === "duplicate";
   const visibleMessage = duplicate ? "This Instagram account is already connected through your Facebook Page." : message;
-  return <div className="google-service-row standalone-instagram-row"><div><strong>Standalone Instagram</strong>{!state ? <span>Checking connection…</span> : connected ? <><span className="meta-account-identity">{identity}</span><span>Connected</span><small>Connected directly through Instagram and independent from your Facebook Page.</small></> : duplicate ? <><span>Not connected</span><small>Connect a different professional Instagram account directly through Instagram.</small></> : state.state === "degraded" ? <><span>Needs reconnection</span><small>Reconnect this professional Instagram account to restore access.</small></> : <><span>Not connected</span><small>Connect an additional professional Instagram account directly through Instagram. This account is independent from the Instagram linked to your Facebook Page.</small></>}</div><div className="meta-row-actions">{connected ? <><button disabled={busy} onClick={onConnect} type="button">Reconnect Instagram</button><button className="settings-destructive-button" disabled={busy} onClick={onDisconnect} type="button">Disconnect Instagram</button></> : <button disabled={busy || !state} onClick={onConnect} type="button">Connect standalone Instagram</button>}</div>{visibleMessage ? <small className="settings-status">{visibleMessage}</small> : null}</div>;
+  return <div className="google-service-row standalone-instagram-row" ref={focusRef} tabIndex={-1}><div><strong>Standalone Instagram</strong>{!state ? <span>Checking connection…</span> : connected ? <><span className="meta-account-identity">{identity}</span><span>Connected</span><small>Connected directly through Instagram and independent from your Facebook Page.</small></> : duplicate ? <><span>Not connected</span><small>Connect a different professional Instagram account directly through Instagram.</small></> : state.state === "degraded" ? <><span>Needs reconnection</span><small>Reconnect this professional Instagram account to restore access.</small></> : <><span>Not connected</span><small>Connect an additional professional Instagram account directly through Instagram. This account is independent from the Instagram linked to your Facebook Page.</small></>}</div><div className="meta-row-actions">{connected ? <><button disabled={busy} onClick={onConnect} type="button">Reconnect Instagram</button><button className="settings-destructive-button" disabled={busy} onClick={onDisconnect} type="button">Disconnect Instagram</button></> : <button disabled={busy || !state} onClick={onConnect} type="button">Connect standalone Instagram</button>}</div>{visibleMessage ? <small className="settings-status">{visibleMessage}</small> : null}</div>;
 }
 
-function ThreadsRow({ busy, message, onConnect, onDisconnect, state }: { busy: boolean; message: string; onConnect: () => void; onDisconnect: () => void; state: CreatorThreadsState | null }) {
+function ThreadsRow({ busy, focusRef, message, onConnect, onDisconnect, state }: { busy: boolean; focusRef: RefObject<HTMLDivElement | null>; message: string; onConnect: () => void; onDisconnect: () => void; state: CreatorThreadsState | null }) {
   const account = state?.state === "connected" ? state.account ?? null : null;
-  return <div className="google-service-row threads-row"><div><strong>Threads</strong>{!state ? <span>Checking connection…</span> : account ? <><span className="meta-account-identity">{account.displayName}</span><span>Connected</span>{account.url ? <a className="meta-profile-link" href={account.url} rel="noreferrer" target="_blank">View Threads profile</a> : null}<small>Connects this workspace’s Threads account independently from Instagram.</small></> : state.state === "degraded" ? <><span>Needs reconnection</span><small>Reconnect this Threads account to restore access.</small></> : <><span>Not connected</span><small>Connect this workspace’s Threads account independently from Instagram.</small></>}</div><div className="meta-row-actions">{account ? <><button disabled={busy} onClick={onConnect} type="button">Reconnect Threads</button><button className="settings-destructive-button" disabled={busy} onClick={onDisconnect} type="button">Disconnect Threads</button></> : <button disabled={busy || !state} onClick={onConnect} type="button">Connect Threads</button>}</div>{message ? <small className="settings-status">{message}</small> : null}</div>;
+  return <div className="google-service-row threads-row" ref={focusRef} tabIndex={-1}><div><strong>Threads</strong>{!state ? <span>Checking connection…</span> : account ? <><span className="meta-account-identity">{account.displayName}</span><span>Connected</span>{account.url ? <a className="meta-profile-link" href={account.url} rel="noreferrer" target="_blank">View Threads profile</a> : null}<small>Connects this workspace’s Threads account independently from Instagram.</small></> : state.state === "degraded" ? <><span>Needs reconnection</span><small>Reconnect this Threads account to restore access.</small></> : <><span>Not connected</span><small>Connect this workspace’s Threads account independently from Instagram.</small></>}</div><div className="meta-row-actions">{account ? <><button disabled={busy} onClick={onConnect} type="button">Reconnect Threads</button><button className="settings-destructive-button" disabled={busy} onClick={onDisconnect} type="button">Disconnect Threads</button></> : <button disabled={busy || !state} onClick={onConnect} type="button">Connect Threads</button>}</div>{message ? <small className="settings-status">{message}</small> : null}</div>;
 }
 
 function FacebookConnectedRow({ armed, busy, name, onDisconnect }: { armed: boolean; busy: boolean; name: string; onDisconnect: () => void }) {

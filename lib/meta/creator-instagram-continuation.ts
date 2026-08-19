@@ -1,11 +1,12 @@
+import { cleanCreatorSocialContinuation, readCreatorSocialContinuation } from "./creator-social-continuation";
+
 const resultPrefix = "creator-social-instagram-";
 export type CreatorInstagramContinuationResult = "duplicate" | "error" | null;
 
 export function readCreatorInstagramContinuationResult(input: string | URL): CreatorInstagramContinuationResult {
-  const url = typeof input === "string" ? new URL(input, "http://localhost") : input;
-  const result = url.searchParams.get("oauth");
-  if (result === "creator-social-instagram-duplicate") return "duplicate";
-  return result === "creator-social-instagram-error" ? "error" : null;
+  const continuation = readCreatorSocialContinuation(input);
+  if (continuation?.target !== "standalone-instagram") return null;
+  return continuation.result === "duplicate" ? "duplicate" : continuation.result === "error" ? "error" : null;
 }
 
 export function hasCreatorInstagramContinuation(input: string | URL) {
@@ -14,7 +15,7 @@ export function hasCreatorInstagramContinuation(input: string | URL) {
 }
 
 export function cleanCreatorInstagramContinuation(input: string | URL) {
+  if (hasCreatorInstagramContinuation(input)) return cleanCreatorSocialContinuation(input);
   const url = typeof input === "string" ? new URL(input, "http://localhost") : new URL(input.toString());
-  if (url.searchParams.get("oauth")?.startsWith(resultPrefix)) url.searchParams.delete("oauth");
   return `${url.pathname}${url.search}${url.hash}`;
 }
