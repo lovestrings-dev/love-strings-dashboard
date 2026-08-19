@@ -5,6 +5,7 @@ const connect = await readFile(new URL("../app/api/integrations/meta/instagram/c
 const callback = await readFile(new URL("../app/api/integrations/meta/instagram/callback/route.ts", import.meta.url), "utf8");
 const migration = await readFile(new URL("../supabase/migrations/202608190002_bind_creator_social_instagram.sql", import.meta.url), "utf8");
 const standaloneBindingMigration = await readFile(new URL("../supabase/migrations/202608190003_allow_standalone_instagram_active_binding.sql", import.meta.url), "utf8");
+const ambiguityFixMigration = await readFile(new URL("../supabase/migrations/202608190004_fix_creator_social_instagram_connection_id_ambiguity.sql", import.meta.url), "utf8");
 const oauth = await readFile(new URL("../lib/meta/instagram-oauth.ts", import.meta.url), "utf8");
 const connections = await readFile(new URL("../lib/server/meta-connections.ts", import.meta.url), "utf8");
 assert.match(oauth, /https:\/\/www\.instagram\.com\/oauth\/authorize/);
@@ -40,4 +41,8 @@ assert.match(migration, /connection_kind = 'creator_social_instagram'/);
 assert.match(migration, /connection_state = 'no_data'/);
 assert.match(migration, /disconnect_creator_social_instagram/);
 assert.match(standaloneBindingMigration, /parent_page_external_id drop not null/);
+assert.match(ambiguityFixMigration, /on conflict on constraint app_meta_connection_accounts_connection_id_platform_account_key/);
+assert.doesNotMatch(ambiguityFixMigration, /on conflict \(connection_id, platform_account_id\)/);
+assert.match(ambiguityFixMigration, /return query select v_connection_id, v_account_id/);
+assert.match(ambiguityFixMigration, /errcode = 'P2101'/);
 console.log("Meta creator Instagram OAuth/binding tests passed.");
