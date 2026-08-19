@@ -484,7 +484,7 @@ type EventsSaveSnapshot = EventsSnapshot & {
 
 const platformStats = [
   {
-    platform: "Instagram via Facebook Page",
+    platform: "Instagram (Business)",
     slug: "instagram",
     profileUrl: "",
     icon: Camera,
@@ -5317,11 +5317,12 @@ export default function Home() {
     platformStatsData.map((platform) => ({ ...platform, profileUrl: configuredPlatformUrls[platform.slug] ?? platform.profileUrl })),
     workspaceGoogleConnection
   );
-  const dashboardPlatformStats = [
-    ...getPlatformCardsForPreferences(platformStatsData, dashboardPreferences, true),
-    ...getStandaloneInstagramCard(platformMetricRows),
-    ...getThreadsCard(platformMetricRows)
-  ];
+  const dashboardPlatformStats = getPlatformCardsForPreferences(
+    platformStatsData,
+    platformMetricRows,
+    dashboardPreferences,
+    true
+  );
   const validDailyFocusProgressTaskKeys = useMemo(
     () =>
       new Set([
@@ -17120,11 +17121,18 @@ function PlatformsView({
 
       <PlatformStatsSection
         hideHeading
-        platforms={[
-          ...getPlatformCardsForPreferences(platformStatsData, { childOrderByParent: { platforms: platformChildOrder }, visibleCards: [], cardOrder: [], isPersonalized: true, topLevelOrder: [] }, false),
-          ...getStandaloneInstagramCard(platformMetricRows),
-          ...getThreadsCard(platformMetricRows)
-        ]}
+        platforms={getPlatformCardsForPreferences(
+          platformStatsData,
+          platformMetricRows,
+          {
+            childOrderByParent: { platforms: platformChildOrder },
+            visibleCards: [],
+            cardOrder: [],
+            isPersonalized: true,
+            topLevelOrder: []
+          },
+          false
+        )}
         title="All Platform Metrics"
         description="Daily platform snapshots collected into the shared Supabase history."
         variant="full"
@@ -18413,7 +18421,7 @@ function getStandaloneInstagramCard(rows: MetricRow[]): PlatformDisplayCard[] {
   const template = platformStats[0];
   return [{
     ...template,
-    platform: "Standalone Instagram",
+    platform: "Instagram (Creator)",
     profileUrl: "",
     slug: "instagram-standalone",
     metrics: template.metrics.map((metric) => {
@@ -18467,6 +18475,7 @@ const platformChildSlugs: Partial<Record<DashboardCardId, string>> = {
 
 function getPlatformCardsForPreferences(
   stats: typeof platformStats,
+  rows: MetricRow[],
   preferences: ResolvedDashboardPreferences,
   dashboardOnly: boolean
 ): PlatformDisplayCard[] {
@@ -18495,6 +18504,12 @@ function getPlatformCardsForPreferences(
           profileUrl: "",
           slug: "youtube-music-service"
         } as PlatformDisplayCard];
+      }
+      if (cardId === "platforms.instagram-creator") {
+        return getStandaloneInstagramCard(rows);
+      }
+      if (cardId === "platforms.threads") {
+        return getThreadsCard(rows);
       }
       const slug = platformChildSlugs[cardId];
       if (!slug) return [];

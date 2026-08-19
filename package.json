@@ -9,6 +9,7 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test:dashboard-preferences": "node --experimental-strip-types scripts/test-dashboard-preferences.mjs",
+    "test:platform-card-preferences": "node --experimental-strip-types scripts/test-platform-card-preferences.mjs",
     "test:facebook-page-ui": "node scripts/test-facebook-page-ui.mjs",
     "test:date-input": "node --experimental-strip-types scripts/test-date-input.mjs",
     "test:metric-collector-eligibility": "node --experimental-strip-types scripts/test-metric-collector-eligibility.mjs",

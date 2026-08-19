@@ -10,6 +10,8 @@ assert.deepEqual(canonical.topLevelOrder, ["events", "focus", "platforms", "mark
 assert.deepEqual(canonical.childOrderByParent.platforms, [
   "platforms.audience",
   "platforms.instagram",
+  "platforms.instagram-creator",
+  "platforms.threads",
   "platforms.facebook",
   "platforms.youtube",
   "platforms.youtube-topic",
@@ -25,6 +27,8 @@ assert.deepEqual(
   [
     "platforms.audience",
     "platforms.instagram",
+    "platforms.instagram-creator",
+    "platforms.threads",
     "platforms.facebook",
     "platforms.youtube",
     "platforms.youtube-topic",
@@ -68,10 +72,18 @@ const allHidden = resolveDashboardPreferences({
 assert.equal(allHidden.isPersonalized, true);
 assert.deepEqual(allHidden.visibleCards, []);
 
-const legacyOrder = dashboardCardRegistry.map((card) => card.id).filter((id) => id !== "platforms.audience");
+const legacyOrder = dashboardCardRegistry
+  .map((card) => card.id)
+  .filter((id) => !["platforms.audience", "platforms.instagram-creator", "platforms.threads"].includes(id));
 const futureCard = resolveDashboardPreferences({ cardOrder: legacyOrder, visibleCards: legacyOrder });
-assert.equal(futureCard.childOrderByParent.platforms?.at(-1), "platforms.audience");
+assert.deepEqual(futureCard.childOrderByParent.platforms?.slice(-3), [
+  "platforms.audience",
+  "platforms.instagram-creator",
+  "platforms.threads"
+]);
 assert.equal(futureCard.visibleCards.includes("platforms.audience"), true);
+assert.equal(futureCard.visibleCards.includes("platforms.instagram-creator"), true);
+assert.equal(futureCard.visibleCards.includes("platforms.threads"), true);
 
 const reset = resolveDashboardPreferences({ cardOrder: [], visibleCards: [] });
 assert.deepEqual(reset, canonical);
