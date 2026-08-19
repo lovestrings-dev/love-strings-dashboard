@@ -77,8 +77,12 @@ function firstToken(payload: TokenPayload) {
   if (!value || typeof value !== "object") return null;
   const record = value as TokenPayload;
   return typeof record.access_token === "string" && record.access_token
-    ? { accessToken: record.access_token, expiresIn: record.expires_in, tokenType: typeof record.token_type === "string" && record.token_type ? record.token_type : "bearer", userId: typeof record.user_id === "string" ? record.user_id : null }
+    ? { accessToken: record.access_token, expiresIn: record.expires_in, tokenType: typeof record.token_type === "string" && record.token_type ? record.token_type : "bearer", userId: stableId(record.user_id) }
     : null;
+}
+function stableId(value: unknown) {
+  if (typeof value === "string" && value) return value;
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : null;
 }
 function grantedPermissions(payload: TokenPayload) {
   const root = Array.isArray(payload.data) ? payload.data[0] : payload;

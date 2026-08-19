@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { resolveCreatorSocialInstagramState } from "../lib/meta/creator-instagram-state.ts";
 
 const connect = await readFile(new URL("../app/api/integrations/meta/instagram/connect/route.ts", import.meta.url), "utf8");
 const callback = await readFile(new URL("../app/api/integrations/meta/instagram/callback/route.ts", import.meta.url), "utf8");
 const migration = await readFile(new URL("../supabase/migrations/202608190002_bind_creator_social_instagram.sql", import.meta.url), "utf8");
 const standaloneBindingMigration = await readFile(new URL("../supabase/migrations/202608190003_allow_standalone_instagram_active_binding.sql", import.meta.url), "utf8");
 const ambiguityFixMigration = await readFile(new URL("../supabase/migrations/202608190004_fix_creator_social_instagram_connection_id_ambiguity.sql", import.meta.url), "utf8");
+const reconnectFixMigration = await readFile(new URL("../supabase/migrations/202608190005_preserve_creator_instagram_reconnect_state.sql", import.meta.url), "utf8");
 const oauth = await readFile(new URL("../lib/meta/instagram-oauth.ts", import.meta.url), "utf8");
 const connections = await readFile(new URL("../lib/server/meta-connections.ts", import.meta.url), "utf8");
 assert.match(oauth, /https:\/\/www\.instagram\.com\/oauth\/authorize/);
@@ -45,4 +47,20 @@ assert.match(ambiguityFixMigration, /on conflict on constraint app_meta_connecti
 assert.doesNotMatch(ambiguityFixMigration, /on conflict \(connection_id, platform_account_id\)/);
 assert.match(ambiguityFixMigration, /return query select v_connection_id, v_account_id/);
 assert.match(ambiguityFixMigration, /errcode = 'P2101'/);
+assert.match(reconnectFixMigration, /v_connection_id uuid/);
+assert.match(reconnectFixMigration, /Prefer the currently active App A binding/);
+assert.match(reconnectFixMigration, /connection\.id <> v_connection_id/);
+assert.match(reconnectFixMigration, /Make the replacement mapping valid first/);
+assert.match(reconnectFixMigration, /on conflict on constraint app_meta_connection_accounts_connection_id_platform_account_key/);
+assert.match(reconnectFixMigration, /return query select v_connection_id, v_account_id/);
+assert.doesNotMatch(connections, /\.limit\(1\)\.maybeSingle\(\)/);
+assert.match(connections, /resolveCreatorSocialInstagramState/);
+assert.deepEqual(resolveCreatorSocialInstagramState([]), { state: "disconnected" });
+assert.deepEqual(resolveCreatorSocialInstagramState([
+  { id: "old", connection_state: "no_data", token_expires_at: null, app_meta_connection_accounts: [{ account_type: "instagram_professional", is_selected: false, platform_accounts: { meta_external_id: "old", account_name: "Old", url: null } }] },
+  { id: "active", connection_state: "connected", token_expires_at: "2026-10-19T00:00:00Z", app_meta_connection_accounts: [{ account_type: "instagram_professional", is_selected: true, platform_accounts: { meta_external_id: "active", account_name: "Active", url: null } }] }
+]), { state: "connected", connectionId: "active", tokenExpiresAt: "2026-10-19T00:00:00Z", account: { externalId: "active", displayName: "Active", url: null } });
+assert.deepEqual(resolveCreatorSocialInstagramState([
+  { id: "degraded", connection_state: "no_data", token_expires_at: null, app_meta_connection_accounts: [] }
+]), { state: "degraded", connectionId: "degraded", account: undefined });
 console.log("Meta creator Instagram OAuth/binding tests passed.");
