@@ -3,6 +3,7 @@
 import Image from "next/image";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { Fragment } from "react";
+import { createPortal } from "react-dom";
 import { forwardRef } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -12044,6 +12045,7 @@ function BudgetEntryRow({
 }) {
   const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
   const [isActionsOpen, setIsActionsOpen] = useState(initiallyEditing);
+  const [isRecurringDeleteModalOpen, setIsRecurringDeleteModalOpen] = useState(false);
   const [isSourceLinkOpen, setIsSourceLinkOpen] = useState(false);
   const [entryDateDraft, setEntryDateDraft] = useState(entry.date);
   const [paymentPlanEndDateDraft, setPaymentPlanEndDateDraft] = useState(
@@ -12129,7 +12131,10 @@ function BudgetEntryRow({
     return () => document.removeEventListener("pointerdown", closeRecurringDelete);
   }, [isActionsOpen, usesInlineDeleteAction]);
 
+  const areParentFieldsEditable = !entry.generated && isActionsOpen;
+
   return (
+    <>
     <tbody
       className={`budget-record${isRecurringEntry && !isAutoRecurringEntry ? " budget-record-recurring" : ""}`}
       ref={inlineDeleteActionRef}
@@ -12152,7 +12157,7 @@ function BudgetEntryRow({
         <DateInput
           aria-label={`${entry.description} date`}
           calendarLabel={`Choose ${entry.description} date`}
-          disabled={entry.generated}
+          disabled={!areParentFieldsEditable}
           error={Boolean(entryDateDraft && !toIsoDate(entryDateDraft))}
           onBlur={() => commitEntryDate()}
           onChange={setEntryDateDraft}
@@ -12168,7 +12173,7 @@ function BudgetEntryRow({
       <td className="budget-bucket-column" data-label="Bucket">
         <select
           aria-label={`${entry.description} source bucket`}
-          disabled={entry.generated}
+          disabled={!areParentFieldsEditable}
           onChange={(event) =>
             onEntryChange(entry.id, {
               bucket: event.target.value as BudgetSourceBucket
@@ -12186,7 +12191,7 @@ function BudgetEntryRow({
       <td className="budget-description-cell" data-label="Description">
         <textarea
           aria-label={`${entry.description} description`}
-          disabled={entry.generated}
+          disabled={!areParentFieldsEditable}
           onChange={(event) => {
             const minHeight = Number.parseFloat(
               window.getComputedStyle(event.target).minHeight
@@ -12209,10 +12214,10 @@ function BudgetEntryRow({
         <SignedBudgetAmountInput
           amount={signedAmount}
           defaultSign="negative"
-          disabled={entry.generated}
+          disabled={!areParentFieldsEditable}
           inputLabel={`${entry.description} amount`}
           inputOrder="amount-first"
-          showToggle={!entry.generated && isActionsOpen}
+          showToggle={areParentFieldsEditable}
           onChange={(amount) =>
             onEntryChange(entry.id, {
               amount,
@@ -12225,7 +12230,7 @@ function BudgetEntryRow({
         <div className="budget-type-cell">
           <select
             aria-label={`${entry.description} type`}
-            disabled={entry.generated}
+            disabled={!areParentFieldsEditable}
             onChange={(event) =>
               onEntryChange(entry.id, {
                 recurringCadence:
@@ -12262,6 +12267,10 @@ function BudgetEntryRow({
               }
               onClick={() => {
                 if (isActionsOpen) {
+                  if (isRecurringEntry && !isAutoRecurringEntry) {
+                    setIsRecurringDeleteModalOpen(true);
+                    return;
+                  }
                   onDelete(entry.id);
                   return;
                 }
@@ -12355,6 +12364,7 @@ function BudgetEntryRow({
           <DateInput
             aria-label={`${entry.description} payment plan end date`}
             calendarLabel={`Choose ${entry.description} payment plan end date`}
+            disabled={!areParentFieldsEditable}
             error={Boolean(paymentPlanEndDateDraft && !toIsoDate(paymentPlanEndDateDraft))}
             onBlur={() => commitPaymentPlanEndDate()}
             onChange={setPaymentPlanEndDateDraft}
@@ -12370,6 +12380,7 @@ function BudgetEntryRow({
         <td className="budget-bucket-column">
           <select
             aria-label={`${entry.description} recurring cadence`}
+            disabled={!areParentFieldsEditable}
             onChange={(event) =>
               onEntryChange(entry.id, {
                 recurringCadence: event.target.value as BudgetRecurringCadence
@@ -12387,6 +12398,43 @@ function BudgetEntryRow({
       </tr>
     ) : null}
     </tbody>
+    {isRecurringDeleteModalOpen && typeof document !== "undefined"
+      ? createPortal(
+          <div
+            aria-labelledby={`recurring-budget-delete-title-${entry.id}`}
+            aria-modal="true"
+            className="budget-recurring-delete-modal-backdrop"
+            role="dialog"
+          >
+            <div className="budget-recurring-delete-modal">
+              <h2 id={`recurring-budget-delete-title-${entry.id}`}>
+                Delete recurring payment?
+              </h2>
+              <p>
+                This permanently deletes this recurring payment and all associated
+                generated Budget lines/history. Deleted data cannot be restored.
+              </p>
+              <div className="budget-recurring-delete-modal-actions">
+                <button
+                  onClick={() => setIsRecurringDeleteModalOpen(false)}
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button
+                  className="budget-recurring-delete-modal-confirm"
+                  onClick={() => onDelete(entry.id)}
+                  type="button"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
+      : null}
+    </>
   );
 }
 
@@ -17500,7 +17548,7 @@ function ManagedImageUploadButton({
       onUploaded(payload.url);
     } catch (error) { updateStatus({ message: error instanceof Error ? error.message : "Image upload failed.", state: "error" }); }
   }
-  return <div className="managed-image-upload"><input accept="image/jpeg,image/png,image/webp" aria-label="Upload image" disabled={disabled || status.state === "loading"} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }} ref={inputRef} type="file" /><button disabled={disabled || status.state === "loading"} onClick={() => inputRef.current?.click()} type="button"><Upload aria-hidden size={14} />{status.state === "loading" ? "Uploading..." : "Upload image"}</button>{status.message && !onStatusChange ? <span className={status.state === "error" ? "settings-error" : "settings-status"} role={status.state === "error" ? "alert" : "status"}>{status.message}</span> : null}</div>;
+  return <div className="managed-image-upload"><input accept="image/jpeg,image/png,image/webp" aria-label="Upload image" disabled={disabled || status.state === "loading"} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }} ref={inputRef} type="file" /><button disabled={disabled || status.state === "loading"} onClick={() => inputRef.current?.click()} type="button"><Upload aria-hidden size={14} />Upload image</button>{status.message && !onStatusChange ? <span className={status.state === "error" ? "settings-error" : "settings-status"} role={status.state === "error" ? "alert" : "status"}>{status.message}</span> : null}</div>;
 }
 
 function QrCodeLinksSection({

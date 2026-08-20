@@ -2550,21 +2550,21 @@ h2 {
 
 .dashboard-initial-loading {
   background: #151919;
-  bottom: 0;
-  left: 290px;
+  inset: 0;
   position: fixed;
-  right: 0;
-  top: 0;
   z-index: 100;
 }
 
 .dashboard-initial-loading-center {
   display: grid;
-  inset: 0;
+  bottom: 0;
+  left: 290px;
   margin: 0;
   padding: 0;
   place-items: center;
   position: absolute;
+  right: 0;
+  top: 0;
 }
 
 .dashboard-initial-loading-spinner {
@@ -6417,11 +6417,101 @@ h2 {
   line-height: 1.35;
   margin: 5px 0 0;
   overflow-wrap: anywhere;
+  text-transform: none;
 }
 
 .production-song-board .artwork-upload-status-pending {
   color: var(--muted);
   font-weight: 700;
+}
+
+.budget-recurring-delete-modal-backdrop {
+  align-items: center;
+  background: rgba(21, 25, 25, 0.62);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 20px;
+  position: fixed;
+  z-index: 140;
+}
+
+.budget-recurring-delete-modal {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  max-width: 440px;
+  padding: 20px;
+  width: min(100%, 440px);
+}
+
+.budget-recurring-delete-modal h2 {
+  font-size: 18px;
+  margin: 0 0 8px;
+}
+
+.budget-recurring-delete-modal p {
+  color: var(--muted);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.budget-recurring-delete-modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+.budget-recurring-delete-modal-actions button {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  min-height: 36px;
+  padding: 7px 12px;
+}
+
+.budget-recurring-delete-modal-actions .budget-recurring-delete-modal-confirm {
+  background: #fff3f2;
+  border-color: #e9aaa4;
+  color: #b73131;
+}
+
+@media (min-width: 981px) {
+  .sidebar {
+    align-self: start;
+    box-sizing: border-box;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 16px 18px;
+    position: sticky;
+    top: 0;
+    z-index: 30;
+  }
+
+  .brand-header {
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+
+  .brand-mark {
+    gap: 10px;
+    min-height: 38px;
+  }
+
+  .brand-logo {
+    height: 38px;
+    width: 38px;
+  }
+
+  .nav-list {
+    position: static;
+  }
 }
 
 .production-song-board .production-song-delete-button {
@@ -7578,7 +7668,7 @@ h2 {
 }
 
 @media (max-width: 980px) {
-  .dashboard-initial-loading {
+  .dashboard-initial-loading-center {
     left: 0;
   }
 
