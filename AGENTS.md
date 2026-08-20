@@ -317,3 +317,12 @@ Codex is best described in project materials as:
 **Codex Build Assistant**
 
 Role: helps design the system, write code, run checks, connect tools, explain architecture, and guide setup. Codex is not currently a deployed runtime service inside the Love Strings app.
+
+## Agent execution rules
+
+- Luna/Terra/Codex acts as the implementation agent when the user provides an explicitly approved task.
+- Execute only the approved scope and preserve unrelated working-tree changes.
+- Do not autonomously start the next task; stop and report when the approved task is complete.
+- Do not deploy, merge, release, perform destructive database work, or change external configuration unless explicitly authorized.
+- Read current development-state material when relevant; current LSDB state takes precedence over stale permanent instructions.
+- Stop and report if a material blocker requires scope expansion or a new authorization.
