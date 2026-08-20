@@ -1,10 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireWorkspaceAccess } from "@/lib/server/workspace-owner";
+import type { BudgetRecurringCadence } from "@/lib/budget-recurrence";
 
 type BudgetEntryType = "earned" | "spent" | "one-off" | "recurring";
 type BudgetSourceBucket = "events" | "production" | "marketing" | "other";
-type BudgetRecurringCadence = "monthly" | "yearly";
 type BudgetEntry = {
   id: string;
   dbId?: string;
@@ -227,6 +227,7 @@ function mapBudgetSnapshotRows({
 
 function normalizeBudgetEntryForSave(entry: BudgetEntry) {
   const stableKey = entry.id?.trim() || createStableId(entry.description) || `budget-${Date.now()}`;
+  const type = normalizeBudgetEntryType(entry.type);
 
   return {
     entry: {
@@ -237,7 +238,11 @@ function normalizeBudgetEntryForSave(entry: BudgetEntry) {
       ),
       description: entry.description?.trim() || "Budget line",
       id: stableKey,
-      type: normalizeBudgetEntryType(entry.type)
+      recurringCadence:
+        type === "recurring"
+          ? normalizeBudgetRecurringCadence(entry.recurringCadence)
+          : undefined,
+      type
     },
     stableKey
   };
@@ -293,6 +298,25 @@ function normalizeBudgetEntryType(value: string): BudgetEntryType {
   }
 
   return "one-off";
+}
+
+function normalizeBudgetRecurringCadence(
+  value: unknown
+): BudgetRecurringCadence {
+  if (
+    value === "daily" ||
+    value === "weekly" ||
+    value === "monthly" ||
+    value === "yearly"
+  ) {
+    return value;
+  }
+
+  if (value === undefined || value === null || value === "") {
+    return "monthly";
+  }
+
+  throw new Error("Invalid recurring budget cadence.");
 }
 
 async function deleteMissingRows({

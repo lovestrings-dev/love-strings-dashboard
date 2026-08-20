@@ -35,6 +35,10 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { AccountControl } from "./account-control";
 import { DateInput } from "./date-input";
 import { toDisplayDate, toIsoDate } from "@/lib/date-input";
+import {
+  addBudgetRecurrenceCadence,
+  type BudgetRecurringCadence
+} from "@/lib/budget-recurrence";
 import { defaultWorkspaceTimeZone, getWorkspaceDateKey } from "@/lib/workspace-time";
 import { defaultWorkspaceId } from "@/lib/workspace";
 import { MetaPageConnectionSettings } from "./meta-page-connection-settings";
@@ -223,7 +227,6 @@ type ProductionWorkbookSeed = {
 type BudgetEntryType = "earned" | "spent" | "one-off" | "recurring";
 type BudgetSourceBucket = "events" | "production" | "marketing" | "other";
 type BudgetLedgerSortKey = "date" | "bucket" | "description" | "amount" | "type";
-type BudgetRecurringCadence = "monthly" | "yearly";
 type ProductionDefaultCosts = Record<"license" | "distributor", number>;
 type SortDirection = "ascending" | "descending";
 type BudgetEntry = {
@@ -646,7 +649,7 @@ const platformStats = [
   }
 ];
 
-const appVersionLabel = "Beta 1.20";
+const appVersionLabel = "Beta 1.21";
 const defaultAppLogoUrl = "";
 
 const sections = [
@@ -2973,9 +2976,8 @@ function generateBudgetRecurringEntries(entry: BudgetEntry) {
     endDate && endDate.getTime() < forecastEndDate.getTime()
       ? endDate
       : forecastEndDate;
-  const cadenceMonths = entry.recurringCadence === "yearly" ? 12 : 1;
   const generatedEntries: BudgetEntry[] = [];
-  let occurrenceDate = addMonthsToDate(startDate, cadenceMonths);
+  let occurrenceDate = addBudgetRecurrenceCadence(startDate, entry.recurringCadence);
 
   while (
     occurrenceDate.getTime() <= generationEndDate.getTime()
@@ -2988,11 +2990,15 @@ function generateBudgetRecurringEntries(entry: BudgetEntry) {
       id: getBudgetGeneratedEntryId(entry.id, occurrenceDate),
       sourceRecurringEntryId: entry.id
     });
-    occurrenceDate = addMonthsToDate(occurrenceDate, cadenceMonths);
+    occurrenceDate = addBudgetRecurrenceCadence(
+      occurrenceDate,
+      entry.recurringCadence
+    );
   }
 
   return generatedEntries;
 }
+
 
 function getBudgetGeneratedEntryId(entryId: string, occurrenceDate: Date) {
   return `budget-forecast-${entryId}-${occurrenceDate.toISOString().slice(0, 10)}`;
@@ -3363,6 +3369,18 @@ function getAmountToneClass(value: number) {
   }
 
   return "amount-positive";
+}
+
+function getBalanceToneClass(value: number) {
+  if (value < 0) {
+    return "amount-expense";
+  }
+
+  if (value > 0) {
+    return "amount-positive";
+  }
+
+  return undefined;
 }
 
 function getTransactionAmountToneClass(value: number) {
@@ -5180,6 +5198,7 @@ export default function Home() {
   const otherTasksReconcileInFlight = useRef(false);
   const hasVisitedFocusDashboard = useRef(false);
   const dashboardPreferenceMutationVersion = useRef(0);
+  const dashboardMetricsLoadWorkspaceRef = useRef("");
   const activeWorkspaceIdRef = useRef("");
   const hasRequestedQrCodeSupabaseLoad = useRef(false);
   const [activeSection, setActiveSection] = useState<Section>("Dashboard");
@@ -5225,6 +5244,7 @@ export default function Home() {
   >(null);
   const [workspaceRole, setWorkspaceRole] = useState<WorkspaceRole | null>(null);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
+  const [activeWorkspaceResolvedId, setActiveWorkspaceResolvedId] = useState("");
   const [dashboardPreferences, setDashboardPreferences] = useState<ResolvedDashboardPreferences>(
     () => resolveDashboardPreferences()
   );
@@ -5246,6 +5266,11 @@ export default function Home() {
   const [appleMusicLastUploadedAt, setAppleMusicLastUploadedAt] = useState("");
   const [platformStatsData, setPlatformStatsData] = useState<typeof platformStats>([]);
   const [platformMetricRows, setPlatformMetricRows] = useState<MetricRow[]>([]);
+  const [dashboardPreferencesWorkspaceId, setDashboardPreferencesWorkspaceId] = useState("");
+  const [dashboardPlatformMetricsWorkspaceId, setDashboardPlatformMetricsWorkspaceId] = useState("");
+  const [dashboardMarketingWorkspaceId, setDashboardMarketingWorkspaceId] = useState("");
+  const [dashboardProductionWorkspaceId, setDashboardProductionWorkspaceId] = useState("");
+  const [dashboardRoadmapWorkspaceId, setDashboardRoadmapWorkspaceId] = useState("");
   const [configuredPlatformUrls, setConfiguredPlatformUrls] = useState<Record<string, string>>({});
   const [workspaceGoogleConnection, setWorkspaceGoogleConnection] =
     useState<GoogleConnectionStatus | null>(null);
@@ -5322,6 +5347,17 @@ export default function Home() {
     platformMetricRows,
     dashboardPreferences,
     true
+  );
+  const isDashboardInitialLoadReady = Boolean(
+    activeWorkspaceId &&
+    activeWorkspaceResolvedId === activeWorkspaceId &&
+    dashboardPreferencesWorkspaceId === activeWorkspaceId &&
+    dashboardPlatformMetricsWorkspaceId === activeWorkspaceId &&
+    dashboardMarketingWorkspaceId === activeWorkspaceId &&
+    dashboardProductionWorkspaceId === activeWorkspaceId &&
+    dashboardRoadmapWorkspaceId === activeWorkspaceId &&
+    hasLoadedBudgetSupabaseSnapshot &&
+    hasLoadedEventSupabaseSnapshot
   );
   const validDailyFocusProgressTaskKeys = useMemo(
     () =>
@@ -5576,6 +5612,7 @@ export default function Home() {
       .then((result) => {
         if (!isCancelled && dashboardPreferenceMutationVersion.current === loadVersion) {
           setDashboardPreferences(result.resolved);
+          setDashboardPreferencesWorkspaceId(activeWorkspaceId);
         }
       })
       .catch((error) => {
@@ -5586,6 +5623,7 @@ export default function Home() {
             message: "Dashboard preferences could not be loaded. App defaults are in use.",
             state: "error"
           });
+          setDashboardPreferencesWorkspaceId(activeWorkspaceId);
         }
       });
     return () => {
@@ -5698,6 +5736,11 @@ export default function Home() {
 
   const loadPlatformStats = useCallback(async () => {
     if (!activeWorkspaceId) return [];
+    const isInitialDashboardMetricLoad =
+      dashboardMetricsLoadWorkspaceRef.current !== activeWorkspaceId;
+    if (isInitialDashboardMetricLoad) {
+      dashboardMetricsLoadWorkspaceRef.current = activeWorkspaceId;
+    }
     try {
       const supabase = createBrowserSupabaseClient();
       const { data, error } = await supabase
@@ -5721,6 +5764,7 @@ export default function Home() {
 
       if (error) {
         console.warn("Unable to load platform metrics from Supabase.", error);
+        if (isInitialDashboardMetricLoad) setDashboardPlatformMetricsWorkspaceId(activeWorkspaceId);
         return [];
       }
 
@@ -5728,9 +5772,11 @@ export default function Home() {
       setPlatformStatsData((currentStats) =>
         mergePlatformMetricRows(currentStats, (data ?? []) as MetricRow[])
       );
+      if (isInitialDashboardMetricLoad) setDashboardPlatformMetricsWorkspaceId(activeWorkspaceId);
       return (data ?? []) as MetricRow[];
     } catch (error) {
       console.warn("Using local platform metric fallback.", error);
+      if (isInitialDashboardMetricLoad) setDashboardPlatformMetricsWorkspaceId(activeWorkspaceId);
       return [];
     }
   }, [activeWorkspaceId]);
@@ -6961,14 +7007,18 @@ export default function Home() {
         setNavigationStack([]);
         setPendingScrollRestore(null);
         setActiveWorkspaceId(payload.workspaceId);
-        const workspacesResponse = await fetch("/api/workspaces", { cache: "no-store" });
-        const workspacesPayload = (await workspacesResponse.json().catch(() => null)) as {
-          workspaces?: Array<{ id: string; name: string }>;
-        } | null;
-        const workspace = workspacesPayload?.workspaces?.find(
-          (candidate) => candidate.id === payload.workspaceId,
-        );
-        if (!isCancelled && workspace?.name) setActiveWorkspaceName(workspace.name);
+        try {
+          const workspacesResponse = await fetch("/api/workspaces", { cache: "no-store" });
+          const workspacesPayload = (await workspacesResponse.json().catch(() => null)) as {
+            workspaces?: Array<{ id: string; name: string }>;
+          } | null;
+          const workspace = workspacesPayload?.workspaces?.find(
+            (candidate) => candidate.id === payload.workspaceId,
+          );
+          if (!isCancelled && workspace?.name) setActiveWorkspaceName(workspace.name);
+        } finally {
+          if (!isCancelled) setActiveWorkspaceResolvedId(payload.workspaceId);
+        }
       }
     }
 
@@ -7847,10 +7897,15 @@ export default function Home() {
         setCampaigns(nextCampaigns);
       } catch (error) {
         console.warn("Using local marketing campaign fallback.", error);
+      } finally {
+        if (!isCancelled) setDashboardMarketingWorkspaceId(activeWorkspaceId);
       }
     }
-
-    loadMarketingCampaigns();
+    let isCancelled = false;
+    void loadMarketingCampaigns();
+    return () => {
+      isCancelled = true;
+    };
   }, [activeWorkspaceId]);
 
   useEffect(() => {
@@ -7920,6 +7975,10 @@ export default function Home() {
         if (!isCancelled && activeWorkspaceIdRef.current === requestedWorkspaceId) {
           console.warn("Using local production fallback.", error);
         }
+      } finally {
+        if (!isCancelled && activeWorkspaceIdRef.current === requestedWorkspaceId) {
+          setDashboardProductionWorkspaceId(requestedWorkspaceId);
+        }
       }
     }
 
@@ -7931,6 +7990,8 @@ export default function Home() {
 
   useEffect(() => {
     let isCancelled = false;
+    if (!activeWorkspaceId) return;
+    const requestedWorkspaceId = activeWorkspaceId;
 
     void fetch("/api/roadmap/phases")
       .then(async (response) => {
@@ -7940,14 +8001,18 @@ export default function Home() {
       .then((result) => {
         if (!isCancelled) {
           setRoadmapPhaseDrafts(normalizeRoadmapPhases(result.phases ?? []));
+          setDashboardRoadmapWorkspaceId(requestedWorkspaceId);
         }
       })
-      .catch((error) => console.warn("Using Roadmap phase fallback.", error));
+      .catch((error) => {
+        console.warn("Using Roadmap phase fallback.", error);
+        if (!isCancelled) setDashboardRoadmapWorkspaceId(requestedWorkspaceId);
+      });
 
     return () => {
       isCancelled = true;
     };
-  }, []);
+  }, [activeWorkspaceId]);
 
   useEffect(() => {
     if (!activeWorkspaceId) {
@@ -8405,6 +8470,9 @@ export default function Home() {
             workspaceName={activeWorkspaceName}
           />
         ) : null}
+        {!settingsView && activeSection === "Dashboard" && !isDashboardInitialLoadReady ? (
+          <DashboardInitialLoadingOverlay />
+        ) : null}
         </div>
       </section>
       <FloatingNavigationBackButton
@@ -8661,6 +8729,12 @@ function GeneralSettingsView({
     };
     document.addEventListener("pointerdown", cancel);
     return () => document.removeEventListener("pointerdown", cancel);
+  }, [isWorkspaceNameEditing, workspaceName]);
+
+  useEffect(() => {
+    if (!isWorkspaceNameEditing) {
+      setWorkspaceNameDraft(workspaceName);
+    }
   }, [isWorkspaceNameEditing, workspaceName]);
 
   useEffect(() => {
@@ -9417,9 +9491,9 @@ function GeneralSettingsView({
         <article className="general-settings-card">
           <div className="settings-disclosure">
             <div><h2>Artist / Band name</h2><p title={workspaceNameDraft}>{workspaceNameDraft}</p></div>
-            <button aria-label={isWorkspaceNameEditing ? "Save workspace name" : "Edit workspace name"} className="settings-icon-button" disabled={workspaceNameStatus.state === "loading"} onClick={() => isWorkspaceNameEditing ? void saveWorkspaceName() : setIsWorkspaceNameEditing(true)} type="button">{isWorkspaceNameEditing ? <Save aria-hidden size={16} /> : <Pencil aria-hidden size={16} />}</button>
+            {!isWorkspaceNameEditing ? <button aria-label="Edit workspace name" className="settings-icon-button" onClick={() => setIsWorkspaceNameEditing(true)} type="button"><Pencil aria-hidden size={16} /></button> : null}
           </div>
-          {isWorkspaceNameEditing ? <div className="google-topic-config" data-workspace-name-editor><input aria-label="Artist / Band name" className="workspace-name-input" onChange={(event) => setWorkspaceNameDraft(event.target.value)} value={workspaceNameDraft} /></div> : null}
+          {isWorkspaceNameEditing ? <div className="workspace-name-editor" data-workspace-name-editor><input aria-label="Artist / Band name" className="workspace-name-input" onChange={(event) => setWorkspaceNameDraft(event.target.value)} value={workspaceNameDraft} /><button aria-label="Save workspace name" className="settings-icon-button" disabled={workspaceNameStatus.state === "loading"} onClick={() => void saveWorkspaceName()} type="button"><Save aria-hidden size={16} /></button></div> : null}
           {workspaceNameStatus.message ? <p className={workspaceNameStatus.state === "error" ? "settings-error" : "settings-status"} role={workspaceNameStatus.state === "error" ? "alert" : "status"}>{workspaceNameStatus.message}</p> : null}
         </article>
         <article className="general-settings-card">
@@ -11354,6 +11428,9 @@ function BudgetView({
   const [pendingEntryFocusId, setPendingEntryFocusId] = useState<string | null>(
     null
   );
+  const [initialEditingEntryId, setInitialEditingEntryId] = useState<string | null>(
+    null
+  );
   const [ledgerSort, setLedgerSort] = useState<{
     direction: SortDirection;
     key: BudgetLedgerSortKey;
@@ -11475,7 +11552,7 @@ function BudgetView({
         </article>
         <article className="metric-card budget-metric-card module-accent-thin module-accent-budget">
           <span>Current Balance</span>
-          <strong className={getAmountToneClass(summary.balance)}>
+          <strong className={getBalanceToneClass(summary.balance)}>
             {formatCurrency(summary.balance)}
           </strong>
         </article>
@@ -11491,7 +11568,7 @@ function BudgetView({
         </article>
         <article className="metric-card budget-metric-card module-accent-thin module-accent-budget">
           <span>Projected balance month ahead</span>
-          <strong className={getAmountToneClass(summary.upcomingBalance)}>
+          <strong className={getBalanceToneClass(summary.upcomingBalance)}>
             {formatCurrency(summary.upcomingBalance)}
           </strong>
         </article>
@@ -11580,6 +11657,7 @@ function BudgetView({
               });
               setIsHistoricalLedgerOpen(true);
               setPendingEntryFocusId(entryId);
+              setInitialEditingEntryId(entryId);
             }}
             type="button"
           >
@@ -11600,6 +11678,7 @@ function BudgetView({
             emptyMessage="No upcoming budget lines."
             onDeleteEntry={onDeleteEntry}
             onEntryChange={onEntryChange}
+            initialEditingEntryId={initialEditingEntryId}
             onOpenEntrySource={onOpenEntrySource}
             onSort={updateLedgerSort}
           />
@@ -11636,6 +11715,7 @@ function BudgetView({
               emptyMessage="No historical budget lines."
               onDeleteEntry={onDeleteEntry}
               onEntryChange={onEntryChange}
+              initialEditingEntryId={initialEditingEntryId}
               onOpenEntrySource={onOpenEntrySource}
               onSort={updateLedgerSort}
               />
@@ -11815,6 +11895,7 @@ function BudgetLedgerTable({
   entries,
   onDeleteEntry,
   onEntryChange,
+  initialEditingEntryId,
   onOpenEntrySource,
   onSort
 }: {
@@ -11827,6 +11908,7 @@ function BudgetLedgerTable({
   entries: BudgetEntry[];
   onDeleteEntry: (entryId: string) => void;
   onEntryChange: (entryId: string, updates: Partial<BudgetEntry>) => void;
+  initialEditingEntryId: string | null;
   onOpenEntrySource: (entry: BudgetEntry) => void;
   onSort: (sortKey: BudgetLedgerSortKey) => void;
 }) {
@@ -11876,6 +11958,7 @@ function BudgetLedgerTable({
               key={entry.id}
               onDelete={onDeleteEntry}
               onEntryChange={onEntryChange}
+              initiallyEditing={initialEditingEntryId === entry.id}
               onOpenSource={onOpenEntrySource}
             />
           ))
@@ -11947,25 +12030,26 @@ function getBudgetEntryElementId(entryId: string) {
 function BudgetEntryRow({
   entry,
   entriesById,
+  initiallyEditing = false,
   onDelete,
   onEntryChange,
   onOpenSource
 }: {
   entry: BudgetEntry;
   entriesById: Map<string, BudgetEntry>;
+  initiallyEditing?: boolean;
   onDelete: (entryId: string) => void;
   onEntryChange: (entryId: string, updates: Partial<BudgetEntry>) => void;
   onOpenSource: (entry: BudgetEntry) => void;
 }) {
   const [isDeleteConfirmed, setIsDeleteConfirmed] = useState(false);
-  const [isActionsOpen, setIsActionsOpen] = useState(false);
+  const [isActionsOpen, setIsActionsOpen] = useState(initiallyEditing);
   const [isSourceLinkOpen, setIsSourceLinkOpen] = useState(false);
-  const [amountInput, setAmountInput] = useState(String(getBudgetSignedAmount(entry)));
   const [entryDateDraft, setEntryDateDraft] = useState(entry.date);
   const [paymentPlanEndDateDraft, setPaymentPlanEndDateDraft] = useState(
     entry.paymentPlanEndDate ?? ""
   );
-  const inlineDeleteActionRef = useRef<HTMLDivElement | null>(null);
+  const inlineDeleteActionRef = useRef<HTMLTableSectionElement | null>(null);
   const descriptionInputRef = useRef<HTMLTextAreaElement | null>(null);
   const sourceActionRef = useRef<HTMLDivElement | null>(null);
   const signedAmount = getBudgetSignedAmount(entry);
@@ -12048,6 +12132,7 @@ function BudgetEntryRow({
   return (
     <tbody
       className={`budget-record${isRecurringEntry && !isAutoRecurringEntry ? " budget-record-recurring" : ""}`}
+      ref={inlineDeleteActionRef}
     >
     <tr
       className={[
@@ -12121,31 +12206,19 @@ function BudgetEntryRow({
         />
       </td>
       <td className="budget-amount-cell" data-label="Amount">
-        <input
-          aria-label={`${entry.description} amount`}
-          className={getTransactionAmountToneClass(signedAmount)}
+        <SignedBudgetAmountInput
+          amount={signedAmount}
+          defaultSign="negative"
           disabled={entry.generated}
-          inputMode="decimal"
-          onBlur={() => {
-            const parsedAmount = parseEditableAmount(amountInput);
-            setAmountInput(String(parsedAmount ?? signedAmount));
-          }}
-          onChange={(event) => {
-            const nextAmountInput = event.target.value;
-            const parsedAmount = parseEditableAmount(nextAmountInput);
-
-            setAmountInput(nextAmountInput);
-
-            if (parsedAmount === null) {
-              return;
-            }
-
+          inputLabel={`${entry.description} amount`}
+          inputOrder="amount-first"
+          showToggle={!entry.generated && isActionsOpen}
+          onChange={(amount) =>
             onEntryChange(entry.id, {
-              amount: parsedAmount,
+              amount,
               type: entry.type === "recurring" ? "recurring" : "one-off"
-            });
-          }}
-          value={entry.generated ? String(signedAmount) : amountInput}
+            })
+          }
         />
       </td>
       <td className="budget-type-column" data-label="Type">
@@ -12175,7 +12248,7 @@ function BudgetEntryRow({
       </td>
       <td className="budget-actions-column" data-label="Actions">
         {usesInlineDeleteAction ? (
-          <div className="budget-actions-cell" ref={inlineDeleteActionRef}>
+          <div className="budget-actions-cell">
             <button
               aria-label={
                 isActionsOpen
@@ -12304,6 +12377,8 @@ function BudgetEntryRow({
             }
             value={entry.recurringCadence ?? "monthly"}
           >
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
             <option value="monthly">Monthly</option>
             <option value="yearly">Yearly</option>
           </select>
@@ -12437,6 +12512,7 @@ function ProductionSongBoard({
   const [deadlineInput, setDeadlineInput] = useState(song.releaseDate);
   const [appliedDeadlineInput, setAppliedDeadlineInput] = useState(song.releaseDate);
   const [albumArtUrl, setAlbumArtUrl] = useState(song.albumArtUrl);
+  const [artworkUploadStatus, setArtworkUploadStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
   const [isAlbumArtEditorOpen, setIsAlbumArtEditorOpen] = useState(false);
   const [isFocusHighlighted, setIsFocusHighlighted] = useState(false);
   const [isReleaseDateEditing, setIsReleaseDateEditing] = useState(false);
@@ -12452,6 +12528,13 @@ function ProductionSongBoard({
   const nextTasks = getNextProductionTasks(song.steps).slice(0, 3);
   const canUpdateDeadline = Boolean(toIsoDate(deadlineInput));
   const canSaveSongTitle = songTitleInput.trim().length > 0;
+  const persistArtworkUrl = useCallback((value = albumArtUrl) => {
+    const nextArtworkUrl = value.trim();
+    setAlbumArtUrl(nextArtworkUrl);
+    if (nextArtworkUrl !== song.albumArtUrl) {
+      onChange(song.id, { albumArtUrl: nextArtworkUrl });
+    }
+  }, [albumArtUrl, onChange, song.albumArtUrl, song.id]);
 
   useEffect(() => {
     window.setTimeout(() => {
@@ -12463,18 +12546,6 @@ function ProductionSongBoard({
       setIsReleaseDateEditing(false);
     }, 0);
   }, [song.albumArtUrl, song.releaseDate, song.title]);
-
-  useEffect(() => {
-    if (albumArtUrl === song.albumArtUrl) {
-      return;
-    }
-
-    const saveTimer = window.setTimeout(() => {
-      onChange(song.id, { albumArtUrl });
-    }, 700);
-
-    return () => window.clearTimeout(saveTimer);
-  }, [albumArtUrl, onChange, song.albumArtUrl, song.id]);
 
   useEffect(() => {
     if (!focusToken) {
@@ -12524,6 +12595,27 @@ function ProductionSongBoard({
     window.addEventListener("pointerdown", cancelReleaseDateEdit);
     return () => window.removeEventListener("pointerdown", cancelReleaseDateEdit);
   }, [appliedDeadlineInput, isReleaseDateEditing]);
+
+  useEffect(() => {
+    if (!isAlbumArtEditorOpen) {
+      return;
+    }
+
+    function saveArtworkOnOutsidePointer(event: PointerEvent) {
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-production-artwork-editor]")
+      ) {
+        return;
+      }
+
+      persistArtworkUrl();
+      setIsAlbumArtEditorOpen(false);
+    }
+
+    document.addEventListener("pointerdown", saveArtworkOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", saveArtworkOnOutsidePointer);
+  }, [isAlbumArtEditorOpen, persistArtworkUrl]);
 
   useEffect(() => {
     if (!isSongDeleteArmed) {
@@ -12816,15 +12908,16 @@ function ProductionSongBoard({
                 </button>
               </div>
             </label>
-            <label className="song-artwork-options-editor">
+            <label className="song-artwork-options-editor" data-production-artwork-editor>
               <span className="song-option-field-heading">Artwork URL</span>
               <div className="release-date-input-row">
                 <input
-                  disabled={!isAlbumArtEditorOpen}
+                  aria-label="Artwork URL"
+                  readOnly={!isAlbumArtEditorOpen}
                   onChange={(event) => setAlbumArtUrl(event.target.value.trim())}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
-                      onChange(song.id, { albumArtUrl });
+                      persistArtworkUrl();
                       setIsAlbumArtEditorOpen(false);
                     }
                   }}
@@ -12832,35 +12925,43 @@ function ProductionSongBoard({
                   type="url"
                   value={albumArtUrl}
                 />
-                <ManagedImageUploadButton
-                  module="production"
-                  onUploaded={(url) => {
-                    setAlbumArtUrl(url);
-                    onChange(song.id, { albumArtUrl: url });
-                    setIsAlbumArtEditorOpen(false);
-                  }}
-                />
-                <button
-                  aria-label={isAlbumArtEditorOpen ? "Save artwork URL" : "Edit artwork URL"}
-                  onClick={() => {
-                    if (isAlbumArtEditorOpen) {
-                      onChange(song.id, { albumArtUrl });
+                {isAlbumArtEditorOpen ? (
+                  <ManagedImageUploadButton
+                    module="production"
+                    onStatusChange={setArtworkUploadStatus}
+                    onUploaded={(url) => {
+                      persistArtworkUrl(url);
                       setIsAlbumArtEditorOpen(false);
-                      return;
-                    }
-
-                    setAlbumArtUrl(song.albumArtUrl);
-                    setIsAlbumArtEditorOpen(true);
-                  }}
-                  type="button"
-                >
-                  {isAlbumArtEditorOpen ? (
-                    <Save size={16} aria-hidden />
-                  ) : (
+                    }}
+                  />
+                ) : (
+                  <button
+                    aria-label="Edit artwork URL"
+                    onClick={() => {
+                      setAlbumArtUrl(song.albumArtUrl);
+                      setArtworkUploadStatus({ message: "", state: "idle" });
+                      setIsAlbumArtEditorOpen(true);
+                    }}
+                    type="button"
+                  >
                     <Pencil size={15} aria-hidden />
-                  )}
-                </button>
+                  </button>
+                )}
               </div>
+              {artworkUploadStatus.message ? (
+                <span
+                  className={`artwork-upload-status ${
+                    artworkUploadStatus.state === "error"
+                      ? "settings-error"
+                      : artworkUploadStatus.state === "loading"
+                        ? "artwork-upload-status-pending"
+                        : "settings-status"
+                  }`}
+                  role={artworkUploadStatus.state === "error" ? "alert" : "status"}
+                >
+                  {artworkUploadStatus.message}
+                </span>
+              ) : null}
             </label>
             <div className="song-release-options-field production-release-date-editor">
               <span className="song-option-field-heading">Release date</span>
@@ -13379,12 +13480,16 @@ function ProductionBudgetLineEditor({
 
 function ProductionBudgetAmountInput({
   amount,
+  ariaLabel = "Production budget amount",
+  disabled = false,
   forcedSign,
   onChange,
   placeholder = "-20 or 100",
   toneAmount = amount
 }: {
   amount: number;
+  ariaLabel?: string;
+  disabled?: boolean;
   forcedSign?: "negative" | "positive";
   onChange: (amount: number) => void;
   placeholder?: string;
@@ -13396,8 +13501,9 @@ function ProductionBudgetAmountInput({
 
   return (
     <input
-      aria-label="Production budget amount"
+      aria-label={ariaLabel}
       className={getTransactionAmountToneClass(toneAmount)}
+      disabled={disabled}
       inputMode="decimal"
       onBlur={() => {
         const parsedAmount = parseEditableAmount(amountInput);
@@ -13462,10 +13568,18 @@ function applyForcedAmountSign(
 function SignedBudgetAmountInput({
   amount,
   defaultSign,
+  disabled = false,
+  inputLabel,
+  inputOrder = "toggle-first",
+  showToggle = true,
   onChange
 }: {
   amount: number;
   defaultSign: "negative" | "positive";
+  disabled?: boolean;
+  inputLabel?: string;
+  inputOrder?: "amount-first" | "toggle-first";
+  showToggle?: boolean;
   onChange: (amount: number) => void;
 }) {
   const [isZeroNegative, setIsZeroNegative] = useState(
@@ -13487,17 +13601,22 @@ function SignedBudgetAmountInput({
   }
 
   return (
-    <div className="signed-budget-amount-control">
-      <button
-        aria-label={isNegative ? "Change amount to income" : "Change amount to expense"}
-        className={`signed-budget-toggle ${isNegative ? "is-expense" : "is-income"}`}
-        onClick={toggleSign}
-        type="button"
-      >
-        {isNegative ? "−" : "+"}
-      </button>
+    <div className={`signed-budget-amount-control${showToggle ? " has-toggle" : ""}${inputOrder === "amount-first" ? " signed-budget-amount-control-amount-first" : ""}`}>
+      {showToggle ? (
+        <button
+          aria-label={isNegative ? "Change amount to income" : "Change amount to expense"}
+          className={`signed-budget-toggle ${isNegative ? "is-expense" : "is-income"}`}
+          disabled={disabled}
+          onClick={toggleSign}
+          type="button"
+        >
+          {isNegative ? "−" : "+"}
+        </button>
+      ) : null}
       <ProductionBudgetAmountInput
         amount={signedAmount}
+        ariaLabel={inputLabel}
+        disabled={disabled}
         forcedSign={isNegative ? "negative" : "positive"}
         key={isNegative ? "expense" : "income"}
         onChange={onChange}
@@ -15440,6 +15559,17 @@ function AppleMusicCsvImportControl({
   );
 }
 
+function DashboardInitialLoadingOverlay() {
+  return (
+    <div className="dashboard-initial-loading" role="status">
+      <div aria-hidden className="dashboard-initial-loading-center">
+        <span className="dashboard-initial-loading-spinner" />
+      </div>
+      <span className="sr-only">Loading Dashboard</span>
+    </div>
+  );
+}
+
 function DashboardView({
   appleMusicReminderDismissedDate,
   budgetEntries,
@@ -16881,7 +17011,7 @@ function DashboardBudgetPreview({
       <div className="dashboard-budget-grid">
         <article className="metric-card budget-metric-card dashboard-budget-current">
           <span>Current balance</span>
-          <strong className={getAmountToneClass(summary.balance)}>
+          <strong className={getBalanceToneClass(summary.balance)}>
             {formatCurrency(summary.balance)}
           </strong>
         </article>
@@ -16897,7 +17027,7 @@ function DashboardBudgetPreview({
         </article>
         <article className="metric-card budget-metric-card dashboard-budget-projected-balance">
           <span>Projected balance month ahead</span>
-          <strong className={getAmountToneClass(summary.upcomingBalance)}>
+          <strong className={getBalanceToneClass(summary.upcomingBalance)}>
             {formatCurrency(summary.upcomingBalance)}
           </strong>
         </article>
@@ -17310,14 +17440,14 @@ function PlatformsView({
             </span>
           ) : platform.slug === "apple-music" ? (
             <div className="platform-card-header-meta apple-import-actions">
-              {appleMusicLastUpdate ? (
+              {formatAppleMusicLastUpdateDate(appleMusicLastUpdate) ? (
                 <span
                   className={getPlatformUpdateMetaClass(
                     platform.slug,
                     appleMusicLastUpdate
                   )}
                 >
-                  Last update {formatDateForDisplay(appleMusicLastUpdate)}
+                  Last update: {formatAppleMusicLastUpdateDate(appleMusicLastUpdate)}
                 </span>
               ) : null}
               <AppleMusicCsvImportControl
@@ -17344,27 +17474,33 @@ function PlatformsView({
 function ManagedImageUploadButton({
   disabled = false,
   module,
+  onStatusChange,
   onUploaded
 }: {
   disabled?: boolean;
   module: "production" | "marketing" | "events" | "qr";
+  onStatusChange?: (status: RefreshStatus) => void;
   onUploaded: (url: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
+  function updateStatus(nextStatus: RefreshStatus) {
+    setStatus(nextStatus);
+    onStatusChange?.(nextStatus);
+  }
   async function upload(file: File) {
-    setStatus({ message: "Uploading image...", state: "loading" });
+    updateStatus({ message: "Uploading image...", state: "loading" });
     try {
       const form = new FormData();
       form.set("file", file); form.set("module", module);
       const response = await fetch("/api/media/images", { body: form, method: "POST" });
       const payload = await response.json() as { error?: string; url?: string };
       if (!response.ok || !payload.url) throw new Error(payload.error || "Image upload failed.");
+      updateStatus({ message: "Image uploaded.", state: "success" });
       onUploaded(payload.url);
-      setStatus({ message: "Image uploaded.", state: "success" });
-    } catch (error) { setStatus({ message: error instanceof Error ? error.message : "Image upload failed.", state: "error" }); }
+    } catch (error) { updateStatus({ message: error instanceof Error ? error.message : "Image upload failed.", state: "error" }); }
   }
-  return <div className="managed-image-upload"><input accept="image/jpeg,image/png,image/webp" aria-label="Upload image" disabled={disabled || status.state === "loading"} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }} ref={inputRef} type="file" /><button disabled={disabled || status.state === "loading"} onClick={() => inputRef.current?.click()} type="button"><Upload aria-hidden size={14} />{status.state === "loading" ? "Uploading..." : "Upload image"}</button>{status.message ? <span className={status.state === "error" ? "settings-error" : "settings-status"} role={status.state === "error" ? "alert" : "status"}>{status.message}</span> : null}</div>;
+  return <div className="managed-image-upload"><input accept="image/jpeg,image/png,image/webp" aria-label="Upload image" disabled={disabled || status.state === "loading"} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }} ref={inputRef} type="file" /><button disabled={disabled || status.state === "loading"} onClick={() => inputRef.current?.click()} type="button"><Upload aria-hidden size={14} />{status.state === "loading" ? "Uploading..." : "Upload image"}</button>{status.message && !onStatusChange ? <span className={status.state === "error" ? "settings-error" : "settings-status"} role={status.state === "error" ? "alert" : "status"}>{status.message}</span> : null}</div>;
 }
 
 function QrCodeLinksSection({
@@ -17652,6 +17788,18 @@ function getAppleMusicLastUpdateDate(
     getPlatformMetric(platformStatsData, "apple-music", "last_update_date")?.value ??
     getPlatformLastSnapshotDate(platformMetricRows, "apple-music")
   );
+}
+
+function formatAppleMusicLastUpdateDate(value?: string) {
+  if (!value || /undefined|null|nan/i.test(value)) {
+    return null;
+  }
+
+  if (parseCampaignDate(value) || parseCampaignDateKey(value)) {
+    return formatDateWithDots(value);
+  }
+
+  return null;
 }
 
 function getAppleMusicUpdateTask(
@@ -18417,7 +18565,6 @@ type PlatformDisplayCard = (typeof platformStats)[number] & {
 
 function getStandaloneInstagramCard(rows: MetricRow[]): PlatformDisplayCard[] {
   const source = "instagram-login-api";
-  if (!rows.some((row) => getSingle(row.platforms)?.slug === "instagram" && row.source === source)) return [];
   const template = platformStats[0];
   return [{
     ...template,
@@ -18433,19 +18580,37 @@ function getStandaloneInstagramCard(rows: MetricRow[]): PlatformDisplayCard[] {
   } as PlatformDisplayCard];
 }
 
+const threadsPlatformMetrics = [
+  { label: "Profile Views", metricName: "views_daily", value: "—" },
+  { label: "Followers", metricName: "followers", value: "—" },
+  { label: "Likes", metricName: "likes_daily", value: "—" },
+  { label: "Replies", metricName: "replies_daily", value: "—" },
+  { label: "Reposts", metricName: "reposts_daily", value: "—" },
+  { label: "Quotes", metricName: "quotes_daily", value: "—" },
+  { label: "Link Clicks", metricName: "clicks_daily", value: "—" }
+];
+
+const threadsDashboardMetrics = [
+  { label: "Followers", metricName: "followers", value: "—" },
+  { label: "Profile Views", metricName: "views_daily", value: "—" },
+  { label: "Reposts", metricName: "reposts_daily", value: "—" },
+  { label: "Likes", metricName: "likes_daily", value: "—" }
+];
+
 function getThreadsCard(rows: MetricRow[]): PlatformDisplayCard[] {
+  return getThreadsCardForMetrics(rows, threadsPlatformMetrics);
+}
+
+function getThreadsDashboardCard(rows: MetricRow[]): PlatformDisplayCard[] {
+  return getThreadsCardForMetrics(rows, threadsDashboardMetrics);
+}
+
+function getThreadsCardForMetrics(
+  rows: MetricRow[],
+  metrics: Array<{ label: string; metricName: string; value: string }>
+): PlatformDisplayCard[] {
   const source = "threads-api";
-  if (!rows.some((row) => getSingle(row.platforms)?.slug === "threads" && row.source === source)) return [];
   const template = platformStats[0];
-  const metrics = [
-    { label: "Profile Views", metricName: "views_daily", value: "—" },
-    { label: "Followers", metricName: "followers", value: "—" },
-    { label: "Likes", metricName: "likes_daily", value: "—" },
-    { label: "Replies", metricName: "replies_daily", value: "—" },
-    { label: "Reposts", metricName: "reposts_daily", value: "—" },
-    { label: "Quotes", metricName: "quotes_daily", value: "—" },
-    { label: "Link Clicks", metricName: "clicks_daily", value: "—" }
-  ];
   return [{
     ...template,
     platform: "Threads",
@@ -18509,7 +18674,7 @@ function getPlatformCardsForPreferences(
         return getStandaloneInstagramCard(rows);
       }
       if (cardId === "platforms.threads") {
-        return getThreadsCard(rows);
+        return dashboardOnly ? getThreadsDashboardCard(rows) : getThreadsCard(rows);
       }
       const slug = platformChildSlugs[cardId];
       if (!slug) return [];
@@ -19134,10 +19299,6 @@ function PlatformStatsSection({
                         }
                         key={`${platform.platform}-${metric.label}`}
                       >
-                        <dt>
-                          {metric.label}
-                          {metric.context ? <span>{metric.context}</span> : null}
-                        </dt>
                         <dd>
                           {metric.value}
                           {dailyDelta ? (
@@ -19149,6 +19310,10 @@ function PlatformStatsSection({
                             </span>
                           ) : null}
                         </dd>
+                        <dt>
+                          {metric.label}
+                          {metric.context ? <span>{metric.context}</span> : null}
+                        </dt>
                       </div>
                     );
                   })}

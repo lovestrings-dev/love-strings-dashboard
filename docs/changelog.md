@@ -580,6 +580,35 @@ Still deferred:
   YouTube collection, Gmail/CRM, Spotify, Deezer, Amazon, and workspace
   archive/delete workflows.
 
+## Beta 1.21 — Daily-Use Stability & Budget Recurrence (Prepared for deployment)
+
+Headline: **The daily dashboard, Production artwork workflow, platform cards,
+and Budget ledger have been tightened for dependable desktop and mobile use.**
+
+Includes:
+
+- Dashboard-only first-render loading overlay with failure-safe readiness,
+  centered spinner, and unchanged module scope.
+- Correct platform card availability for Threads and Instagram Creator, Apple
+  Music card cleanup, sticky navigation, and number-first metric tiles.
+- Reliable workspace/artist-name editing and persistence.
+- Production mobile overflow fixes plus a compact Artwork URL editor with
+  tap-away save, managed Cloudinary upload, and status feedback below its row.
+- Budget balance-tone normalization, restored responsive row geometry,
+  parent-only edit-mode sign toggles, and new lines opening directly in edit
+  mode.
+- Daily and Weekly recurring Budget cadences in addition to the retained
+  Monthly and Yearly paths.
+
+Database and validation state:
+
+- Migration `202608200001_add_daily_weekly_budget_recurring_cadences.sql`
+  expands only the Budget cadence check constraint; existing rows were not
+  rewritten.
+- Focused Dashboard/platform/Meta presentation, Apple Music update, and
+  Budget recurrence checks pass alongside lint, TypeScript, production build,
+  and diff/whitespace validation.
+
 ## Beta 1.20 — Meta App B Page & Instagram Onboarding (Prepared for deployment)
 
 Headline: **A workspace can now authorize Meta, explicitly bind its Facebook
