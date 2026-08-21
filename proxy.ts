@@ -1,14 +1,17 @@
 import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 import {
   activeWorkspaceCookieName,
   parseWorkspaceId,
   resolveWorkspaceMembership
 } from "@/lib/workspace";
+import { isPlatformAdministrationPath } from "@/lib/platform-administration-routing";
 
 const cronSecret = process.env.CRON_SECRET;
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 export async function proxy(request: NextRequest) {
   if (
@@ -43,8 +46,9 @@ export async function proxy(request: NextRequest) {
   const {
     data: { user }
   } = await supabase.auth.getUser();
+  const authenticatedUser = user;
 
-  if (!user) {
+  if (!authenticatedUser) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     loginUrl.search = "";
@@ -55,7 +59,7 @@ export async function proxy(request: NextRequest) {
   const { data: memberships, error: membershipError } = await supabase
     .from("app_workspace_members")
     .select("workspace_id, role, created_at")
-    .eq("user_id", user.id)
+    .eq("user_id", authenticatedUser.id)
     .order("created_at", { ascending: true });
 
   const requestedWorkspaceId = parseWorkspaceId(
@@ -64,6 +68,9 @@ export async function proxy(request: NextRequest) {
   const membership = resolveWorkspaceMembership(memberships, requestedWorkspaceId);
 
   if (membershipError || !membership) {
+    if (isPlatformAdministrationPath(request.nextUrl.pathname) && await isPlatformOperator(authenticatedUser.id)) {
+      return response;
+    }
     if (request.nextUrl.pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Workspace access denied." }, { status: 403 });
     }
@@ -100,12 +107,27 @@ export async function proxy(request: NextRequest) {
   return response;
 }
 
+async function isPlatformOperator(userId: string) {
+  if (!supabaseUrl || !supabaseServiceRoleKey) return false;
+  const service = createClient(supabaseUrl, supabaseServiceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false }
+  });
+  const { data, error } = await service
+    .from("app_platform_operators")
+    .select("user_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return !error && Boolean(data);
+}
+
 function isPublicPath(pathname: string) {
   return (
     pathname === "/login" ||
     pathname === "/no-workspace" ||
     pathname === "/set-password" ||
-    pathname === "/api/invitations/accept"
+    pathname === "/api/invitations/accept" ||
+    pathname === "/api/platform/provisioning-invitations/accept" ||
+    pathname === "/api/platform/provisioning-invitations/continuation"
   );
 }
 

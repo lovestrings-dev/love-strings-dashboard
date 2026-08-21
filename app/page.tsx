@@ -34,6 +34,8 @@ import {
 } from "lucide-react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { AccountControl } from "./account-control";
+import { PlatformAdministrationView } from "./platform-administration-view";
+import { InitialWorkspaceSetup } from "./initial-workspace-setup";
 import { DateInput } from "./date-input";
 import { toDisplayDate, toIsoDate } from "@/lib/date-input";
 import {
@@ -5254,6 +5256,8 @@ export default function Home() {
     state: "idle"
   });
   const [activeWorkspaceName, setActiveWorkspaceName] = useState("Workspace");
+  const [activeWorkspaceSetupState, setActiveWorkspaceSetupState] = useState<"active" | "pending_setup" | "">("");
+  const [profileDisplayName, setProfileDisplayName] = useState("");
   const [workspaceTimeZone, setWorkspaceTimeZone] = useState(defaultWorkspaceTimeZone);
   const [productionDefaultCosts, setProductionDefaultCosts] =
     useState<ProductionDefaultCosts>(defaultProductionStepCosts);
@@ -7001,13 +7005,16 @@ export default function Home() {
 
     async function loadActiveWorkspace() {
       const response = await fetch("/api/workspace/active", { cache: "no-store" });
-      const payload = (await response.json()) as { workspaceId?: string };
+      const payload = (await response.json()) as { displayName?: string; role?: WorkspaceRole; setupState?: "active" | "pending_setup"; workspaceId?: string };
       if (!isCancelled && response.ok && payload.workspaceId) {
         setPlatformMetricRows([]);
         setPlatformStatsData([]);
         setNavigationStack([]);
         setPendingScrollRestore(null);
         setActiveWorkspaceId(payload.workspaceId);
+        setActiveWorkspaceSetupState(payload.setupState === "pending_setup" ? "pending_setup" : "active");
+        setProfileDisplayName(payload.displayName ?? "");
+        if (payload.role === "admin" || payload.role === "member" || payload.role === "viewer") setWorkspaceRole(payload.role);
         try {
           const workspacesResponse = await fetch("/api/workspaces", { cache: "no-store" });
           const workspacesPayload = (await workspacesResponse.json().catch(() => null)) as {
@@ -8219,6 +8226,13 @@ export default function Home() {
           : song
       )
     );
+  }
+
+  if (activeWorkspaceSetupState === "pending_setup" && workspaceRole === "admin") {
+    return <InitialWorkspaceSetup initialUserName={profileDisplayName} onComplete={(workspaceName) => {
+      setActiveWorkspaceName(workspaceName);
+      setActiveWorkspaceSetupState("active");
+    }} />;
   }
 
   return (
@@ -9796,126 +9810,6 @@ function formatInvitationDate(value: string) {
     minute: "2-digit",
     timeZone: "Europe/Vienna",
   }).format(date);
-}
-
-function PlatformAdministrationView({
-  activeSection,
-  onBack
-}: {
-  activeSection: Section;
-  onBack: () => void;
-}) {
-  const [accessChecked, setAccessChecked] = useState(false);
-  const [canCreateWorkspaces, setCanCreateWorkspaces] = useState(false);
-  const [newWorkspaceName, setNewWorkspaceName] = useState("");
-  const [newWorkspaceSlug, setNewWorkspaceSlug] = useState("");
-  const [status, setStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
-
-  useEffect(() => {
-    let isCancelled = false;
-    void fetch("/api/platform/workspaces", { cache: "no-store" })
-      .then(async (response) => ({ ok: response.ok, payload: await response.json() }))
-      .then(({ ok, payload }) => {
-        if (isCancelled) return;
-        setCanCreateWorkspaces(ok && payload.canCreateWorkspaces === true);
-        setAccessChecked(true);
-      })
-      .catch(() => {
-        if (!isCancelled) setAccessChecked(true);
-      });
-    return () => {
-      isCancelled = true;
-    };
-  }, []);
-
-  async function createWorkspace(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setStatus({ message: "Creating workspace...", state: "loading" });
-    try {
-      const response = await fetch("/api/platform/workspaces", {
-        body: JSON.stringify({ name: newWorkspaceName, slug: newWorkspaceSlug }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST"
-      });
-      const payload = (await response.json()) as { error?: string; name?: string };
-      if (!response.ok) throw new Error(payload.error || "Workspace creation failed.");
-      setNewWorkspaceName("");
-      setNewWorkspaceSlug("");
-      setStatus({
-        message: `${payload.name || "Workspace"} is ready for onboarding.`,
-        state: "success"
-      });
-    } catch (error) {
-      setStatus({
-        message: error instanceof Error ? error.message : "Workspace creation failed.",
-        state: "error"
-      });
-    }
-  }
-
-  return (
-    <section className="user-settings-canvas" aria-labelledby="platform-administration-title">
-      <header className="user-settings-header">
-        <div>
-          <p className="eyebrow">Platform administration</p>
-          <h1 id="platform-administration-title">Workspace provisioning</h1>
-        </div>
-      </header>
-      <div className="user-settings-content">
-        {accessChecked && !canCreateWorkspaces ? (
-          <article className="general-settings-card">
-            <h2>Platform access required</h2>
-            <p>Only registered platform operators can provision workspaces.</p>
-          </article>
-        ) : null}
-        {canCreateWorkspaces ? (
-          <article className="general-settings-card general-settings-invitations">
-            <div className="general-settings-heading">
-              <div>
-                <p className="eyebrow">All workspaces</p>
-                <h2>Create workspace</h2>
-              </div>
-            </div>
-            <p className="settings-description">
-              This is platform-level administration. It is not a setting of the
-              currently selected workspace.
-            </p>
-            <form className="workspace-invitation-form" onSubmit={createWorkspace}>
-              <label>
-                <span>Name</span>
-                <input
-                  disabled={status.state === "loading"}
-                  onChange={(event) => setNewWorkspaceName(event.target.value)}
-                  placeholder="Test Band"
-                  required
-                  value={newWorkspaceName}
-                />
-              </label>
-              <label>
-                <span>Slug</span>
-                <input
-                  disabled={status.state === "loading"}
-                  onChange={(event) => setNewWorkspaceSlug(event.target.value)}
-                  placeholder="test-band"
-                  required
-                  value={newWorkspaceSlug}
-                />
-              </label>
-              <button disabled={status.state === "loading"} type="submit">
-                <Plus aria-hidden size={16} />
-                <span>{status.state === "loading" ? "Creating..." : "Create workspace"}</span>
-              </button>
-            </form>
-            {status.message ? (
-              <p className={status.state === "error" ? "settings-error" : "settings-status"}>
-                {status.message}
-              </p>
-            ) : null}
-          </article>
-        ) : null}
-      </div>
-    </section>
-  );
 }
 
 function AboutDashboardView({

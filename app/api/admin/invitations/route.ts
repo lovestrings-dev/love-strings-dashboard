@@ -5,10 +5,10 @@ import {
   requireWorkspaceAdministrator,
   WorkspaceAccessError
 } from "@/lib/server/workspace-owner";
+import { sendWorkspaceInvitationEmail } from "@/lib/server/workspace-invitation-email";
 
 type WorkspaceRole = "admin" | "member" | "viewer";
 
-const productionAppUrl = "https://love-strings-dashboard.vercel.app";
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(request: NextRequest) {
@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      await sendInvitationEmail(serviceClient, email, token);
+      await sendWorkspaceInvitationEmail(serviceClient, email, token);
     } catch (error) {
       await serviceClient.from("app_workspace_invitations").delete().eq("id", invitation.id);
       throw error;
@@ -150,7 +150,7 @@ export async function PATCH(request: NextRequest) {
     if (!rotated) return NextResponse.json({ error: "Invitation is no longer pending." }, { status: 409 });
 
     try {
-      await sendInvitationEmail(serviceClient, invitation.email, token);
+      await sendWorkspaceInvitationEmail(serviceClient, invitation.email, token);
     } catch (error) {
       await serviceClient
         .from("app_workspace_invitations")
@@ -219,30 +219,6 @@ async function getPendingInvitation(
   return data;
 }
 
-async function sendInvitationEmail(
-  serviceClient: Awaited<ReturnType<typeof requireWorkspaceAdministrator>>["serviceClient"],
-  email: string,
-  token: string
-) {
-  const passwordSetupUrl = `${getPublicAppUrl()}/set-password?workspace_invitation=${token}`;
-  const { data, error } = await serviceClient.auth.admin.inviteUserByEmail(email, {
-    redirectTo: passwordSetupUrl
-  });
-  if (!error && data.user) return;
-
-  const message = error?.message.toLowerCase() ?? "";
-  if (message.includes("already") || message.includes("registered")) {
-    const { error: magicLinkError } = await serviceClient.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${passwordSetupUrl}&workspace_join=1` }
-    });
-    if (!magicLinkError) return;
-    throw magicLinkError;
-  }
-
-  throw error ?? new Error("Supabase did not return the invited user.");
-}
-
 function getInvitationStatus(invitation: { accepted_at: string | null; expires_at: string; revoked_at: string | null }) {
   if (invitation.revoked_at) return "revoked";
   if (invitation.accepted_at) return "accepted";
@@ -255,11 +231,6 @@ function createInvitationToken() {
 
 function hashInvitationToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
-}
-
-function getPublicAppUrl() {
-  const configuredUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
-  return (configuredUrl || productionAppUrl).replace(/\/$/, "");
 }
 
 function isSameOriginRequest(request: NextRequest) {

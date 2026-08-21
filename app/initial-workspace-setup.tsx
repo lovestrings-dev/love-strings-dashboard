@@ -1,0 +1,22 @@
+"use client";
+
+import { useState } from "react";
+
+export function InitialWorkspaceSetup({ initialUserName, onComplete }: { initialUserName: string; onComplete: (workspaceName: string) => void }) {
+  const [userName, setUserName] = useState(initialUserName);
+  const [artistBandName, setArtistBandName] = useState("");
+  const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setMessage(""); setSubmitting(true);
+    try {
+      const response = await fetch("/api/workspace/finalize", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ artistBandName, userName }) });
+      const payload = await response.json() as { error?: string; workspace?: { workspace_name?: string } };
+      if (!response.ok) throw new Error(payload.error || "Workspace setup could not be completed.");
+      onComplete(payload.workspace?.workspace_name || artistBandName.trim());
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Workspace setup could not be completed."); } finally { setSubmitting(false); }
+  }
+
+  return <main className="login-page"><section className="login-panel" aria-labelledby="initial-workspace-setup-title"><span aria-hidden className="login-logo login-logo-neutral">AD</span><div><p className="eyebrow">ArtistDeck</p><h1 id="initial-workspace-setup-title">Set up your ArtistDeck workspace</h1></div><p>Tell us who you are and what this workspace is for.</p><form className="login-form" onSubmit={submit}><label>User Name<input autoComplete="name" maxLength={120} onChange={(event) => setUserName(event.target.value)} required value={userName} /></label><label>Artist / Band Name<input autoComplete="organization" maxLength={120} minLength={2} onChange={(event) => setArtistBandName(event.target.value)} required value={artistBandName} /></label>{message ? <p className="login-error" role="alert">{message}</p> : null}<button disabled={submitting} type="submit">{submitting ? "Finishing setup..." : "Open Dashboard"}</button></form></section></main>;
+}

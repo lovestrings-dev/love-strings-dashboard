@@ -6,8 +6,19 @@ import {
 
 export async function GET(request: NextRequest) {
   try {
-    await requirePlatformOwner(request);
-    return NextResponse.json({ canCreateWorkspaces: true });
+    const { serviceClient } = await requirePlatformOwner(request);
+    const [{ data: workspaces, error: workspaceError }, { data: invitations, error: invitationError }] = await Promise.all([
+      serviceClient.from("app_workspaces").select("id, name, setup_state, slug, created_at").order("created_at", { ascending: false }),
+      serviceClient.from("app_workspace_invitations").select("workspace_id, email, accepted_at, revoked_at, expires_at")
+        .is("accepted_at", null).is("revoked_at", null).gt("expires_at", new Date().toISOString())
+    ]);
+    if (workspaceError) throw workspaceError;
+    if (invitationError) throw invitationError;
+    const pendingEmailByWorkspaceId = new Map((invitations ?? []).map((invitation) => [invitation.workspace_id, invitation.email]));
+    return NextResponse.json({
+      canCreateWorkspaces: true,
+      workspaces: (workspaces ?? []).map((workspace) => ({ ...workspace, pendingAdminEmail: pendingEmailByWorkspaceId.get(workspace.id) ?? null }))
+    });
   } catch (error) {
     const status = error instanceof WorkspaceAccessError ? error.status : 500;
     return NextResponse.json({ canCreateWorkspaces: false }, { status });
