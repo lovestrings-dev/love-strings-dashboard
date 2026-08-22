@@ -19,6 +19,7 @@ import {
   Disc3,
   Headphones,
   Link as LinkIcon,
+  Mail,
   MapPin,
   Megaphone,
   Upload,
@@ -43,6 +44,11 @@ import {
   type BudgetRecurringCadence
 } from "@/lib/budget-recurrence";
 import { defaultWorkspaceTimeZone, getWorkspaceDateKey } from "@/lib/workspace-time";
+import {
+  calculateAudienceDashboard,
+  type AudienceDashboardCalculations,
+  type AudienceMetricRow
+} from "@/lib/audience-aggregation";
 import { defaultWorkspaceId } from "@/lib/workspace";
 import { MetaPageConnectionSettings } from "./meta-page-connection-settings";
 import {
@@ -5358,6 +5364,21 @@ export default function Home() {
     dashboardPreferences,
     true
   );
+  const audienceDashboard = useMemo(
+    () =>
+      calculateAudienceDashboard(
+        platformMetricRows.map((row): AudienceMetricRow => ({
+          importedAt: row.imported_at,
+          metricName: row.metric_name,
+          metricValue: row.metric_value,
+          notes: row.notes,
+          platformSlug: getSingle(row.platforms)?.slug ?? "",
+          snapshotDate: row.snapshot_date,
+          source: row.source
+        }))
+      ),
+    [platformMetricRows]
+  );
   const isDashboardInitialLoadReady = Boolean(
     activeWorkspaceId &&
     activeWorkspaceResolvedId === activeWorkspaceId &&
@@ -8401,6 +8422,7 @@ export default function Home() {
           <PlatformsView
             appleMusicImportStatus={appleMusicImportStatus}
             appleMusicLastUploadedAt={appleMusicLastUploadedAt}
+            audienceDashboard={audienceDashboard}
             onAddQrCode={addQrCodeLink}
             onAppleMusicCsvImport={importAppleMusicCsv}
             onDeleteQrCode={deleteQrCodeLink}
@@ -8475,6 +8497,7 @@ export default function Home() {
         activeSection !== "Events" &&
         activeSection !== "Budget" ? (
           <DashboardView
+            audienceDashboard={audienceDashboard}
             budgetEntries={budgetEntriesWithForecast}
             campaigns={campaigns}
             dailyFocusProgress={validDailyFocusProgress}
@@ -15537,6 +15560,7 @@ function DashboardInitialLoadingOverlay() {
 }
 
 function DashboardView({
+  audienceDashboard,
   appleMusicReminderDismissedDate,
   budgetEntries,
   campaigns,
@@ -15568,10 +15592,11 @@ function DashboardView({
   productionSongs,
   qrCodeLinks,
   roadmapPhasesData
-  ,workspaceName,
   workspaceTimeZone
 }: {
+  audienceDashboard: AudienceDashboardCalculations;
   appleMusicReminderDismissedDate: string;
+  appleMusicLastUploadedAt: string;
   budgetEntries: BudgetEntry[];
   campaigns: MarketingCampaignConfig[];
   dailyFocusProgress: DailyFocusProgressItem[];
@@ -15758,6 +15783,7 @@ function DashboardView({
         platforms={dashboardPlatformStats}
         title="Platform Snapshot"
         description="Key audience and consumption signals from the main platforms."
+        audienceDashboard={audienceDashboard}
         variant="dashboard"
         renderCardHeaderMeta={(platform) => {
           const updateDate =
@@ -15813,17 +15839,123 @@ function DashboardView({
   );
 }
 
-function DashboardAudienceCard() {
+function DashboardAudienceCard({
+  calculations
+}: {
+  calculations: AudienceDashboardCalculations;
+}) {
+  const estimated = calculations.estimatedAudience;
+  const release = calculations.currentRelease;
+  const catalogue = calculations.catalogue;
   return (
-    <section className="platform-section module-accent module-accent-platforms" aria-label="Audience">
-      <div className="platform-grid platform-grid-dashboard">
-        <article className="platform-card platform-card-audience">
-          <div className="platform-card-header"><div className="platform-card-title"><Headphones size={20} aria-hidden /><h3>Audience</h3></div></div>
-          <p className="platform-card-placeholder"><strong>Audience estimate coming soon</strong><span>Combined audience insights will appear here when aggregation is available.</span></p>
+    <article className="platform-card platform-card-audience">
+      <div className="platform-card-header"><div className="platform-card-title"><Headphones size={20} aria-hidden /><h3>Audience</h3></div></div>
+      <div className="audience-dashboard-grid">
+        <article className="audience-dashboard-child">
+          <h4>Estimated Total Audience</h4>
+          {estimated ? <>
+            <strong>{formatMetricValue(estimated.lower)} – {formatMetricValue(estimated.maximum)}</strong>
+            <span>Estimated / overlap-adjusted</span>
+            {estimated.lowerDelta !== undefined || estimated.maximumDelta !== undefined ? <small>
+              {estimated.lowerDelta !== undefined ? `Lower ${formatAudienceDelta(estimated.lowerDelta)}` : null}
+              {estimated.lowerDelta !== undefined && estimated.maximumDelta !== undefined ? " · " : null}
+              {estimated.maximumDelta !== undefined ? `Max ${formatAudienceDelta(estimated.maximumDelta)}` : null}
+            </small> : null}
+          </> : <AudienceCardEmptyState />}
+        </article>
+        <article className="audience-dashboard-child">
+          <h4>Current Release Plays</h4>
+          {release ? <>
+            <strong>{formatMetricValue(release.value)}</strong>
+            <span>{release.title}</span>
+            {release.delta !== undefined ? <small>{formatAudienceDelta(release.delta)}</small> : null}
+          </> : <AudienceCardEmptyState />}
+        </article>
+        <article className="audience-dashboard-child">
+          <h4>Total Catalogue Plays</h4>
+          {catalogue ? <>
+            <strong>{formatMetricValue(catalogue.value)}</strong>
+            <span>Music platforms only</span>
+            {catalogue.delta !== undefined ? <small>{formatAudienceDelta(catalogue.delta)}</small> : null}
+          </> : <AudienceCardEmptyState />}
+        </article>
+        <article className="audience-dashboard-child audience-dashboard-feedback">
+          <h4>What is the number you want to see here?</h4>
+          <a href="mailto:artistdeck.app@gmail.com?subject=ArtistDeck%20Audience%20metric%20idea"><Mail size={14} aria-hidden /> Tell us</a>
         </article>
       </div>
-    </section>
+    </article>
   );
+}
+
+function PlatformsAudienceCard({
+  calculations
+}: {
+  calculations: AudienceDashboardCalculations;
+}) {
+  const estimated = calculations.estimatedAudience;
+  const release = calculations.currentRelease;
+  const catalogue = calculations.catalogue;
+  return (
+    <article className="platform-card platform-card-audience module-accent module-accent-platforms">
+      <div className="platform-card-header"><div className="platform-card-title"><Headphones size={20} aria-hidden /><h3>Audience</h3></div></div>
+      <div className="audience-platform-grid">
+        <article className="audience-platform-child">
+          <h4>Estimated Total Audience</h4>
+          {estimated ? <>
+            <strong>{formatMetricValue(estimated.lower)} – {formatMetricValue(estimated.maximum)}</strong>
+            <span>Estimated / overlap-adjusted</span>
+            {estimated.lowerDelta !== undefined || estimated.maximumDelta !== undefined ? <small>
+              {estimated.lowerDelta !== undefined ? `Lower ${formatAudienceDelta(estimated.lowerDelta)}` : null}
+              {estimated.lowerDelta !== undefined && estimated.maximumDelta !== undefined ? " · " : null}
+              {estimated.maximumDelta !== undefined ? `Max ${formatAudienceDelta(estimated.maximumDelta)}` : null}
+            </small> : null}
+          </> : <AudienceCardEmptyState />}
+        </article>
+        <article className="audience-platform-child">
+          <h4>Current Release Plays</h4>
+          {release ? <>
+            <strong>{formatMetricValue(release.value)}</strong>
+            <span>{release.title}</span>
+            {release.delta !== undefined ? <small>{formatAudienceDelta(release.delta)}</small> : null}
+          </> : <AudienceCardEmptyState />}
+        </article>
+        <article className="audience-platform-child">
+          <h4>Total Catalogue Plays</h4>
+          {catalogue ? <>
+            <strong>{formatMetricValue(catalogue.value)}</strong>
+            <span>Music platforms only</span>
+            {catalogue.delta !== undefined ? <small>{formatAudienceDelta(catalogue.delta)}</small> : null}
+          </> : <AudienceCardEmptyState />}
+        </article>
+        <article className="audience-platform-child audience-platform-feedback">
+          <h4>What is the number you want to see here?</h4>
+          <a href="mailto:artistdeck.app@gmail.com?subject=ArtistDeck%20Audience%20metric%20idea"><Mail size={14} aria-hidden /> Tell us</a>
+        </article>
+      </div>
+      <AudienceEvolutionPlaceholder />
+    </article>
+  );
+}
+
+function AudienceEvolutionPlaceholder() {
+  return (
+    <div className="platform-trend-panel audience-evolution-placeholder">
+      <div className="platform-trend-toggle">
+        <span>Evolution graphs</span>
+        <span>Coming later</span>
+        <ChevronDown size={16} aria-hidden />
+      </div>
+    </div>
+  );
+}
+
+function AudienceCardEmptyState() {
+  return <span>Connect a relevant platform to see this metric.</span>;
+}
+
+function formatAudienceDelta(value: number) {
+  return `(${value > 0 ? "+" : ""}${formatMetricValue(value)})`;
 }
 
 function DashboardDisconnectedPlatformCard({ label }: { label: string }) {
@@ -17077,6 +17209,7 @@ function DashboardRoadmapPhasePreview({
 function PlatformsView({
   appleMusicImportStatus,
   appleMusicLastUploadedAt,
+  audienceDashboard,
   onAddQrCode,
   onAppleMusicCsvImport,
   onDeleteQrCode,
@@ -17091,8 +17224,10 @@ function PlatformsView({
 }: {
   appleMusicImportStatus: AppleMusicImportStatus;
   appleMusicLastUploadedAt: string;
+  audienceDashboard: AudienceDashboardCalculations;
   onAddQrCode: () => void;
   onAppleMusicCsvImport: (file: File) => void;
+  onSpotifyCsvImport: (file: File) => void;
   onDeleteQrCode: (linkId: string) => void;
   onQrCodeChange: (linkId: string, updates: Partial<QrCodeLink>) => void;
   onRefreshPlatformStats: () => void;
@@ -17216,6 +17351,7 @@ function PlatformsView({
       </header>
 
       <PlatformStatsSection
+        audienceDashboard={audienceDashboard}
         hideHeading
         platforms={getPlatformCardsForPreferences(
           platformStatsData,
@@ -19177,6 +19313,7 @@ function formatReleaseOffset(offset: number) {
 }
 
 function PlatformStatsSection({
+  audienceDashboard,
   description,
   hideHeading = false,
   platforms,
@@ -19185,6 +19322,7 @@ function PlatformStatsSection({
   title,
   variant
 }: {
+  audienceDashboard?: AudienceDashboardCalculations;
   description: string;
   hideHeading?: boolean;
   platforms: PlatformDisplayCard[];
@@ -19211,6 +19349,12 @@ function PlatformStatsSection({
 
       <div className={`platform-grid platform-grid-${variant}`}>
         {platforms.map((platform) => {
+          if (platform.isAudiencePlaceholder) {
+            const calculations = audienceDashboard ?? { catalogue: null, currentRelease: null, estimatedAudience: null };
+            return variant === "dashboard"
+              ? <DashboardAudienceCard calculations={calculations} key={platform.platform} />
+              : <PlatformsAudienceCard calculations={calculations} key={platform.platform} />;
+          }
           const Icon = platform.icon;
           const cardAddon = renderCardAddon?.(platform) ?? null;
           const cardHeaderMeta = renderCardHeaderMeta?.(platform) ?? null;
