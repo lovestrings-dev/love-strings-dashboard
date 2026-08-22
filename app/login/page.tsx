@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
+import { ArtistDeckLoading, ArtistDeckSystemShell } from "@/app/artistdeck-system-shell";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 export default function LoginPage() {
@@ -32,14 +33,10 @@ export default function LoginPage() {
     router.refresh();
   }
 
+  if (isSubmitting) return <ArtistDeckLoading />;
+
   return (
-    <main className="login-page">
-      <section className="login-panel" aria-labelledby="login-title">
-        <span aria-hidden className="login-logo login-logo-neutral">LS</span>
-        <div>
-          <p className="eyebrow">LS Dashboard</p>
-          <h1 id="login-title">Sign in</h1>
-        </div>
+    <ArtistDeckSystemShell heading="Sign in">
 
         <form className="login-form" onSubmit={signIn}>
           <label>
@@ -69,7 +66,6 @@ export default function LoginPage() {
             {isSubmitting ? "Signing in..." : "Sign in"}
           </button>
         </form>
-      </section>
-    </main>
+    </ArtistDeckSystemShell>
   );
 }

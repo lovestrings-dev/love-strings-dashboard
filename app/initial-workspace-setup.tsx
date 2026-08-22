@@ -1,6 +1,8 @@
 "use client";
 
+import { LoaderCircle } from "lucide-react";
 import { useState } from "react";
+import { ArtistDeckSystemShell } from "@/app/artistdeck-system-shell";
 
 export function InitialWorkspaceSetup({ initialUserName, onComplete }: { initialUserName: string; onComplete: (workspaceName: string) => void }) {
   const [userName, setUserName] = useState(initialUserName);
@@ -18,5 +20,5 @@ export function InitialWorkspaceSetup({ initialUserName, onComplete }: { initial
     } catch (error) { setMessage(error instanceof Error ? error.message : "Workspace setup could not be completed."); } finally { setSubmitting(false); }
   }
 
-  return <main className="login-page"><section className="login-panel" aria-labelledby="initial-workspace-setup-title"><span aria-hidden className="login-logo login-logo-neutral">AD</span><div><p className="eyebrow">ArtistDeck</p><h1 id="initial-workspace-setup-title">Set up your ArtistDeck workspace</h1></div><p>Tell us who you are and what this workspace is for.</p><form className="login-form" onSubmit={submit}><label>User Name<input autoComplete="name" maxLength={120} onChange={(event) => setUserName(event.target.value)} required value={userName} /></label><label>Artist / Band Name<input autoComplete="organization" maxLength={120} minLength={2} onChange={(event) => setArtistBandName(event.target.value)} required value={artistBandName} /></label>{message ? <p className="login-error" role="alert">{message}</p> : null}<button disabled={submitting} type="submit">{submitting ? "Finishing setup..." : "Open Dashboard"}</button></form></section></main>;
+  return <ArtistDeckSystemShell description="Tell us who you are and what this workspace is for." heading="Set up your ArtistDeck workspace"><form className="login-form" onSubmit={submit}><label>User Name<input autoComplete="name" disabled={submitting} maxLength={120} onChange={(event) => setUserName(event.target.value)} required value={userName} /></label><label>Artist / Band Name<input autoComplete="organization" disabled={submitting} maxLength={120} minLength={2} onChange={(event) => setArtistBandName(event.target.value)} required value={artistBandName} /></label>{message ? <p className="login-error" role="alert">{message}</p> : null}<button disabled={submitting} type="submit">{submitting ? <><LoaderCircle aria-hidden className="onboarding-spinner" size={16} /> Setting up your workspace…</> : "Open Dashboard"}</button></form></ArtistDeckSystemShell>;
 }

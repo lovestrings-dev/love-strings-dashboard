@@ -9,12 +9,14 @@ export function AccountControl({
   onOpenAboutDashboard,
   onOpenGeneralSettings,
   onOpenPlatformAdministration,
-  onOpenUserSettings
+  onOpenUserSettings,
+  onReady
 }: {
   onOpenAboutDashboard: () => void;
   onOpenGeneralSettings: () => void;
   onOpenPlatformAdministration: () => void;
   onOpenUserSettings: () => void;
+  onReady: () => void;
 }) {
   const router = useRouter();
   const [displayName, setDisplayName] = useState("Account");
@@ -39,16 +41,15 @@ export function AccountControl({
 
   useEffect(() => {
     const supabase = createBrowserSupabaseClient();
+    let isCancelled = false;
 
     async function loadAccount() {
-      const { data } = await supabase.auth.getUser();
-      const user = data.user;
+      try {
+        const { data } = await supabase.auth.getUser();
+        const user = data.user;
+        if (!user) return;
 
-      if (!user) {
-        return;
-      }
-
-      const [profileResult, workspaceResult, workspacesResult, platformResult] = await Promise.all([
+        const [profileResult, workspaceResult, workspacesResult, platformResult] = await Promise.all([
         supabase
           .from("app_profiles")
           .select("avatar_path, display_name")
@@ -57,44 +58,47 @@ export function AccountControl({
         fetch("/api/workspace/active", { cache: "no-store" }),
         fetch("/api/workspaces", { cache: "no-store" }),
         fetch("/api/platform/workspaces", { cache: "no-store" })
-      ]);
-      const profile = profileResult.data;
-      const workspacePayload = (await workspaceResult.json().catch(() => null)) as {
+        ]);
+        const profile = profileResult.data;
+        const workspacePayload = (await workspaceResult.json().catch(() => null)) as {
         workspaceId?: string;
         role?: string;
-      } | null;
-      const workspaceListPayload = (await workspacesResult.json().catch(() => null)) as {
+        } | null;
+        const workspaceListPayload = (await workspacesResult.json().catch(() => null)) as {
         workspaces?: typeof workspaces;
-      } | null;
-      if (workspacesResult.ok && Array.isArray(workspaceListPayload?.workspaces)) {
-        setWorkspaces(workspaceListPayload.workspaces);
-      }
-      setIsPlatformOperator(platformResult.ok);
-      setActiveWorkspaceId(workspaceResult.ok ? workspacePayload?.workspaceId ?? "" : "");
-      const loadedRole = workspaceResult.ok ? workspacePayload?.role : null;
-      setWorkspaceRole(
+        } | null;
+        if (workspacesResult.ok && Array.isArray(workspaceListPayload?.workspaces)) {
+          setWorkspaces(workspaceListPayload.workspaces);
+        }
+        setIsPlatformOperator(platformResult.ok);
+        setActiveWorkspaceId(workspaceResult.ok ? workspacePayload?.workspaceId ?? "" : "");
+        const loadedRole = workspaceResult.ok ? workspacePayload?.role : null;
+        setWorkspaceRole(
         loadedRole === "admin" ||
         loadedRole === "member" ||
         loadedRole === "viewer"
           ? loadedRole
           : null
-      );
-      const profileName = profile?.display_name;
-      const metadataName = user.user_metadata.display_name;
-      const fallbackName = user.email?.split("@")[0] ?? "Account";
-      setDisplayName(
+        );
+        const profileName = profile?.display_name;
+        const metadataName = user.user_metadata.display_name;
+        const fallbackName = user.email?.split("@")[0] ?? "Account";
+        setDisplayName(
         typeof profileName === "string" && profileName.trim()
           ? profileName.trim()
           : typeof metadataName === "string" && metadataName.trim()
           ? metadataName.trim()
           : fallbackName
-      );
-      setEmail(user.email ?? "");
-      if (profile?.avatar_path) {
-        const { data: avatarData } = await supabase.storage
-          .from("avatars")
-          .createSignedUrl(profile.avatar_path, 60 * 60);
-        setAvatarUrl(avatarData?.signedUrl ?? "");
+        );
+        setEmail(user.email ?? "");
+        if (profile?.avatar_path) {
+          const { data: avatarData } = await supabase.storage
+            .from("avatars")
+            .createSignedUrl(profile.avatar_path, 60 * 60);
+          setAvatarUrl(avatarData?.signedUrl ?? "");
+        }
+      } finally {
+        if (!isCancelled) onReady();
       }
     }
 
@@ -126,9 +130,10 @@ export function AccountControl({
     window.addEventListener("love-strings-profile-updated", refreshDisplayName);
 
     return () => {
+      isCancelled = true;
       window.removeEventListener("love-strings-profile-updated", refreshDisplayName);
     };
-  }, []);
+  }, [onReady]);
 
   useEffect(() => {
     if (!isMenuOpen) {

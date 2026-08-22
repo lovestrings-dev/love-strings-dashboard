@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
   try {
     const { serviceClient } = await requirePlatformOwner(request);
     const [{ data: workspaces, error: workspaceError }, { data: invitations, error: invitationError }] = await Promise.all([
-      serviceClient.from("app_workspaces").select("id, name, setup_state, slug, created_at").order("created_at", { ascending: false }),
+      serviceClient.from("app_workspaces").select("id, name, setup_state, access_state, slug, created_at").order("created_at", { ascending: false }),
       serviceClient.from("app_workspace_invitations").select("workspace_id, email, accepted_at, revoked_at, expires_at")
         .is("accepted_at", null).is("revoked_at", null).gt("expires_at", new Date().toISOString())
     ]);

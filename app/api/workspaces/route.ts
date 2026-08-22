@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
 
     const [{ data: workspaceRows, error: workspaceError }, { data: settingsRows, error: settingsError }] =
       await Promise.all([
-        service.from("app_workspaces").select("id, name, slug").in("id", workspaceIds),
+        service.from("app_workspaces").select("id, name, slug, access_state").in("id", workspaceIds),
         service
           .from("app_workspace_settings")
           .select("workspace_id, logo_path")
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
     return workspaceResponse({
       workspaces: (memberships ?? []).flatMap((membership) => {
         const workspace = workspaceById.get(membership.workspace_id);
-        if (!workspace) return [];
+        if (!workspace || workspace.access_state === "frozen") return [];
         return [{
           id: workspace.id,
           logoPath: logoPathByWorkspaceId.get(workspace.id) ?? "",
@@ -74,12 +74,13 @@ export async function POST(request: NextRequest) {
     const service = createServiceSupabaseClient();
     const { data: membership, error } = await service
       .from("app_workspace_members")
-      .select("workspace_id")
+      .select("workspace_id, app_workspaces!inner(access_state)")
       .eq("workspace_id", workspaceId)
       .eq("user_id", user.id)
       .maybeSingle();
     if (error) throw error;
     if (!membership) return workspaceResponse({ error: "Workspace access denied." }, { status: 403 });
+    if (membership.app_workspaces?.[0]?.access_state === "frozen") return workspaceResponse({ error: "Workspace unavailable." }, { status: 423 });
     const response = workspaceResponse({ status: "switched", workspaceId });
     response.cookies.set(activeWorkspaceCookieName, workspaceId, { httpOnly: true, path: "/", sameSite: "lax", secure: request.nextUrl.protocol === "https:" });
     return response;

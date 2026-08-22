@@ -652,8 +652,8 @@ const platformStats = [
   }
 ];
 
-const appVersionLabel = "Beta 1.21";
-const defaultAppLogoUrl = "";
+const appVersionLabel = "Beta 1.22";
+const defaultAppLogoUrl = "/artistdeck-logo.png";
 
 const sections = [
   "Dashboard",
@@ -5258,6 +5258,10 @@ export default function Home() {
   const [activeWorkspaceName, setActiveWorkspaceName] = useState("Workspace");
   const [activeWorkspaceSetupState, setActiveWorkspaceSetupState] = useState<"active" | "pending_setup" | "">("");
   const [profileDisplayName, setProfileDisplayName] = useState("");
+  const [pendingSetupWorkspaceId, setPendingSetupWorkspaceId] = useState("");
+  const [isResolvingInitialWorkspace, setIsResolvingInitialWorkspace] = useState(true);
+  const [isHeaderAccountReady, setIsHeaderAccountReady] = useState(false);
+  const [isWorkspaceBrandingReady, setIsWorkspaceBrandingReady] = useState(false);
   const [workspaceTimeZone, setWorkspaceTimeZone] = useState(defaultWorkspaceTimeZone);
   const [productionDefaultCosts, setProductionDefaultCosts] =
     useState<ProductionDefaultCosts>(defaultProductionStepCosts);
@@ -5313,6 +5317,7 @@ export default function Home() {
     token: number;
   } | null>(null);
   const locationFocusToken = useRef(0);
+  const markHeaderAccountReady = useCallback(() => setIsHeaderAccountReady(true), []);
   const consumeEventFocusTarget = useCallback(() => setEventFocusTarget(null), []);
   const consumeLocationFocusTarget = useCallback(() => setLocationFocusTarget(null), []);
   const [campaigns, setCampaigns] = useState<MarketingCampaignConfig[]>([]);
@@ -5362,7 +5367,9 @@ export default function Home() {
     dashboardProductionWorkspaceId === activeWorkspaceId &&
     dashboardRoadmapWorkspaceId === activeWorkspaceId &&
     hasLoadedBudgetSupabaseSnapshot &&
-    hasLoadedEventSupabaseSnapshot
+    hasLoadedEventSupabaseSnapshot &&
+    isHeaderAccountReady &&
+    isWorkspaceBrandingReady
   );
   const validDailyFocusProgressTaskKeys = useMemo(
     () =>
@@ -7007,14 +7014,19 @@ export default function Home() {
       const response = await fetch("/api/workspace/active", { cache: "no-store" });
       const payload = (await response.json()) as { displayName?: string; role?: WorkspaceRole; setupState?: "active" | "pending_setup"; workspaceId?: string };
       if (!isCancelled && response.ok && payload.workspaceId) {
+        const isPendingSetupAdmin = payload.setupState === "pending_setup" && payload.role === "admin";
         setPlatformMetricRows([]);
         setPlatformStatsData([]);
         setNavigationStack([]);
         setPendingScrollRestore(null);
-        setActiveWorkspaceId(payload.workspaceId);
         setActiveWorkspaceSetupState(payload.setupState === "pending_setup" ? "pending_setup" : "active");
         setProfileDisplayName(payload.displayName ?? "");
         if (payload.role === "admin" || payload.role === "member" || payload.role === "viewer") setWorkspaceRole(payload.role);
+        if (isPendingSetupAdmin) {
+          setPendingSetupWorkspaceId(payload.workspaceId);
+          return;
+        }
+        setActiveWorkspaceId(payload.workspaceId);
         try {
           const workspacesResponse = await fetch("/api/workspaces", { cache: "no-store" });
           const workspacesPayload = (await workspacesResponse.json().catch(() => null)) as {
@@ -7028,6 +7040,7 @@ export default function Home() {
           if (!isCancelled) setActiveWorkspaceResolvedId(payload.workspaceId);
         }
       }
+      if (!isCancelled) setIsResolvingInitialWorkspace(false);
     }
 
     void loadActiveWorkspace();
@@ -7097,7 +7110,11 @@ export default function Home() {
     let isCancelled = false;
 
     async function loadWorkspaceBranding() {
-      if (!activeWorkspaceId) return;
+      if (!activeWorkspaceId) {
+        setIsWorkspaceBrandingReady(false);
+        return;
+      }
+      setIsWorkspaceBrandingReady(false);
       const supabase = createBrowserSupabaseClient();
       const { data, error } = await supabase
         .from("app_workspace_settings")
@@ -7109,6 +7126,7 @@ export default function Home() {
         if (!isCancelled) {
           setAppLogoPath("");
           setAppLogoUrl(defaultAppLogoUrl);
+          setIsWorkspaceBrandingReady(true);
         }
         return;
       }
@@ -7120,7 +7138,11 @@ export default function Home() {
       if (!isCancelled && logoData?.signedUrl) {
         setAppLogoPath(data.logo_path);
         setAppLogoUrl(logoData.signedUrl);
+      } else if (!isCancelled) {
+        setAppLogoPath("");
+        setAppLogoUrl(defaultAppLogoUrl);
       }
+      if (!isCancelled) setIsWorkspaceBrandingReady(true);
     }
 
     void loadWorkspaceBranding();
@@ -8228,18 +8250,23 @@ export default function Home() {
     );
   }
 
-  if (activeWorkspaceSetupState === "pending_setup" && workspaceRole === "admin") {
+  if (pendingSetupWorkspaceId && activeWorkspaceSetupState === "pending_setup" && workspaceRole === "admin") {
     return <InitialWorkspaceSetup initialUserName={profileDisplayName} onComplete={(workspaceName) => {
       setActiveWorkspaceName(workspaceName);
       setActiveWorkspaceSetupState("active");
+      setActiveWorkspaceId(pendingSetupWorkspaceId);
+      setActiveWorkspaceResolvedId("");
+      setPendingSetupWorkspaceId("");
     }} />;
   }
 
   return (
     <main className="dashboard-shell">
+      {!isResolvingInitialWorkspace ? <>
       <aside className="sidebar" aria-label="Primary">
         <div className="brand-header">
           <AccountControl
+            onReady={markHeaderAccountReady}
             onOpenAboutDashboard={() => setSettingsView("about")}
             onOpenGeneralSettings={() => setSettingsView("general")}
             onOpenPlatformAdministration={() => setSettingsView("platform")}
@@ -8261,9 +8288,7 @@ export default function Home() {
                 unoptimized
                 width={44}
               />
-            ) : (
-              <span aria-hidden className="brand-logo brand-logo-neutral">LS</span>
-            )}
+            ) : null}
           </div>
         </div>
 
@@ -8485,15 +8510,14 @@ export default function Home() {
             workspaceName={activeWorkspaceName}
           />
         ) : null}
-        {!settingsView && activeSection === "Dashboard" && !isDashboardInitialLoadReady ? (
-          <DashboardInitialLoadingOverlay />
-        ) : null}
         </div>
       </section>
       <FloatingNavigationBackButton
         isVisible={!settingsView && navigationStack.length > 0}
         onBack={goBackToPreviousAppState}
       />
+      </> : null}
+      {isResolvingInitialWorkspace || (!settingsView && activeSection === "Dashboard" && !isDashboardInitialLoadReady) ? <DashboardInitialLoadingOverlay /> : null}
     </main>
   );
 }

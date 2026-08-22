@@ -64,9 +64,17 @@ export async function requireWorkspaceAccess(request: NextRequest) {
   const requestedWorkspaceId = parseWorkspaceId(
     request.cookies.get(activeWorkspaceCookieName)?.value
   );
-  const membership = resolveWorkspaceMembership(memberships, requestedWorkspaceId);
+  const workspaceIds = (memberships ?? []).map((membership) => membership.workspace_id);
+  const { data: workspaceStates, error: workspaceStatesError } = await serviceClient
+    .from("app_workspaces")
+    .select("id, access_state")
+    .in("id", workspaceIds);
+  if (workspaceStatesError) throw workspaceStatesError;
+  const activeWorkspaceIds = new Set((workspaceStates ?? []).filter((workspace) => workspace.access_state !== "frozen").map((workspace) => workspace.id));
+  const membership = resolveWorkspaceMembership((memberships ?? []).filter((candidate) => activeWorkspaceIds.has(candidate.workspace_id)), requestedWorkspaceId);
   if (!membership) {
-    throw new WorkspaceAccessError("Workspace access denied.", 403);
+  const hasFrozenMembership = (memberships ?? []).length > 0;
+    throw new WorkspaceAccessError(hasFrozenMembership ? "Workspace unavailable." : "Workspace access denied.", hasFrozenMembership ? 423 : 403);
   }
 
   return { role: membership.role as WorkspaceRole, serviceClient, user, workspaceId: membership.workspace_id };

@@ -65,15 +65,21 @@ export async function proxy(request: NextRequest) {
   const requestedWorkspaceId = parseWorkspaceId(
     request.cookies.get(activeWorkspaceCookieName)?.value
   );
-  const membership = resolveWorkspaceMembership(memberships, requestedWorkspaceId);
+  const workspaceIds = (memberships ?? []).map((entry) => entry.workspace_id);
+  const { data: workspaceStates, error: workspaceStateError } = workspaceIds.length
+    ? await supabase.from("app_workspaces").select("id, access_state").in("id", workspaceIds)
+    : { data: [], error: null };
+  const activeWorkspaceIds = new Set((workspaceStates ?? []).filter((workspace) => workspace.access_state !== "frozen").map((workspace) => workspace.id));
+  const membership = resolveWorkspaceMembership((memberships ?? []).filter((entry) => activeWorkspaceIds.has(entry.workspace_id)), requestedWorkspaceId);
 
-  if (membershipError || !membership) {
+  if (membershipError || workspaceStateError || !membership) {
     if (isPlatformAdministrationPath(request.nextUrl.pathname) && await isPlatformOperator(authenticatedUser.id)) {
       return response;
     }
     if (request.nextUrl.pathname.startsWith("/api/")) {
-      return NextResponse.json({ error: "Workspace access denied." }, { status: 403 });
+      return NextResponse.json({ error: "Workspace unavailable." }, { status: 423 });
     }
+    if ((memberships ?? []).length > 0) { const unavailableUrl = request.nextUrl.clone(); unavailableUrl.pathname = "/workspace-unavailable"; unavailableUrl.search = ""; return NextResponse.redirect(unavailableUrl); }
     const noWorkspaceUrl = request.nextUrl.clone();
     noWorkspaceUrl.pathname = "/no-workspace";
     noWorkspaceUrl.search = "";
@@ -124,10 +130,9 @@ function isPublicPath(pathname: string) {
   return (
     pathname === "/login" ||
     pathname === "/no-workspace" ||
+    pathname === "/workspace-unavailable" ||
     pathname === "/set-password" ||
-    pathname === "/api/invitations/accept" ||
-    pathname === "/api/platform/provisioning-invitations/accept" ||
-    pathname === "/api/platform/provisioning-invitations/continuation"
+    pathname === "/api/invitations/accept"
   );
 }
 
@@ -153,5 +158,5 @@ function isAuthorizedVercelCronRefreshRequest(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|love-strings-logo.jpeg).*)"]
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|love-strings-logo.jpeg|artistdeck-logo.png).*)"]
 };

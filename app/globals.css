@@ -351,14 +351,21 @@ button {
   background: transparent;
   border: 0;
   color: #f4f3ee;
+  color-scheme: dark;
   cursor: pointer;
   font: inherit;
   font-size: 13px;
   font-weight: 700;
   min-height: 32px;
   outline: none;
-  padding: 0;
+  padding: 0 0 0 4px;
   width: 100%;
+}
+
+.workspace-selector select option {
+  background: #202525;
+  color: #f4f3ee;
+  padding-left: 10px;
 }
 
 .workspace-selector-control svg {
@@ -416,6 +423,111 @@ button {
   min-height: min(620px, calc(100vh - 190px));
   padding: 24px;
 }
+
+.platform-admin-canvas {
+  margin: 0 auto;
+  max-width: 900px;
+  min-height: calc(100vh - 48px);
+  padding: 28px 24px 48px;
+}
+
+.platform-admin-header,
+.platform-admin-header-actions,
+.platform-workspace-row,
+.platform-delete-confirmation > div {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.platform-admin-header { margin-bottom: 24px; }
+.platform-admin-header h1 { margin: 4px 0 0; }
+.platform-admin-header-actions { flex: 0 0 auto; }
+
+.platform-admin-logout,
+.platform-delete-button,
+.platform-delete-confirmation button {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  gap: 7px;
+  justify-content: center;
+  min-height: 40px;
+  padding: 8px 12px;
+}
+
+.platform-admin-logout:hover { border-color: var(--accent); color: var(--accent-strong); }
+.onboarding-spinner { animation: onboarding-spin 1s linear infinite; }
+@keyframes onboarding-spin { to { transform: rotate(360deg); } }
+.platform-admin-content { display: grid; gap: 20px; }
+
+.platform-admin-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--module-focus);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 20px;
+}
+.platform-admin-primary { border-left-color: var(--accent); }
+.platform-admin-card .general-settings-heading { margin-bottom: 12px; }
+.platform-admin-card .general-settings-heading h2 { font-size: 21px; margin: 3px 0 0; }
+
+.platform-workspace-list { display: grid; gap: 10px; }
+.platform-workspace-row {
+  background: #fbfaf7;
+  border: 1px solid #ebe8df;
+  border-radius: 8px;
+  min-width: 0;
+  padding: 13px;
+}
+.platform-workspace-row > div { min-width: 0; }
+.platform-workspace-row strong { display: block; font-size: 16px; overflow-wrap: anywhere; }
+.platform-workspace-row span { color: var(--muted); display: block; font-size: 13px; line-height: 1.4; margin-top: 3px; overflow-wrap: anywhere; }
+.platform-state { font-weight: 800; }
+.platform-state-pending_setup { color: #946c18; }
+.platform-state-active { color: var(--accent-strong); }
+.platform-state-frozen { color: #8b5a15; }
+.platform-workspace-actions { align-items: center; display: flex; flex: 0 0 auto; gap: 8px; }
+.platform-access-confirmation {
+  background: #fffaf0;
+  border: 1px solid #ead9b3;
+  border-radius: 10px;
+  margin-top: 12px;
+  padding: 14px;
+}
+.platform-access-confirmation p { color: var(--muted); margin: 6px 0 12px; }
+.platform-access-confirmation > div { display: flex; gap: 8px; }
+.platform-freeze-button,
+.platform-reactivate-button {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; color: var(--text); cursor: pointer; font: inherit; font-size: 14px; font-weight: 800; min-height: 40px; padding: 8px 12px;
+}
+.platform-freeze-button { color: #8b5a15; }
+.platform-reactivate-button { color: var(--accent-strong); }
+.platform-delete-button { color: #9d3030; flex: 0 0 auto; }
+.platform-delete-button:hover:not(:disabled) { border-color: #c86666; background: #fff7f7; }
+.platform-delete-button:disabled { cursor: default; opacity: .5; }
+
+.platform-delete-confirmation {
+  background: #fff9f7;
+  border: 1px solid #eddbd5;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 14px;
+}
+.platform-delete-confirmation p { color: var(--muted); line-height: 1.45; margin: 0; }
+.platform-delete-confirmation input { border: 1px solid var(--line); border-radius: 8px; font: inherit; min-height: 42px; padding: 8px 10px; }
+.platform-admin-internal { border-left-color: #8b97a3; }
 
 .user-profile-settings {
   max-width: 760px;
@@ -1661,6 +1773,79 @@ button {
   padding: 24px;
 }
 
+.artistdeck-system-page {
+  align-items: center;
+  background: #f7f6f2;
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.artistdeck-system-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 18px;
+  max-width: 440px;
+  padding: 28px;
+  width: 100%;
+}
+
+
+.artistdeck-system-logo {
+  border-radius: 14px;
+  box-shadow: 0 8px 20px rgba(18, 18, 32, 0.18);
+  height: 72px;
+  object-fit: cover;
+  width: 72px;
+}
+
+.artistdeck-system-card h1 {
+  font-size: 30px;
+  line-height: 1.08;
+  margin: 4px 0 0;
+}
+
+.artistdeck-system-description {
+  color: var(--muted);
+  line-height: 1.55;
+  margin: 0;
+}
+
+.onboarding-spinner { animation: onboarding-spin 1s linear infinite; }
+
+.artistdeck-system-card .login-form { gap: 16px; }
+
+.artistdeck-system-card .login-form button,
+.login-submit {
+  align-items: center;
+  background: var(--accent-strong);
+  border: 1px solid var(--accent-strong);
+  border-radius: 12px;
+  color: #ffffff;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 800;
+  gap: 9px;
+  justify-content: center;
+  min-height: 48px;
+  padding: 10px 18px;
+  text-decoration: none;
+}
+
+.login-submit { width: 100%; }
+
+.artistdeck-system-card .login-form button:hover:not(:disabled),
+.login-submit:hover { background: #095f65; border-color: #095f65; }
+
+.artistdeck-system-card .login-form button:disabled { cursor: wait; opacity: 0.65; }
+
 .login-panel {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -2558,7 +2743,7 @@ h2 {
 .dashboard-initial-loading-center {
   display: grid;
   bottom: 0;
-  left: 290px;
+  left: 0;
   margin: 0;
   padding: 0;
   place-items: center;
@@ -7936,6 +8121,27 @@ h2 {
   .user-settings-canvas {
     min-height: calc(100vh - 24px);
   }
+
+  .platform-admin-canvas {
+    min-height: calc(100vh - 24px);
+    padding: 20px 14px 36px;
+  }
+
+  .platform-admin-header {
+    align-items: stretch;
+    display: grid;
+    gap: 14px;
+  }
+
+  .platform-admin-header-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .platform-admin-header-actions > * { justify-content: center; width: 100%; }
+  .platform-admin-card { padding: 16px; }
+  .platform-workspace-row { align-items: stretch; display: grid; gap: 12px; }
+  .platform-workspace-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .platform-workspace-actions button { width: 100%; }
+  .platform-workspace-row .platform-delete-button { width: 100%; }
+  .platform-delete-confirmation > div { align-items: stretch; display: grid; grid-template-columns: 1fr; }
+  .platform-delete-confirmation button { width: 100%; }
 
   .user-settings-header {
     align-items: stretch;

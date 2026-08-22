@@ -23,7 +23,7 @@ const [proxy, workspaceOwner] = await Promise.all([
 ]);
 
 for (const [name, source] of [["proxy", proxy], ["workspace owner", workspaceOwner]]) {
-  assert.match(source, /resolveWorkspaceMembership\(memberships, requestedWorkspaceId\)/, `${name} uses shared resolution semantics`);
+  assert.match(source, /resolveWorkspaceMembership\(\(memberships \?\? \[\]\)\.filter/, `${name} filters frozen workspaces before shared resolution`);
 }
 
 console.log("Workspace resolution checks passed.");

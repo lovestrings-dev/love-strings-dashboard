@@ -2,6 +2,55 @@
 
 This file tracks app versions that are useful to discuss, test, and deploy. It is for product-level changes, not every small database edit.
 
+## Beta 1.22 — ArtistDeck onboarding and workspace lifecycle (Prepared for user push)
+
+Headline: **ArtistDeck now has one clear, ordinary-invitation path from Platform
+Owner invitation to an active workspace, with a complete operational lifecycle.**
+
+Includes:
+
+- Dedicated Platform Owner authority outside all workspace memberships, a
+  focused Platform Administration surface with Logout, invitation, workspace
+  management, and contextual Freeze/Reactivate/Delete controls.
+- New administrators receive a provisional `pending_setup` workspace and an
+  ordinary Admin invitation; after normal Supabase authentication they provide
+  their User Name and Artist/Band Name, then the workspace is finalized with
+  its permanent name and collision-safe slug before reaching the Dashboard.
+- Workspace lifecycle states now cover pending setup, active, frozen, and
+  permanent deletion. Frozen workspaces retain data and memberships but are
+  unavailable until a Platform Owner reactivates them.
+- ArtistDeck-branded auth/system surfaces, a default ArtistDeck logo fallback,
+  and a single continuous loading overlay that waits for workspace resolution,
+  essential Dashboard data, and header identity/branding before reveal.
+- Workspace selector dark-menu contrast and spacing corrections, plus the
+  recent responsive Platform Administration and onboarding visual polish.
+- Retirement of the abandoned special no-workspace provisioning architecture:
+  its table, function, routes, UI, tests, and continuation-only client logic
+  are gone. The historical creation migration remains immutable.
+
+Database and validation state:
+
+- `202608220001_add_workspace_access_state.sql` and
+  `202608220002_retire_legacy_workspace_provisioning.sql` are applied to the
+  linked development database and synchronized locally/remotely.
+- The retirement audit found only the revoked, unaccepted,
+  never-provisioned `sounderentertainment@gmail.com` historical record. No
+  active special-provisioning record was removed from a live workflow.
+- Focused provisional invitation, finalization/deletion, freeze/reactivate,
+  last-Admin, workspace resolution, platform-routing, and callback-first
+  session tests pass, as do TypeScript, lint, production build, and diff checks.
+
+Carry forward:
+
+- Rename the user-facing **YouTube Topic** to **YouTube Music** and hide the
+  separate future YouTube Music/YouTube-for-Artists placeholders while keeping
+  intentionally reserved collector scaffolding for later work.
+- ArtistDeck-branded Supabase email templates remain deferred.
+- Optional future onboarding questions may later shape production, marketing,
+  and roadmap defaults; they are not part of this beta.
+- The workspace lifecycle direction remains Freeze/archive → optional scheduled
+  deletion → retention → restore → permanent purge; no timer or cron exists yet.
+
 ## Beta 1.0
 
 Status: Deployed beta baseline
