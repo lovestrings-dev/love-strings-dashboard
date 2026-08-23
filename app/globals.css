@@ -739,12 +739,28 @@ button {
 
 .audience-platform-feedback a:hover { text-decoration: underline; }
 
-.audience-evolution-placeholder .platform-trend-toggle > span:last-of-type {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-  margin-left: auto;
+.audience-evolution-body {
+  grid-template-columns: 1fr;
 }
+
+.audience-estimated-trend-summary {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.audience-range-line-chart {
+  --audience-lower-color: #1f7a58;
+  --audience-maximum-color: #2f75a8;
+}
+
+.audience-range-line {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.5;
+}
+
+.audience-range-line-lower { stroke: var(--audience-lower-color); }
+.audience-range-line-maximum { stroke: var(--audience-maximum-color); stroke-dasharray: 5 4; }
 
 .user-dashboard-row strong {
   min-width: 0;

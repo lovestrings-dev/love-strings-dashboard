@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-const { calculateAudienceDashboard, normalizeReleaseTitle } = await import(
+const { calculateAudienceDashboard, calculateAudienceEvolutionHistory, normalizeReleaseTitle } = await import(
   "../lib/audience-aggregation.ts"
 );
 
@@ -132,5 +132,46 @@ assert.equal(calculateAudienceDashboard([
   row({ date: "2026-08-20", metricName: "total_plays", platformSlug: "apple-music", source: "apple-music-csv", value: 200 }),
   row({ date: "2026-08-18", metricName: "total_catalog_streams", platformSlug: "spotify", source: "spotify-songs-csv", value: 300 })
 ]).catalogue.delta, 20, "Cumulative catalogue totals carry forward from each provider's last valid observation.");
+
+const evolution = calculateAudienceEvolutionHistory([
+  row({ date: "2026-08-20", metricName: "followers", platformSlug: "instagram", source: "instagram-api", value: 1010 }),
+  row({ date: "2026-08-23", metricName: "followers", platformSlug: "instagram", source: "instagram-api", value: 1015 }),
+  row({ date: "2026-08-18", metricName: "followers", platformSlug: "spotify", source: "spotify-audience-current-csv", value: 590 }),
+  row({ date: "2026-08-20", metricName: "latest_release_name", notes: "Guns", platformSlug: "spotify", source: "spotify-songs-csv", value: 0 }),
+  row({ date: "2026-08-18", metricName: "latest_release_name", notes: "Old Song", platformSlug: "spotify", source: "spotify-songs-csv", value: 0 }),
+  row({ date: "2026-08-18", metricName: "latest_release_streams", notes: "Old Song", platformSlug: "spotify", source: "spotify-songs-csv", value: 50 }),
+  row({ date: "2026-08-20", metricName: "latest_release_streams", notes: "Guns", platformSlug: "spotify", source: "spotify-songs-csv", value: 78 }),
+  row({ date: "2026-08-18", metricName: "total_catalog_streams", platformSlug: "spotify", source: "spotify-songs-csv", value: 500 }),
+  row({ date: "2026-08-20", metricName: "total_catalog_streams", platformSlug: "spotify", source: "spotify-songs-csv", value: 550 }),
+  row({ date: "2026-08-20", metricName: "total_channel_views", platformSlug: "youtube", source: "youtube-data-api", value: 9999 })
+]);
+assert.deepEqual(evolution.estimatedAudience, [
+  { date: "2026-08-18", lower: 590, maximum: 590 },
+  { date: "2026-08-19", lower: 590, maximum: 590 },
+  { date: "2026-08-20", lower: 1600, maximum: 1600 },
+  { date: "2026-08-21", lower: 1600, maximum: 1600 },
+  { date: "2026-08-22", lower: 1600, maximum: 1600 },
+  { date: "2026-08-23", lower: 1605, maximum: 1605 }
+], "Historical lower and maximum use the accepted formula on every calendar day, carrying sparse sources forward without backfilling Instagram before 20 Aug.");
+assert.deepEqual(evolution.currentRelease, [
+  { date: "2026-08-20", value: 78 },
+  { date: "2026-08-21", value: 78 },
+  { date: "2026-08-22", value: 78 },
+  { date: "2026-08-23", value: 78 }
+], "Current-release history starts at Guns, excludes Old Song, and carries Guns forward across sparse days.");
+assert.equal(evolution.currentReleaseTitle, "Guns", "The current canonical title labels the graph.");
+assert.deepEqual(evolution.catalogue, [
+  { date: "2026-08-18", value: 500 },
+  { date: "2026-08-19", value: 500 },
+  { date: "2026-08-20", value: 550 },
+  { date: "2026-08-21", value: 550 },
+  { date: "2026-08-22", value: 550 },
+  { date: "2026-08-23", value: 550 }
+], "Catalogue history carries cumulative totals through every calendar day and excludes YouTube Channel views.");
+assert.equal(evolution.estimatedAudience.at(-1).lower, calculateAudienceDashboard([
+  row({ date: "2026-08-20", metricName: "followers", platformSlug: "instagram", source: "instagram-api", value: 1010 }),
+  row({ date: "2026-08-23", metricName: "followers", platformSlug: "instagram", source: "instagram-api", value: 1015 }),
+  row({ date: "2026-08-18", metricName: "followers", platformSlug: "spotify", source: "spotify-audience-current-csv", value: 590 })
+]).estimatedAudience.lower, "Graph endpoint equals the card endpoint for the same inputs.");
 
 console.log("Audience aggregation checks passed.");

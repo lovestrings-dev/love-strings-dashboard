@@ -51,6 +51,13 @@ export type AudienceDashboardCalculations = {
   estimatedAudience: AudienceEstimate | null;
 };
 
+export type AudienceEvolutionHistory = {
+  catalogue: Array<{ date: string; value: number }>;
+  currentRelease: Array<{ date: string; value: number }>;
+  currentReleaseTitle: string | null;
+  estimatedAudience: Array<{ date: string; lower: number; maximum: number }>;
+};
+
 /**
  * Product estimates, not measured unique people. Source metrics stay
  * authoritative; this layer only derives dashboard interpretation from them.
@@ -58,26 +65,74 @@ export type AudienceDashboardCalculations = {
 export function calculateAudienceDashboard(
   rows: AudienceMetricRow[]
 ): AudienceDashboardCalculations {
+  return calculateAudienceDashboardAtDate(rows);
+}
+
+export function calculateAudienceDashboardAtDate(
+  rows: AudienceMetricRow[],
+  targetDate?: string
+): AudienceDashboardCalculations {
   return {
-    catalogue: calculateCatalogue(rows),
-    currentRelease: calculateCurrentRelease(rows),
-    estimatedAudience: calculateEstimatedAudience(rows)
+    catalogue: calculateCatalogue(rows, targetDate),
+    currentRelease: calculateCurrentRelease(rows, targetDate),
+    estimatedAudience: calculateEstimatedAudience(rows, targetDate)
   };
+}
+
+/**
+ * Reconstructs graph points from authoritative provider snapshots. These are
+ * deliberately not persisted aggregate rows: each calendar day in the raw
+ * provider-history range is reconstructed by resolving every source <= that day.
+ */
+export function calculateAudienceEvolutionHistory(rows: AudienceMetricRow[]): AudienceEvolutionHistory {
+  const currentReleaseTitle = calculateCurrentRelease(rows)?.title ?? null;
+  const currentReleaseKey = currentReleaseTitle ? normalizeReleaseTitle(currentReleaseTitle) : null;
+  const snapshotDates = [...new Set(rows.map((row) => row.snapshotDate).filter(isValidDate))].sort();
+  const dates = calendarDatesInclusive(snapshotDates[0], snapshotDates.at(-1));
+  const history: AudienceEvolutionHistory = {
+    catalogue: [],
+    currentRelease: [],
+    currentReleaseTitle,
+    estimatedAudience: []
+  };
+
+  dates.forEach((date) => {
+    const calculation = calculateAudienceDashboardAtDate(rows, date);
+    if (calculation.estimatedAudience) {
+      history.estimatedAudience.push({
+        date,
+        lower: calculation.estimatedAudience.lower,
+        maximum: calculation.estimatedAudience.maximum
+      });
+    }
+    if (calculation.catalogue) {
+      history.catalogue.push({ date, value: calculation.catalogue.value });
+    }
+    if (
+      calculation.currentRelease &&
+      currentReleaseKey &&
+      normalizeReleaseTitle(calculation.currentRelease.title) === currentReleaseKey
+    ) {
+      history.currentRelease.push({ date, value: calculation.currentRelease.value });
+    }
+  });
+
+  return history;
 }
 
 export function normalizeReleaseTitle(title: string) {
   return title.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase();
 }
 
-function calculateEstimatedAudience(rows: AudienceMetricRow[]): AudienceEstimate | null {
-  const inputs = getAudienceInputs(rows);
+function calculateEstimatedAudience(rows: AudienceMetricRow[], targetDate?: string): AudienceEstimate | null {
+  const inputs = getAudienceInputs(rows, targetDate);
   const current = estimateAudience(inputs);
   if (!current) return null;
 
   const currentContributions = Object.values(inputs).filter(
     (value): value is MetricContribution => Boolean(value)
   );
-  const comparisonDate = latestDate(currentContributions);
+  const comparisonDate = targetDate ?? latestDate(currentContributions);
   const previousInputs = comparisonDate
     ? getAudienceInputs(rows, previousCalendarDate(comparisonDate))
     : null;
@@ -144,18 +199,18 @@ function estimateAudience(inputs: ReturnType<typeof getAudienceInputs>): Omit<Au
   };
 }
 
-function calculateCurrentRelease(rows: AudienceMetricRow[]): CurrentReleaseAggregate | null {
-  const spotifyTitle = findMetric(rows, "spotify", "latest_release_name", "spotify-songs-csv")?.title;
-  const appleTitle = findMetric(rows, "apple-music", "current_release_name", "apple-music-csv")?.title;
-  const youtubeTitle = findMetric(rows, "youtube-music", "current_release_name", "youtube-data-api")?.title ??
-    findMetric(rows, "youtube-music", "current_release_plays", "youtube-data-api")?.title;
+function calculateCurrentRelease(rows: AudienceMetricRow[], targetDate?: string): CurrentReleaseAggregate | null {
+  const spotifyTitle = findMetric(rows, "spotify", "latest_release_name", "spotify-songs-csv", targetDate)?.title;
+  const appleTitle = findMetric(rows, "apple-music", "current_release_name", "apple-music-csv", targetDate)?.title;
+  const youtubeTitle = findMetric(rows, "youtube-music", "current_release_name", "youtube-data-api", targetDate)?.title ??
+    findMetric(rows, "youtube-music", "current_release_plays", "youtube-data-api", targetDate)?.title;
   const canonicalTitle = spotifyTitle ?? appleTitle ?? youtubeTitle;
   if (!canonicalTitle) return null;
 
   const contributions = [
-    findMetricWithMatchingTitle(rows, "youtube-music", "current_release_plays", "youtube-data-api", canonicalTitle),
-    findMetricWithMatchingTitle(rows, "spotify", "latest_release_streams", "spotify-songs-csv", canonicalTitle),
-    findMetricWithMatchingTitle(rows, "apple-music", "current_release_plays", "apple-music-csv", canonicalTitle)
+    findMetricWithMatchingTitle(rows, "youtube-music", "current_release_plays", "youtube-data-api", canonicalTitle, targetDate),
+    findMetricWithMatchingTitle(rows, "spotify", "latest_release_streams", "spotify-songs-csv", canonicalTitle, targetDate),
+    findMetricWithMatchingTitle(rows, "apple-music", "current_release_plays", "apple-music-csv", canonicalTitle, targetDate)
   ].filter((value): value is MetricContribution => Boolean(value));
   if (contributions.length === 0) return null;
 
@@ -174,11 +229,11 @@ function calculateCurrentRelease(rows: AudienceMetricRow[]): CurrentReleaseAggre
   };
 }
 
-function calculateCatalogue(rows: AudienceMetricRow[]): CatalogueAggregate | null {
+function calculateCatalogue(rows: AudienceMetricRow[], targetDate?: string): CatalogueAggregate | null {
   const contributions = [
-    findMetric(rows, "youtube-music", "total_plays", "youtube-data-api"),
-    findMetric(rows, "apple-music", "total_plays", "apple-music-csv"),
-    findMetric(rows, "spotify", "total_catalog_streams", "spotify-songs-csv")
+    findMetric(rows, "youtube-music", "total_plays", "youtube-data-api", targetDate),
+    findMetric(rows, "apple-music", "total_plays", "apple-music-csv", targetDate),
+    findMetric(rows, "spotify", "total_catalog_streams", "spotify-songs-csv", targetDate)
   ].filter((value): value is MetricContribution => Boolean(value));
   if (contributions.length === 0) return null;
 
@@ -220,9 +275,10 @@ function findMetricWithMatchingTitle(
   platformSlug: string,
   metricName: string,
   source: string,
-  title: string
+  title: string,
+  targetDate?: string
 ) {
-  const contribution = findMetric(rows, platformSlug, metricName, source);
+  const contribution = findMetric(rows, platformSlug, metricName, source, targetDate);
   return contribution && normalizeReleaseTitle(contribution.title ?? "") === normalizeReleaseTitle(title)
     ? contribution
     : null;
@@ -289,4 +345,21 @@ function previousCalendarDate(date: string) {
   const timestamp = Date.parse(`${date}T00:00:00Z`);
   if (Number.isNaN(timestamp)) return "";
   return new Date(timestamp - 86_400_000).toISOString().slice(0, 10);
+}
+
+function isValidDate(date: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) && !Number.isNaN(Date.parse(`${date}T00:00:00Z`));
+}
+
+function calendarDatesInclusive(firstDate?: string, lastDate?: string) {
+  if (!firstDate || !lastDate) return [];
+  const start = Date.parse(`${firstDate}T00:00:00Z`);
+  const end = Date.parse(`${lastDate}T00:00:00Z`);
+  if (Number.isNaN(start) || Number.isNaN(end) || start > end) return [];
+
+  const dates: string[] = [];
+  for (let timestamp = start; timestamp <= end; timestamp += 86_400_000) {
+    dates.push(new Date(timestamp).toISOString().slice(0, 10));
+  }
+  return dates;
 }

@@ -45,7 +45,9 @@ import {
 } from "@/lib/budget-recurrence";
 import { defaultWorkspaceTimeZone, getWorkspaceDateKey } from "@/lib/workspace-time";
 import {
+  calculateAudienceEvolutionHistory,
   calculateAudienceDashboard,
+  type AudienceEvolutionHistory,
   type AudienceDashboardCalculations,
   type AudienceMetricRow
 } from "@/lib/audience-aggregation";
@@ -5398,6 +5400,21 @@ export default function Home() {
         ...campaigns.flatMap((campaign) =>
           getCampaignDailyProgressItems(campaign, getCampaignDays(campaign)).map(
             (item) => item.taskKey
+  const audienceEvolutionHistory = useMemo(
+    () =>
+      calculateAudienceEvolutionHistory(
+        platformMetricRows.map((row): AudienceMetricRow => ({
+          importedAt: row.imported_at,
+          metricName: row.metric_name,
+          metricValue: row.metric_value,
+          notes: row.notes,
+          platformSlug: getSingle(row.platforms)?.slug ?? "",
+          snapshotDate: row.snapshot_date,
+          source: row.source
+        }))
+      ),
+    [platformMetricRows]
+  );
           )
         ),
         ...productionSongDrafts.flatMap((song) =>
@@ -8474,6 +8491,7 @@ export default function Home() {
             locationFocusTarget={locationFocusTarget}
             onEventFocusTargetConsumed={consumeEventFocusTarget}
             onLocationFocusTargetConsumed={consumeLocationFocusTarget}
+            audienceEvolutionHistory={audienceEvolutionHistory}
             restoreContext={eventsRestoreContext}
             isLoaded={hasLoadedEventSupabaseSnapshot}
             locations={locationAddressBook}
@@ -15889,7 +15907,8 @@ function DashboardAudienceCard({
 }
 
 function PlatformsAudienceCard({
-  calculations
+  calculations,
+  history
 }: {
   calculations: AudienceDashboardCalculations;
 }) {
@@ -15933,18 +15952,61 @@ function PlatformsAudienceCard({
           <a href="mailto:artistdeck.app@gmail.com?subject=ArtistDeck%20Audience%20metric%20idea"><Mail size={14} aria-hidden /> Tell us</a>
         </article>
       </div>
-      <AudienceEvolutionPlaceholder />
+      <AudienceEvolutionPanel history={history} />
     </article>
   );
 }
 
-function AudienceEvolutionPlaceholder() {
+const emptyAudienceEvolutionHistory: AudienceEvolutionHistory = {
+  catalogue: [],
+  currentRelease: [],
+  currentReleaseTitle: null,
+  estimatedAudience: []
+};
+
+function AudienceEvolutionPanel({ history }: { history: AudienceEvolutionHistory }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const currentReleasePoints: MetricTrendPoint[] = history.currentRelease.map((point) => ({ ...point, source: "supabase" }));
+  const cataloguePoints: MetricTrendPoint[] = history.catalogue.map((point) => ({ ...point, source: "supabase" }));
+
   return (
-    <div className="platform-trend-panel audience-evolution-placeholder">
-      <div className="platform-trend-toggle">
+    <div className="platform-trend-panel">
+      <button
+        aria-expanded={isOpen}
+        className="platform-trend-toggle"
+        onClick={() => setIsOpen((current) => !current)}
+        type="button"
+      >
         <span>Evolution graphs</span>
-        <span>Coming later</span>
-        <ChevronDown size={16} aria-hidden />
+        <ChevronDown className={isOpen ? "platform-trend-toggle-icon-open" : undefined} size={16} aria-hidden />
+      </button>
+      {isOpen ? (
+        <div className="platform-trend-body audience-evolution-body">
+          <AudienceEstimatedTrendChart points={history.estimatedAudience} />
+          <PlatformTrendChartBlock
+            color="#7c54a8"
+            label={`Current Release Plays${history.currentReleaseTitle ? ` — ${history.currentReleaseTitle}` : ""}`}
+            points={currentReleasePoints}
+          />
+          <PlatformTrendChartBlock color="#2f75a8" label="Total Catalogue Plays" points={cataloguePoints} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AudienceEstimatedTrendChart({ points }: { points: AudienceEvolutionHistory["estimatedAudience"] }) {
+  const firstPoint = points[0];
+  const lastPoint = points.at(-1);
+  return (
+    <div className="platform-trend-chart-block audience-estimated-trend-chart-block">
+      <div className="platform-trend-summary audience-estimated-trend-summary">
+        <span className="platform-trend-title-with-legend"><i aria-hidden className="platform-trend-legend-square" style={{ backgroundColor: "#1f7a58" }} />Estimated / overlap-adjusted</span>
+        <strong>{firstPoint && lastPoint ? `${formatMetricValue(firstPoint.lower)} → ${formatMetricValue(lastPoint.lower)}` : "No data yet"}</strong>
+        <em>Lower</em>
+        <span className="platform-trend-title-with-legend"><i aria-hidden className="platform-trend-legend-square" style={{ backgroundColor: "#2f75a8" }} />Maximum connected audience</span>
+        <strong>{firstPoint && lastPoint ? `${formatMetricValue(firstPoint.maximum)} → ${formatMetricValue(lastPoint.maximum)}` : "No data yet"}</strong>
+        <em>Maximum</em>
       </div>
     </div>
   );
@@ -15971,6 +16033,7 @@ function DashboardDisconnectedPlatformCard({ label }: { label: string }) {
 
 function DashboardCampaignPreview({
   childOrder,
+  history: AudienceEvolutionHistory;
   visibleChildren,
   preview,
   productionSongs
@@ -16025,10 +16088,46 @@ function DashboardCampaignCard({
     return (
       <article
         className={`dashboard-campaign-card module-accent module-accent-marketing dashboard-campaign-card-empty${
+      <AudienceRangeLineChart points={points} />
           label === "Next" ? " dashboard-campaign-card-empty-next" : ""
         }${
           label === "Current" ? " dashboard-campaign-card-empty-current" : ""
         }`}
+function AudienceRangeLineChart({ points }: { points: AudienceEvolutionHistory["estimatedAudience"] }) {
+  if (points.length < 2) return <p className="platform-trend-empty">Not enough history yet.</p>;
+  const width = 320;
+  const height = 132;
+  const padding = 14;
+  const labelBandHeight = 20;
+  const gridBottom = height - padding - labelBandHeight;
+  const values = points.flatMap((point) => [point.lower, point.maximum]);
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const firstTime = Date.parse(points[0].date);
+  const lastTime = Date.parse(points.at(-1)?.date ?? points[0].date);
+  const valueRange = Math.max(maxValue - minValue, 1);
+  const timeRange = Math.max(lastTime - firstTime, 1);
+  const chartWidth = width - padding * 2;
+  const chartHeight = gridBottom - padding;
+  const coordinates = points.map((point) => ({
+    ...point,
+    x: padding + ((Date.parse(point.date) - firstTime) / timeRange) * chartWidth,
+    lowerY: padding + chartHeight - ((point.lower - minValue) / valueRange) * chartHeight + 8,
+    maximumY: padding + chartHeight - ((point.maximum - minValue) / valueRange) * chartHeight + 8
+  }));
+  const path = (field: "lowerY" | "maximumY") => coordinates.map((point) => `${point.x.toFixed(1)},${point[field].toFixed(1)}`).join(" ");
+  const middleIndex = Math.floor((coordinates.length - 1) / 2);
+  const labels = new Set([0, middleIndex, coordinates.length - 1]);
+  return <div className="platform-line-chart audience-range-line-chart"><svg aria-label="Estimated and maximum audience over time" role="img" viewBox={`0 0 ${width} ${height}`}>
+    <title>Estimated / overlap-adjusted and maximum connected audience</title>
+    <rect className="platform-line-chart-grid-frame" height={chartHeight} width={chartWidth} x={padding} y={padding} />
+    {Array.from({ length: 4 }, (_, index) => <line className="platform-line-chart-grid-line" key={index} x1={padding} x2={width - padding} y1={padding + (index / 3) * chartHeight} y2={padding + (index / 3) * chartHeight} />)}
+    <polyline className="audience-range-line audience-range-line-lower" points={path("lowerY")} />
+    <polyline className="audience-range-line audience-range-line-maximum" points={path("maximumY")} />
+    {coordinates.map((point, index) => labels.has(index) ? <text className="platform-line-chart-month" key={point.date} textAnchor={index === 0 ? "start" : index === coordinates.length - 1 ? "end" : "middle"} x={point.x} y={height - 2}>{formatTrendDate(point.date)}</text> : null)}
+  </svg></div>;
+}
+
       >
         <p className="eyebrow">{label}</p>
         <h3>{emptyText}</h3>
@@ -17289,6 +17388,7 @@ function PlatformsView({
   );
   const analyticsPageViewsTrend = getPlatformMetricTrend(
     platformMetricRows,
+  audienceEvolutionHistory,
     "google-analytics",
     "page_views_30d",
     []
@@ -17306,6 +17406,7 @@ function PlatformsView({
   const youtubeMusicTotalPlaysTrend = getPlatformMetricTrend(
     platformMetricRows,
     "youtube-music",
+  audienceEvolutionHistory: AudienceEvolutionHistory;
     "total_plays",
     []
   );
@@ -17441,6 +17542,7 @@ function PlatformsView({
             {platform.slug === "google-analytics" ? (
               <PlatformTrendPanelGroup
                 charts={[
+        audienceEvolutionHistory={audienceEvolutionHistory}
                   {
                     color: "#1f7a58",
                     label: "Active users, last 30 days",
@@ -19353,7 +19455,7 @@ function PlatformStatsSection({
             const calculations = audienceDashboard ?? { catalogue: null, currentRelease: null, estimatedAudience: null };
             return variant === "dashboard"
               ? <DashboardAudienceCard calculations={calculations} key={platform.platform} />
-              : <PlatformsAudienceCard calculations={calculations} key={platform.platform} />;
+              : <PlatformsAudienceCard calculations={calculations} history={audienceEvolutionHistory ?? emptyAudienceEvolutionHistory} key={platform.platform} />;
           }
           const Icon = platform.icon;
           const cardAddon = renderCardAddon?.(platform) ?? null;
@@ -19437,6 +19539,7 @@ function PlatformStatsSection({
               {cardAddon}
               </> : null}
             </article>
+  audienceEvolutionHistory,
           );
         })}
       </div>
@@ -19446,6 +19549,7 @@ function PlatformStatsSection({
 
 function RoadmapView({
   campaigns,
+  audienceEvolutionHistory?: AudienceEvolutionHistory;
   onCreatePhase,
   onDeletePhase,
   onOpenMarketing,
