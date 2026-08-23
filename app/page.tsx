@@ -5238,6 +5238,7 @@ export default function Home() {
   const activeWorkspaceIdRef = useRef("");
   const hasRequestedQrCodeSupabaseLoad = useRef(false);
   const [activeSection, setActiveSection] = useState<Section>("Dashboard");
+  const [isLayoutDebugEnabled, setIsLayoutDebugEnabled] = useState(false);
   const previousActiveSection = useRef<Section>("Dashboard");
   const [focusQueueNavigationState, setFocusQueueNavigationState] = useState<FocusQueueNavigationState>({
     completedTasksOpen: false,
@@ -7080,6 +7081,15 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      setIsLayoutDebugEnabled(
+        new URLSearchParams(window.location.search).get("layoutDebug") === "1"
+      );
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
     if (
       !pendingScrollRestore ||
       settingsView ||
@@ -8625,7 +8635,198 @@ export default function Home() {
       />
       </> : null}
       {isResolvingInitialWorkspace || (!settingsView && activeSection === "Dashboard" && !isDashboardInitialLoadReady) ? <DashboardInitialLoadingOverlay /> : null}
+      {isLayoutDebugEnabled ? <LayoutDebugPanel section={activeSection} /> : null}
     </main>
+  );
+}
+
+type LayoutDebugStyle = {
+  boxSizing: string;
+  contain: string;
+  display: string;
+  flexBasis: string;
+  flexShrink: string;
+  gridTemplateColumns: string;
+  margin: string;
+  maxWidth: string;
+  minWidth: string;
+  overflowX: string;
+  padding: string;
+  position: string;
+  transform: string;
+  whiteSpace: string;
+  width: string;
+};
+
+type LayoutDebugElement = {
+  classes: string;
+  clientWidth: number;
+  id: string;
+  left: number;
+  right: number;
+  scrollWidth: number;
+  styles: LayoutDebugStyle;
+  tag: string;
+  text: string;
+  width: number;
+};
+
+type LayoutDebugReport = {
+  collectedAt: string;
+  document: {
+    bodyClientWidth: number;
+    bodyScrollWidth: number;
+    documentClientWidth: number;
+    documentScrollWidth: number;
+  };
+  offenders: Array<LayoutDebugElement & { ancestors: LayoutDebugElement[]; reasons: string[] }>;
+  section: Section;
+  viewport: {
+    devicePixelRatio: number;
+    innerWidth: number;
+    outerWidth: number;
+    visualViewportScale: number | null;
+    visualViewportWidth: number | null;
+  };
+};
+
+function LayoutDebugPanel({ section }: { section: Section }) {
+  const [report, setReport] = useState<LayoutDebugReport | null>(null);
+  const [isOutlined, setIsOutlined] = useState(false);
+  const [copyStatus, setCopyStatus] = useState("");
+
+  const collectReport = useCallback(() => {
+    const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
+    const getStyles = (element: HTMLElement): LayoutDebugStyle => {
+      const styles = window.getComputedStyle(element);
+      return {
+        boxSizing: styles.boxSizing,
+        contain: styles.contain,
+        display: styles.display,
+        flexBasis: styles.flexBasis,
+        flexShrink: styles.flexShrink,
+        gridTemplateColumns: styles.gridTemplateColumns,
+        margin: styles.margin,
+        maxWidth: styles.maxWidth,
+        minWidth: styles.minWidth,
+        overflowX: styles.overflowX,
+        padding: styles.padding,
+        position: styles.position,
+        transform: styles.transform,
+        whiteSpace: styles.whiteSpace,
+        width: styles.width
+      };
+    };
+    const describe = (element: HTMLElement): LayoutDebugElement => {
+      const rect = element.getBoundingClientRect();
+      return {
+        classes: typeof element.className === "string"
+          ? element.className
+          : String(element.getAttribute("class") || ""),
+        clientWidth: Math.round(element.clientWidth),
+        id: element.id,
+        left: Math.round(rect.left * 10) / 10,
+        right: Math.round(rect.right * 10) / 10,
+        scrollWidth: Math.round(element.scrollWidth),
+        styles: getStyles(element),
+        tag: element.tagName.toLowerCase(),
+        text: (element.innerText || element.textContent || "").replace(/\s+/g, " ").trim().slice(0, 96),
+        width: Math.round(rect.width * 10) / 10
+      };
+    };
+    const ancestorChain = (element: HTMLElement) => {
+      const ancestors: LayoutDebugElement[] = [];
+      for (let parent = element.parentElement; parent && ancestors.length < 12; parent = parent.parentElement) {
+        if (parent.dataset.layoutDebugPanel !== undefined) break;
+        ancestors.push(describe(parent));
+        if (parent.classList.contains("platform-section") || parent.classList.contains("dashboard-shell")) break;
+      }
+      return ancestors;
+    };
+    const offenders = Array.from(document.body.querySelectorAll<HTMLElement>("*")).flatMap((element) => {
+      if (element.dataset.layoutDebugPanel !== undefined || element.closest("[data-layout-debug-panel]")) return [];
+      const details = describe(element);
+      const reasons = [
+        ...(details.right > viewportWidth + 1 ? ["right exceeds viewport"] : []),
+        ...(details.left < -1 ? ["left precedes viewport"] : []),
+        ...(details.width > viewportWidth + 1 ? ["rendered width exceeds viewport"] : []),
+        ...(details.scrollWidth > details.clientWidth + 1 ? ["internal horizontal overflow"] : [])
+      ];
+      return reasons.length ? [{ ...details, ancestors: ancestorChain(element), reasons }] : [];
+    }).sort((first, second) => Math.max(second.right - viewportWidth, second.scrollWidth - second.clientWidth, 0) - Math.max(first.right - viewportWidth, first.scrollWidth - first.clientWidth, 0));
+
+    setReport({
+      collectedAt: new Date().toISOString(),
+      document: {
+        bodyClientWidth: document.body.clientWidth,
+        bodyScrollWidth: document.body.scrollWidth,
+        documentClientWidth: document.documentElement.clientWidth,
+        documentScrollWidth: document.documentElement.scrollWidth
+      },
+      offenders,
+      section,
+      viewport: {
+        devicePixelRatio: window.devicePixelRatio,
+        innerWidth: window.innerWidth,
+        outerWidth: window.outerWidth,
+        visualViewportScale: window.visualViewport?.scale ?? null,
+        visualViewportWidth: window.visualViewport?.width ?? null
+      }
+    });
+  }, [section]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(collectReport);
+    const refresh = () => window.requestAnimationFrame(collectReport);
+    window.addEventListener("resize", refresh);
+    window.visualViewport?.addEventListener("resize", refresh);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", refresh);
+      window.visualViewport?.removeEventListener("resize", refresh);
+    };
+  }, [collectReport]);
+
+  useEffect(() => {
+    document.querySelectorAll("[data-layout-debug-overflow]").forEach((element) => {
+      element.removeAttribute("data-layout-debug-overflow");
+    });
+    if (!isOutlined || !report) return;
+    report.offenders.forEach((offender) => {
+      const selector = `${offender.tag}${offender.id ? `#${CSS.escape(offender.id)}` : ""}`;
+      const candidate = Array.from(document.querySelectorAll<HTMLElement>(selector)).find((element) => {
+        const rect = element.getBoundingClientRect();
+        return Math.abs(rect.left - offender.left) < 1 && Math.abs(rect.right - offender.right) < 1;
+      });
+      candidate?.setAttribute("data-layout-debug-overflow", "true");
+    });
+    return () => {
+      document.querySelectorAll("[data-layout-debug-overflow]").forEach((element) => {
+        element.removeAttribute("data-layout-debug-overflow");
+      });
+    };
+  }, [isOutlined, report]);
+
+  const copyReport = async () => {
+    if (!report || !navigator.clipboard) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(report, null, 2));
+      setCopyStatus("Copied");
+    } catch {
+      setCopyStatus("Copy failed");
+    }
+  };
+
+  return createPortal(
+    <aside className="layout-debug-panel" data-layout-debug-panel aria-label="Layout diagnostic">
+      <div className="layout-debug-heading"><strong>Layout debug · {report?.section ?? section}</strong><button onClick={collectReport} type="button">Refresh</button></div>
+      {report ? <>
+        <p className="layout-debug-root">viewport {report.viewport.visualViewportWidth ?? report.viewport.innerWidth}px · inner/outer {report.viewport.innerWidth}/{report.viewport.outerWidth}px · document {report.document.documentScrollWidth}px / {report.document.documentClientWidth}px · body {report.document.bodyScrollWidth}px / {report.document.bodyClientWidth}px · scale {report.viewport.visualViewportScale ?? "—"} · DPR {report.viewport.devicePixelRatio}</p>
+        <div className="layout-debug-actions"><button onClick={() => setIsOutlined((current) => !current)} type="button">Outline: {isOutlined ? "on" : "off"}</button><button onClick={() => void copyReport()} type="button">Copy diagnostics</button>{copyStatus ? <span>{copyStatus}</span> : null}</div>
+        <ol className="layout-debug-offenders">{report.offenders.length ? report.offenders.slice(0, 12).map((offender, index) => <li key={`${offender.tag}-${offender.id}-${index}`}><strong>{offender.tag}{offender.id ? `#${offender.id}` : ""}{offender.classes ? `.${offender.classes.split(/\s+/).slice(0, 3).join(".")}` : ""}</strong><span>{offender.reasons.join(", ")} · {offender.left}→{offender.right} ({offender.width}px), scroll {offender.scrollWidth}/{offender.clientWidth}</span><small>{offender.ancestors.slice(0, 4).map((ancestor) => `${ancestor.tag}${ancestor.id ? `#${ancestor.id}` : ""}${ancestor.classes ? `.${ancestor.classes.split(/\s+/)[0]}` : ""} ${ancestor.left}→${ancestor.right}`).join(" › ")}</small></li>) : <li>No horizontal offenders at this moment.</li>}</ol>
+      </> : <p className="layout-debug-root">Measuring layout…</p>}
+    </aside>,
+    document.body
   );
 }
 
