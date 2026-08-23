@@ -6,7 +6,7 @@ const collectorSource = await readFile(new URL("../lib/metrics/collectors.ts", i
 
 assert.match(
   appSource,
-  /function formatPlatformUpdateTimestamp\(date: string, importedAt\?: string\)[\s\S]*?timestamp\.toLocaleDateString\("de-AT"[\s\S]*?timestamp\.toLocaleTimeString\("de-AT"/,
+  /function formatPlatformUpdateTimestamp\(date: string, importedAt\?: string\)[\s\S]*?timestamp\.toLocaleDateString\("en-GB"[\s\S]*?timestamp\.toLocaleTimeString\("de-AT"/,
   "Platform cards must use the authoritative imported_at timestamp for both date and time."
 );
 assert.match(

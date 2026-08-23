@@ -2244,6 +2244,17 @@ h2 {
   opacity: 0.72;
 }
 
+.platform-refresh-button {
+  background: #171717;
+  border-color: #171717;
+  justify-content: center;
+  min-height: 36px;
+  font-size: 12px;
+  gap: 6px;
+  padding: 7px 10px;
+  width: auto;
+}
+
 .refresh-status {
   color: var(--muted);
   font-size: 12px;
@@ -2296,10 +2307,27 @@ h2 {
 }
 
 .apple-import-actions {
-  align-items: flex-end;
+  align-items: center;
   display: grid;
-  gap: 6px;
-  justify-items: end;
+  gap: 6px 8px;
+  grid-template-areas:
+    "freshness import"
+    "status status";
+  grid-template-columns: minmax(0, 1fr) auto;
+  max-width: 152px;
+  min-width: 152px;
+  width: 152px;
+}
+
+.apple-import-actions > .platform-card-header-meta { align-self: center; grid-area: freshness; }
+.apple-import-actions > .platform-card-header-meta > span { display: block; }
+.platform-card-header-meta > span { display: block; }
+.apple-import-actions > .apple-import-button { grid-area: import; justify-self: end; }
+.apple-import-actions > .refresh-status { grid-area: status; max-width: none; text-align: left; }
+
+.platform-card-spotify .platform-card-title h3,
+.platform-card-apple-music .platform-card-title h3 {
+  white-space: nowrap;
 }
 
 .apple-import-panel-embedded .apple-import-actions {
@@ -2314,11 +2342,12 @@ h2 {
   color: #fff;
   cursor: pointer;
   display: inline-flex;
-  font-size: 14px;
+  font-size: 0;
   font-weight: 800;
-  gap: 8px;
-  min-height: 40px;
-  padding: 0 14px;
+  justify-content: center;
+  min-height: 36px;
+  padding: 7px;
+  width: 36px;
 }
 
 .apple-import-button input {
@@ -8137,7 +8166,9 @@ h2 {
   }
 
   .apple-import-actions {
-    justify-items: start;
+    max-width: 152px;
+    min-width: 152px;
+    width: 152px;
   }
 
   .platform-grid {

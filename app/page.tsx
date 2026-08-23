@@ -376,6 +376,13 @@ type AppleMusicCsvRow = {
   shazams: number;
   song: string;
 };
+type SpotifyCsvImportStatus = RefreshStatus;
+type SpotifyAudienceCsvRow = {
+  date: string; followers: number; listeners: number; monthlyActiveListeners: number;
+  monthlyListeners: number; playlistAdds: number; saves: number; streams: number; superListeners: number;
+};
+type SpotifySongsCsvRow = { listeners: number; releaseDate: string; saves: number; song: string; streams: number };
+type SpotifyPlaylistsCsvRow = { listeners: number; streams: number; title: string };
 type MarketingCampaignTaskDbRow = {
   id: string;
   task_kind:
@@ -596,12 +603,19 @@ const platformStats = [
     dashboard: true,
     metrics: [
       { label: "Followers", metricName: "followers", value: "—", context: "" },
-      { label: "Total Streams", metricName: "total_streams", value: "—" },
+      { label: "Monthly Active Listeners", metricName: "monthly_active_listeners", value: "—" },
       {
-        label: "Current Release Streams",
-        metricName: "current_release_streams",
+        label: "Latest Release Streams",
+        metricName: "latest_release_streams",
         value: "—"
-      }
+      },
+      {
+        label: "Total Catalog Streams",
+        metricName: "total_catalog_streams",
+        value: "—"
+      },
+      { label: "All Playlists Listeners", metricName: "all_playlists_listeners", value: "—" },
+      { label: "All Playlists Streams", metricName: "all_playlists_streams", value: "—" }
     ]
   },
   {
@@ -3826,12 +3840,12 @@ function getDailyProgressItemForFocusTask(
   task: FocusQueueItem,
   status: MarketingStatus
 ): Omit<DailyFocusProgressItem, "date"> | null {
-  if (task.id === "other-apple-music-csv-update") {
+  if (task.id === "other-apple-music-csv-update" || task.id === "other-spotify-csv-update") {
     return {
       label: task.label,
       source: "Other",
       status,
-      taskKey: "other:apple-music-csv-update"
+      taskKey: task.id === "other-apple-music-csv-update" ? "other:apple-music-csv-update" : "other:spotify-csv-update"
     };
   }
 
@@ -5281,6 +5295,7 @@ export default function Home() {
   const [appleMusicReminderDismissedDate, setAppleMusicReminderDismissedDate] =
     useState("");
   const [appleMusicLastUploadedAt, setAppleMusicLastUploadedAt] = useState("");
+  const [spotifyLastUploadedAt, setSpotifyLastUploadedAt] = useState("");
   const [platformStatsData, setPlatformStatsData] = useState<typeof platformStats>([]);
   const [platformMetricRows, setPlatformMetricRows] = useState<MetricRow[]>([]);
   const [dashboardPreferencesWorkspaceId, setDashboardPreferencesWorkspaceId] = useState("");
@@ -5300,6 +5315,10 @@ export default function Home() {
       message: "",
       state: "idle"
     });
+  const [spotifyCsvImportStatus, setSpotifyCsvImportStatus] = useState<SpotifyCsvImportStatus>({
+    message: "",
+    state: "idle"
+  });
   const [productionSaveStatus, setProductionSaveStatus] = useState<RefreshStatus>({
     message: "",
     state: "idle"
@@ -5381,6 +5400,21 @@ export default function Home() {
       ),
     [platformMetricRows]
   );
+  const audienceEvolutionHistory = useMemo(
+    () =>
+      calculateAudienceEvolutionHistory(
+        platformMetricRows.map((row): AudienceMetricRow => ({
+          importedAt: row.imported_at,
+          metricName: row.metric_name,
+          metricValue: row.metric_value,
+          notes: row.notes,
+          platformSlug: getSingle(row.platforms)?.slug ?? "",
+          snapshotDate: row.snapshot_date,
+          source: row.source
+        }))
+      ),
+    [platformMetricRows]
+  );
   const isDashboardInitialLoadReady = Boolean(
     activeWorkspaceId &&
     activeWorkspaceResolvedId === activeWorkspaceId &&
@@ -5400,21 +5434,6 @@ export default function Home() {
         ...campaigns.flatMap((campaign) =>
           getCampaignDailyProgressItems(campaign, getCampaignDays(campaign)).map(
             (item) => item.taskKey
-  const audienceEvolutionHistory = useMemo(
-    () =>
-      calculateAudienceEvolutionHistory(
-        platformMetricRows.map((row): AudienceMetricRow => ({
-          importedAt: row.imported_at,
-          metricName: row.metric_name,
-          metricValue: row.metric_value,
-          notes: row.notes,
-          platformSlug: getSingle(row.platforms)?.slug ?? "",
-          snapshotDate: row.snapshot_date,
-          source: row.source
-        }))
-      ),
-    [platformMetricRows]
-  );
           )
         ),
         ...productionSongDrafts.flatMap((song) =>
@@ -5527,6 +5546,12 @@ export default function Home() {
       .limit(1)
       .maybeSingle();
     setAppleMusicLastUploadedAt(data?.finished_at ?? "");
+  }, [activeWorkspaceId]);
+  const loadSpotifyLastUploadedAt = useCallback(async () => {
+    if (!activeWorkspaceId) return;
+    const supabase = createBrowserSupabaseClient();
+    const { data } = await supabase.from("import_logs").select("finished_at").eq("workspace_id", activeWorkspaceId).in("source", ["spotify-audience-csv", "spotify-songs-csv"]).eq("import_status", "completed").not("finished_at", "is", null).order("finished_at", { ascending: false }).limit(1).maybeSingle();
+    setSpotifyLastUploadedAt(data?.finished_at ?? "");
   }, [activeWorkspaceId]);
 
   useEffect(() => {
@@ -6151,6 +6176,7 @@ export default function Home() {
 
       const result = await response.json();
       await loadPlatformStats();
+      await loadSpotifyLastUploadedAt();
       await loadAppleMusicLastUploadedAt();
 
       if (result.skipped) {
@@ -6249,15 +6275,9 @@ export default function Home() {
         getPlatformMetric(platformStatsData, "apple-music", "current_release_name")?.value ??
         getPlatformMetric(platformStatsData, "apple-music", "current_release_plays")?.context ??
         "";
-      const currentReleaseName = selectCurrentAppleMusicRelease({
-        campaigns,
-        previousCurrentReleaseName,
-        reportEndDate,
-        rows
-      });
       const response = await fetch("/api/apple-music/import", {
         body: JSON.stringify({
-          currentReleaseName,
+          currentReleaseName: previousCurrentReleaseName,
           fileName: file.name,
           reportEndDate,
           reportStartDate,
@@ -6285,7 +6305,9 @@ export default function Home() {
         taskKey: "other:apple-music-csv-update"
       });
       setAppleMusicImportStatus({
-        message: `Imported ${result.songs} songs from ${formatDateForDisplay(result.reportEndDate)}.`,
+        message: result.noNewData
+          ? "No new data dates were found. Check that you selected the correct time period when downloading your Apple Music data."
+          : `Imported ${result.songs} songs from ${formatDateForDisplay(result.reportEndDate)}.`,
         state: "success"
       });
     } catch (error) {
@@ -6293,6 +6315,30 @@ export default function Home() {
         message: error instanceof Error ? error.message : "Apple CSV import failed.",
         state: "error"
       });
+    }
+  }
+
+  async function importSpotifyCsv(file: File) {
+    setSpotifyCsvImportStatus({ message: "Reading Spotify CSV...", state: "loading" });
+    try {
+      const parsed = parseSpotifyCsvFile(await file.text());
+      const response = await fetch("/api/spotify/import", {
+        body: JSON.stringify({ fileName: file.name, ...parsed }),
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "x-love-strings-import": "spotify-csv" },
+        method: "POST"
+      });
+      const responseText = await response.text();
+      const result = responseText ? JSON.parse(responseText) as { error?: string; authoritativeDate?: string; kind?: string; noNewData?: boolean; sources?: string[] } : {};
+      if (!response.ok) throw new Error(result.error ?? `Spotify CSV import failed with status ${response.status}: ${responseText || "No response body"}.`);
+      await loadPlatformStats();
+      await loadSpotifyLastUploadedAt();
+      recordDailyFocusStatus({ label: "Spotify CSV import", source: "Other", status: "done", taskKey: "other:spotify-csv-update" });
+      setSpotifyCsvImportStatus({ message: result.noNewData
+        ? "No new data dates were found. Check that you selected the correct time period when downloading your Spotify data."
+        : getSpotifyImportSuccessMessage(result.kind ?? "Spotify data", result.sources ?? []), state: "success" });
+    } catch (error) {
+      setSpotifyCsvImportStatus({ message: error instanceof Error ? error.message : `Spotify CSV import failed: ${String(error)}`, state: "error" });
     }
   }
 
@@ -8114,6 +8160,11 @@ export default function Home() {
   }, [loadAppleMusicLastUploadedAt]);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => { void loadSpotifyLastUploadedAt(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadSpotifyLastUploadedAt]);
+
+  useEffect(() => {
     if (!activeWorkspaceId) return;
     const loadTimer = window.setTimeout(() => {
       setAppleMusicReminderDismissedDate(
@@ -8440,8 +8491,10 @@ export default function Home() {
             appleMusicImportStatus={appleMusicImportStatus}
             appleMusicLastUploadedAt={appleMusicLastUploadedAt}
             audienceDashboard={audienceDashboard}
+            audienceEvolutionHistory={audienceEvolutionHistory}
             onAddQrCode={addQrCodeLink}
             onAppleMusicCsvImport={importAppleMusicCsv}
+            onSpotifyCsvImport={importSpotifyCsv}
             onDeleteQrCode={deleteQrCodeLink}
             onQrCodeChange={updateQrCodeLink}
             onRefreshPlatformStats={refreshPlatformStats}
@@ -8450,6 +8503,7 @@ export default function Home() {
             platformChildOrder={dashboardPreferences.childOrderByParent.platforms ?? []}
             qrCodeLinks={qrCodeLinks}
             refreshStatus={refreshStatus}
+            spotifyCsvImportStatus={spotifyCsvImportStatus}
             workspaceTimeZone={workspaceTimeZone}
           />
         ) : null}
@@ -8491,7 +8545,6 @@ export default function Home() {
             locationFocusTarget={locationFocusTarget}
             onEventFocusTargetConsumed={consumeEventFocusTarget}
             onLocationFocusTargetConsumed={consumeLocationFocusTarget}
-            audienceEvolutionHistory={audienceEvolutionHistory}
             restoreContext={eventsRestoreContext}
             isLoaded={hasLoadedEventSupabaseSnapshot}
             locations={locationAddressBook}
@@ -8543,10 +8596,12 @@ export default function Home() {
             otherTasks={otherTasks}
             otherTaskSaveErrors={otherTaskSaveErrors}
             appleMusicReminderDismissedDate={appleMusicReminderDismissedDate}
+            appleMusicLastUploadedAt={appleMusicLastUploadedAt}
             platformMetricRows={platformMetricRows}
             productionSongs={productionSongDrafts}
             qrCodeLinks={qrCodeLinks}
             roadmapPhasesData={roadmapPhaseDrafts}
+            spotifyLastUploadedAt={spotifyLastUploadedAt}
             workspaceTimeZone={workspaceTimeZone}
             workspaceName={activeWorkspaceName}
           />
@@ -15493,7 +15548,7 @@ function FocusQueueTaskMeta({ task }: { task: FocusQueueItem }) {
 
 function FocusQueueTaskLabel({ task }: { task: FocusQueueItem }) {
   if (!task.displayLabel) {
-    const label = task.source === "Other" ? task.label.replace(/^[^-]+\s-\s/, "") : task.label;
+    const label = task.id === "other-apple-music-csv-update" || task.id === "other-spotify-csv-update" ? task.label : task.source === "Other" ? task.label.replace(/^[^-]+\s-\s/, "") : task.label;
     return <span className="dashboard-focus-task-label">{label}</span>;
   }
 
@@ -15519,10 +15574,9 @@ function AppleMusicCsvImportControl({
   variant?: "embedded" | "header" | "standalone";
 }) {
   const importActions = (
-    <div className="apple-import-actions">
-      <label className="apple-import-button">
-        <Upload size={16} aria-hidden />
-        Import CSV
+    <>
+      <label aria-label="Import CSV" className="apple-import-button" title="Import CSV">
+        <Upload size={14} aria-hidden />
         <input
           accept=".csv,text/csv"
           disabled={importStatus.state === "loading"}
@@ -15543,7 +15597,7 @@ function AppleMusicCsvImportControl({
           {importStatus.message}
         </span>
       ) : null}
-    </div>
+    </>
   );
 
   if (hideTitle) {
@@ -15566,6 +15620,20 @@ function AppleMusicCsvImportControl({
   );
 }
 
+function SpotifyCsvImportControl({ importStatus, onImport }: { importStatus: SpotifyCsvImportStatus; onImport: (file: File) => void }) {
+  return <>
+    <label aria-label="Import CSV" className="apple-import-button" title="Import CSV">
+      <Upload size={14} aria-hidden />
+      <input accept=".csv,text/csv" disabled={importStatus.state === "loading"} onChange={(event) => {
+        const file = event.target.files?.[0];
+        if (file) onImport(file);
+        event.target.value = "";
+      }} type="file" />
+    </label>
+    {importStatus.message ? <span className={`refresh-status refresh-status-${importStatus.state}`}>{importStatus.message}</span> : null}
+  </>;
+}
+
 function DashboardInitialLoadingOverlay() {
   return (
     <div className="dashboard-initial-loading" role="status">
@@ -15579,6 +15647,7 @@ function DashboardInitialLoadingOverlay() {
 
 function DashboardView({
   audienceDashboard,
+  appleMusicLastUploadedAt,
   appleMusicReminderDismissedDate,
   budgetEntries,
   campaigns,
@@ -15610,6 +15679,7 @@ function DashboardView({
   productionSongs,
   qrCodeLinks,
   roadmapPhasesData
+  ,spotifyLastUploadedAt, workspaceName,
   workspaceTimeZone
 }: {
   audienceDashboard: AudienceDashboardCalculations;
@@ -15645,6 +15715,7 @@ function DashboardView({
   productionSongs: ProductionSongConfig[];
   qrCodeLinks: QrCodeLink[];
   roadmapPhasesData: RoadmapPhase[];
+  spotifyLastUploadedAt: string;
   workspaceName: string;
   workspaceTimeZone: string;
 }) {
@@ -15656,28 +15727,36 @@ function DashboardView({
     productionPreview.current,
     productionPreview.next
   ].filter((song): song is ProductionSongConfig => Boolean(song));
-  const appleMusicLastUpdate = getAppleMusicLastUpdateDate(
-    dashboardPlatformStats,
-    platformMetricRows
-  );
+  const appleMusicLastUpdate = getAppleMusicLastUpdateDate(dashboardPlatformStats, platformMetricRows);
+  const appleMusicLastUpload = appleMusicLastUploadedAt.slice(0, 10);
   const isCampaignStartToday = isMarketingCampaignStartToday(campaigns, workspaceTimeZone);
   const isAppleMusicUpdateCompletedToday = dailyFocusProgress.some(
     (item) => item.taskKey === "other:apple-music-csv-update" && item.status === "done"
+  );
+  const spotifyLastUpload = spotifyLastUploadedAt.slice(0, 10);
+  const isSpotifyUpdateCompletedToday = dailyFocusProgress.some(
+    (item) => item.taskKey === "other:spotify-csv-update" && item.status === "done"
   );
   const appleMusicUpdateTask =
     appleMusicReminderDismissedDate === getWorkspaceDateKey(workspaceTimeZone)
       ? null
       : getAppleMusicUpdateTask(
-          appleMusicLastUpdate,
+          appleMusicLastUpload,
           isCampaignStartToday,
           isAppleMusicUpdateCompletedToday,
           workspaceTimeZone
         );
+  const spotifyUpdateTask = getSpotifyUpdateTask(
+    spotifyLastUpload,
+    isCampaignStartToday,
+    isSpotifyUpdateCompletedToday,
+    workspaceTimeZone
+  );
   const focusQueue = getDashboardFocusQueue(
     campaignPreview,
     productionPreviewSongs,
     otherTasks,
-    appleMusicUpdateTask ? [appleMusicUpdateTask] : [],
+    [appleMusicUpdateTask, spotifyUpdateTask].filter((task): task is FocusQueueItem => Boolean(task)),
     campaigns,
     workspaceTimeZone
   );
@@ -15911,6 +15990,7 @@ function PlatformsAudienceCard({
   history
 }: {
   calculations: AudienceDashboardCalculations;
+  history: AudienceEvolutionHistory;
 }) {
   const estimated = calculations.estimatedAudience;
   const release = calculations.currentRelease;
@@ -16008,8 +16088,44 @@ function AudienceEstimatedTrendChart({ points }: { points: AudienceEvolutionHist
         <strong>{firstPoint && lastPoint ? `${formatMetricValue(firstPoint.maximum)} → ${formatMetricValue(lastPoint.maximum)}` : "No data yet"}</strong>
         <em>Maximum</em>
       </div>
+      <AudienceRangeLineChart points={points} />
     </div>
   );
+}
+
+function AudienceRangeLineChart({ points }: { points: AudienceEvolutionHistory["estimatedAudience"] }) {
+  if (points.length < 2) return <p className="platform-trend-empty">Not enough history yet.</p>;
+  const width = 320;
+  const height = 132;
+  const padding = 14;
+  const labelBandHeight = 20;
+  const gridBottom = height - padding - labelBandHeight;
+  const values = points.flatMap((point) => [point.lower, point.maximum]);
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const firstTime = Date.parse(points[0].date);
+  const lastTime = Date.parse(points.at(-1)?.date ?? points[0].date);
+  const valueRange = Math.max(maxValue - minValue, 1);
+  const timeRange = Math.max(lastTime - firstTime, 1);
+  const chartWidth = width - padding * 2;
+  const chartHeight = gridBottom - padding;
+  const coordinates = points.map((point) => ({
+    ...point,
+    x: padding + ((Date.parse(point.date) - firstTime) / timeRange) * chartWidth,
+    lowerY: padding + chartHeight - ((point.lower - minValue) / valueRange) * chartHeight + 8,
+    maximumY: padding + chartHeight - ((point.maximum - minValue) / valueRange) * chartHeight + 8
+  }));
+  const path = (field: "lowerY" | "maximumY") => coordinates.map((point) => `${point.x.toFixed(1)},${point[field].toFixed(1)}`).join(" ");
+  const middleIndex = Math.floor((coordinates.length - 1) / 2);
+  const labels = new Set([0, middleIndex, coordinates.length - 1]);
+  return <div className="platform-line-chart audience-range-line-chart"><svg aria-label="Estimated and maximum audience over time" role="img" viewBox={`0 0 ${width} ${height}`}>
+    <title>Estimated / overlap-adjusted and maximum connected audience</title>
+    <rect className="platform-line-chart-grid-frame" height={chartHeight} width={chartWidth} x={padding} y={padding} />
+    {Array.from({ length: 4 }, (_, index) => <line className="platform-line-chart-grid-line" key={index} x1={padding} x2={width - padding} y1={padding + (index / 3) * chartHeight} y2={padding + (index / 3) * chartHeight} />)}
+    <polyline className="audience-range-line audience-range-line-lower" points={path("lowerY")} />
+    <polyline className="audience-range-line audience-range-line-maximum" points={path("maximumY")} />
+    {coordinates.map((point, index) => labels.has(index) ? <text className="platform-line-chart-month" key={point.date} textAnchor={index === 0 ? "start" : index === coordinates.length - 1 ? "end" : "middle"} x={point.x} y={height - 2}>{formatTrendDate(point.date)}</text> : null)}
+  </svg></div>;
 }
 
 function AudienceCardEmptyState() {
@@ -16033,7 +16149,6 @@ function DashboardDisconnectedPlatformCard({ label }: { label: string }) {
 
 function DashboardCampaignPreview({
   childOrder,
-  history: AudienceEvolutionHistory;
   visibleChildren,
   preview,
   productionSongs
@@ -16088,46 +16203,10 @@ function DashboardCampaignCard({
     return (
       <article
         className={`dashboard-campaign-card module-accent module-accent-marketing dashboard-campaign-card-empty${
-      <AudienceRangeLineChart points={points} />
           label === "Next" ? " dashboard-campaign-card-empty-next" : ""
         }${
           label === "Current" ? " dashboard-campaign-card-empty-current" : ""
         }`}
-function AudienceRangeLineChart({ points }: { points: AudienceEvolutionHistory["estimatedAudience"] }) {
-  if (points.length < 2) return <p className="platform-trend-empty">Not enough history yet.</p>;
-  const width = 320;
-  const height = 132;
-  const padding = 14;
-  const labelBandHeight = 20;
-  const gridBottom = height - padding - labelBandHeight;
-  const values = points.flatMap((point) => [point.lower, point.maximum]);
-  const minValue = Math.min(...values);
-  const maxValue = Math.max(...values);
-  const firstTime = Date.parse(points[0].date);
-  const lastTime = Date.parse(points.at(-1)?.date ?? points[0].date);
-  const valueRange = Math.max(maxValue - minValue, 1);
-  const timeRange = Math.max(lastTime - firstTime, 1);
-  const chartWidth = width - padding * 2;
-  const chartHeight = gridBottom - padding;
-  const coordinates = points.map((point) => ({
-    ...point,
-    x: padding + ((Date.parse(point.date) - firstTime) / timeRange) * chartWidth,
-    lowerY: padding + chartHeight - ((point.lower - minValue) / valueRange) * chartHeight + 8,
-    maximumY: padding + chartHeight - ((point.maximum - minValue) / valueRange) * chartHeight + 8
-  }));
-  const path = (field: "lowerY" | "maximumY") => coordinates.map((point) => `${point.x.toFixed(1)},${point[field].toFixed(1)}`).join(" ");
-  const middleIndex = Math.floor((coordinates.length - 1) / 2);
-  const labels = new Set([0, middleIndex, coordinates.length - 1]);
-  return <div className="platform-line-chart audience-range-line-chart"><svg aria-label="Estimated and maximum audience over time" role="img" viewBox={`0 0 ${width} ${height}`}>
-    <title>Estimated / overlap-adjusted and maximum connected audience</title>
-    <rect className="platform-line-chart-grid-frame" height={chartHeight} width={chartWidth} x={padding} y={padding} />
-    {Array.from({ length: 4 }, (_, index) => <line className="platform-line-chart-grid-line" key={index} x1={padding} x2={width - padding} y1={padding + (index / 3) * chartHeight} y2={padding + (index / 3) * chartHeight} />)}
-    <polyline className="audience-range-line audience-range-line-lower" points={path("lowerY")} />
-    <polyline className="audience-range-line audience-range-line-maximum" points={path("maximumY")} />
-    {coordinates.map((point, index) => labels.has(index) ? <text className="platform-line-chart-month" key={point.date} textAnchor={index === 0 ? "start" : index === coordinates.length - 1 ? "end" : "middle"} x={point.x} y={height - 2}>{formatTrendDate(point.date)}</text> : null)}
-  </svg></div>;
-}
-
       >
         <p className="eyebrow">{label}</p>
         <h3>{emptyText}</h3>
@@ -17309,8 +17388,10 @@ function PlatformsView({
   appleMusicImportStatus,
   appleMusicLastUploadedAt,
   audienceDashboard,
+  audienceEvolutionHistory,
   onAddQrCode,
   onAppleMusicCsvImport,
+  onSpotifyCsvImport,
   onDeleteQrCode,
   onQrCodeChange,
   onRefreshPlatformStats,
@@ -17319,11 +17400,13 @@ function PlatformsView({
   platformStatsData,
   qrCodeLinks,
   refreshStatus,
+  spotifyCsvImportStatus,
   workspaceTimeZone
 }: {
   appleMusicImportStatus: AppleMusicImportStatus;
   appleMusicLastUploadedAt: string;
   audienceDashboard: AudienceDashboardCalculations;
+  audienceEvolutionHistory: AudienceEvolutionHistory;
   onAddQrCode: () => void;
   onAppleMusicCsvImport: (file: File) => void;
   onSpotifyCsvImport: (file: File) => void;
@@ -17335,6 +17418,7 @@ function PlatformsView({
   platformStatsData: typeof platformStats;
   qrCodeLinks: QrCodeLink[];
   refreshStatus: RefreshStatus;
+  spotifyCsvImportStatus: SpotifyCsvImportStatus;
   workspaceTimeZone: string;
 }) {
   const instagramFollowerTrend = getPlatformMetricTrend(
@@ -17388,7 +17472,6 @@ function PlatformsView({
   );
   const analyticsPageViewsTrend = getPlatformMetricTrend(
     platformMetricRows,
-  audienceEvolutionHistory,
     "google-analytics",
     "page_views_30d",
     []
@@ -17406,7 +17489,6 @@ function PlatformsView({
   const youtubeMusicTotalPlaysTrend = getPlatformMetricTrend(
     platformMetricRows,
     "youtube-music",
-  audienceEvolutionHistory: AudienceEvolutionHistory;
     "total_plays",
     []
   );
@@ -17420,6 +17502,11 @@ function PlatformsView({
     "total_plays",
     []
   );
+  const spotifyFollowersTrend = getPlatformMetricTrend(platformMetricRows, "spotify", "followers", [], "spotify-audience-csv");
+  const spotifyMonthlyActiveTrend = getPlatformMetricTrend(platformMetricRows, "spotify", "monthly_active_listeners", [], "spotify-audience-csv");
+  const spotifyListenersTrend = getPlatformMetricTrend(platformMetricRows, "spotify", "listeners", [], "spotify-audience-csv");
+  const spotifyStreamsTrend = getPlatformMetricTrend(platformMetricRows, "spotify", "streams", [], "spotify-audience-csv");
+  const spotifyLastUpdate = getSpotifyLastUpdateDate(platformMetricRows);
   const appleMusicLastUpdate = getAppleMusicLastUpdateDate(
     platformStatsData,
     platformMetricRows
@@ -17435,13 +17522,15 @@ function PlatformsView({
         <div className="dashboard-refresh-control platform-refresh-control">
           <ModuleHeaderDate />
           <button
-            className="refresh-button"
+            aria-label="Refresh platform statistics"
+            className="refresh-button platform-refresh-button"
             disabled={refreshStatus.state === "loading"}
             onClick={onRefreshPlatformStats}
+            title="Collect platform statistics"
             type="button"
           >
-            <RefreshCw size={16} aria-hidden />
-            Refresh
+            <RefreshCw size={14} aria-hidden />
+            Collect stats
           </button>
           {refreshStatus.message ? (
             <span className={`refresh-status refresh-status-${refreshStatus.state}`}>
@@ -17453,6 +17542,7 @@ function PlatformsView({
 
       <PlatformStatsSection
         audienceDashboard={audienceDashboard}
+        audienceEvolutionHistory={audienceEvolutionHistory}
         hideHeading
         platforms={getPlatformCardsForPreferences(
           platformStatsData,
@@ -17542,7 +17632,6 @@ function PlatformsView({
             {platform.slug === "google-analytics" ? (
               <PlatformTrendPanelGroup
                 charts={[
-        audienceEvolutionHistory={audienceEvolutionHistory}
                   {
                     color: "#1f7a58",
                     label: "Active users, last 30 days",
@@ -17587,60 +17676,71 @@ function PlatformsView({
                 title="Evolution graphs"
               />
             ) : null}
+            {platform.slug === "spotify" ? (
+              <PlatformTrendPanelGroup
+                charts={[
+                  { color: "#1f7a58", label: "Followers", points: spotifyFollowersTrend },
+                  { color: "#c79522", label: "Monthly active listeners", points: spotifyMonthlyActiveTrend },
+                  { color: "#7c54a8", label: "Listeners", points: spotifyListenersTrend },
+                  { color: "#2f75a8", label: "Streams", points: spotifyStreamsTrend }
+                ]}
+                title="Evolution graphs"
+              />
+            ) : null}
           </>
         }
         renderCardHeaderMeta={(platform) =>
           platform.slug === "instagram" && instagramLastUpdate ? (
             <span className="platform-card-header-meta">
-              Last update: {formatPlatformUpdateTimestamp(
+              <span>Last update:</span><span>{formatPlatformUpdateTimestamp(
                 instagramLastUpdate,
                 getPlatformLastSnapshotImportedAt(platformMetricRows, "instagram")
-              )}
+              )}</span>
             </span>
           ) : platform.slug === "instagram-standalone" && getPlatformLastSnapshotDate(platformMetricRows, "instagram", "instagram-login-api") ? (
             <span className="platform-card-header-meta">
-              Last update: {formatPlatformUpdateTimestamp(
+              <span>Last update:</span><span>{formatPlatformUpdateTimestamp(
                 getPlatformLastSnapshotDate(platformMetricRows, "instagram", "instagram-login-api")!,
                 getPlatformLastSnapshotImportedAt(platformMetricRows, "instagram", "instagram-login-api")
-              )}
+              )}</span>
             </span>
           ) : platform.slug === "threads" && getPlatformLastSnapshotDate(platformMetricRows, "threads", "threads-api") ? (
             <span className="platform-card-header-meta">
-              Last update: {formatPlatformUpdateTimestamp(
+              <span>Last update:</span><span>{formatPlatformUpdateTimestamp(
                 getPlatformLastSnapshotDate(platformMetricRows, "threads", "threads-api")!,
                 getPlatformLastSnapshotImportedAt(platformMetricRows, "threads", "threads-api")
-              )}
+              )}</span>
             </span>
           ) : platform.slug === "facebook" && facebookLastUpdate ? (
             <span className="platform-card-header-meta">
-              Last update: {formatPlatformUpdateTimestamp(
+              <span>Last update:</span><span>{formatPlatformUpdateTimestamp(
                 facebookLastUpdate,
                 getPlatformLastSnapshotImportedAt(platformMetricRows, "facebook")
-              )}
+              )}</span>
             </span>
           ) : platform.slug === "youtube" && youtubeLastUpdate ? (
             <span className="platform-card-header-meta">
-              Last update: {formatPlatformUpdateTimestamp(
+              <span>Last update:</span><span>{formatPlatformUpdateTimestamp(
                 youtubeLastUpdate,
                 getPlatformLastSnapshotImportedAt(platformMetricRows, "youtube")
-              )}
+              )}</span>
             </span>
           ) : platform.slug === "google-analytics" && analyticsLastUpdate ? (
             <span className="platform-card-header-meta">
-              Last update: {formatPlatformUpdateTimestamp(
+              <span>Last update:</span><span>{formatPlatformUpdateTimestamp(
                 analyticsLastUpdate,
                 getPlatformLastSnapshotImportedAt(
                   platformMetricRows,
                   "google-analytics"
                 )
-              )}
+              )}</span>
             </span>
           ) : platform.slug === "youtube-music" && youtubeMusicLastUpdate ? (
             <span className="platform-card-header-meta">
-              Last update: {formatPlatformUpdateTimestamp(
+              <span>Last update:</span><span>{formatPlatformUpdateTimestamp(
                 youtubeMusicLastUpdate,
                 getPlatformLastSnapshotImportedAt(platformMetricRows, "youtube-music")
-              )}
+              )}</span>
             </span>
           ) : platform.slug === "apple-music" ? (
             <div className="platform-card-header-meta apple-import-actions">
@@ -17651,7 +17751,7 @@ function PlatformsView({
                     appleMusicLastUpdate
                   )}
                 >
-                  Last update: {formatAppleMusicLastUpdateDate(appleMusicLastUpdate)}
+                  <span>Data as of:</span><span>{formatDataAsOf(appleMusicLastUpdate)}</span>
                 </span>
               ) : null}
               <AppleMusicCsvImportControl
@@ -17660,6 +17760,11 @@ function PlatformsView({
                 onImport={onAppleMusicCsvImport}
                 variant="header"
               />
+            </div>
+          ) : platform.slug === "spotify" ? (
+            <div className="platform-card-header-meta apple-import-actions">
+              {spotifyLastUpdate ? <span className={getPlatformUpdateMetaClass(platform.slug, spotifyLastUpdate)}><span>Data as of:</span><span>{formatDataAsOf(spotifyLastUpdate)}</span></span> : null}
+              <SpotifyCsvImportControl importStatus={spotifyCsvImportStatus} onImport={onSpotifyCsvImport} />
             </div>
           ) : null
         }
@@ -17994,6 +18099,14 @@ function getAppleMusicLastUpdateDate(
   );
 }
 
+function getSpotifyLastUpdateDate(rows: MetricRow[]) {
+  const dates = rows
+    .filter((row) => getSingle(row.platforms)?.slug === "spotify" && row.metric_name === "audience_data_date")
+    .map((row) => row.notes ?? "")
+    .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date));
+  return dates.sort((first, second) => second.localeCompare(first))[0];
+}
+
 function formatAppleMusicLastUpdateDate(value?: string) {
   if (!value || /undefined|null|nan/i.test(value)) {
     return null;
@@ -18004,6 +18117,11 @@ function formatAppleMusicLastUpdateDate(value?: string) {
   }
 
   return null;
+}
+
+function formatDataAsOf(value?: string) {
+  const parsed = value ? parsePlatformUpdateDate(value) : null;
+  return parsed ? parsed.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : null;
 }
 
 function getAppleMusicUpdateTask(
@@ -18022,14 +18140,17 @@ function getAppleMusicUpdateTask(
 
   return {
     id: "other-apple-music-csv-update",
-    label: `Update Apple Music CSV${
-      needsCampaignStartSnapshot ? " - campaign starts today" : ""
-    }${
-      updateDate ? ` - last update ${formatDateWithDots(updateDate)}` : ""
-    }`,
+    label: `Apple Music${needsCampaignStartSnapshot ? " - campaign starts today" : ""}${updateDate ? ` - last upload ${formatDateWithDots(updateDate)}` : ""}`,
     source: "Other",
     status: "not-started"
   };
+}
+
+function getSpotifyUpdateTask(updateDate: string | undefined, isCampaignStartToday: boolean, isCompletedToday = false, workspaceTimeZone = defaultWorkspaceTimeZone): FocusQueueItem | null {
+  if (isCompletedToday) return null;
+  const needsCampaignStartSnapshot = isCampaignStartToday && !wasPlatformUpdatedToday(updateDate, workspaceTimeZone);
+  if (!isPlatformUpdateStale(updateDate, workspaceTimeZone) && !needsCampaignStartSnapshot) return null;
+  return { id: "other-spotify-csv-update", label: `Spotify${needsCampaignStartSnapshot ? " - campaign starts today" : ""}${updateDate ? ` - last upload ${formatDateWithDots(updateDate)}` : ""}`, source: "Other", status: "not-started" };
 }
 
 function isMarketingCampaignStartToday(campaigns: MarketingCampaignConfig[], workspaceTimeZone = defaultWorkspaceTimeZone) {
@@ -18350,7 +18471,8 @@ function mergePlatformMetricRows(
       }
 
       const context = getMetricDisplayContext(platform.slug, metric.metricName, row, metric.context);
-      const dailyDelta = getPlatformMetricDelta(platform.slug, metric.metricName, row, rows, platform.slug === "instagram" ? row.source ?? undefined : undefined);
+      const deltaSource = platform.slug === "instagram" ? row.source ?? undefined : platform.slug === "spotify" ? (metric.metricName === "followers" || metric.metricName === "monthly_active_listeners" ? "spotify-audience-current-csv" : metric.metricName.startsWith("all_playlists") ? "spotify-playlists-csv" : "spotify-songs-csv") : undefined;
+      const dailyDelta = getPlatformMetricDelta(platform.slug, metric.metricName, row, rows, deltaSource);
 
       return {
         ...metric,
@@ -18400,7 +18522,13 @@ const platformMetricDeltaKeys = new Set([
   "youtube-music:subscribers",
   "youtube-music:total_plays",
   "apple-music:total_plays",
-  "apple-music:total_shazams"
+  "apple-music:total_shazams",
+  "spotify:followers",
+  "spotify:monthly_active_listeners",
+  "spotify:latest_release_streams",
+  "spotify:total_catalog_streams",
+  "spotify:all_playlists_listeners",
+  "spotify:all_playlists_streams"
 ]);
 
 function getPlatformMetricDelta(
@@ -18507,59 +18635,52 @@ function parseAppleMusicCsvFile(fileName: string, csvText: string) {
   };
 }
 
-function selectCurrentAppleMusicRelease({
-  campaigns,
-  previousCurrentReleaseName,
-  reportEndDate,
-  rows
-}: {
-  campaigns: MarketingCampaignConfig[];
-  previousCurrentReleaseName: string;
-  reportEndDate: string;
-  rows: Array<{ song: string }>;
-}) {
-  const songsByNormalizedTitle = new Map(
-    rows.map((row) => [normalizeAppleMusicSongTitle(row.song), row.song])
-  );
-  const reportEndTime = Date.parse(`${reportEndDate}T23:59:59Z`);
-  const latestReleasedCampaign = [...campaigns]
-    .filter((campaign) => {
-      const releaseTime = getCampaignSortTime(campaign.releaseDate);
-      return (
-        releaseTime > 0 &&
-        releaseTime <= reportEndTime &&
-        songsByNormalizedTitle.has(
-          normalizeAppleMusicSongTitle(campaign.releaseTitle)
-        )
-      );
-    })
-    .sort(
-      (firstCampaign, secondCampaign) =>
-        getCampaignSortTime(secondCampaign.releaseDate) -
-        getCampaignSortTime(firstCampaign.releaseDate)
-    )[0];
-
-  if (latestReleasedCampaign) {
-    return (
-      songsByNormalizedTitle.get(
-        normalizeAppleMusicSongTitle(latestReleasedCampaign.releaseTitle)
-      ) ?? latestReleasedCampaign.releaseTitle
-    );
-  }
-
-  const previousReleaseFromCsv = songsByNormalizedTitle.get(
-    normalizeAppleMusicSongTitle(previousCurrentReleaseName)
-  );
-
-  return previousReleaseFromCsv ?? rows[0]?.song ?? previousCurrentReleaseName;
+function parseSpotifyCsvFile(csvText: string): { audienceRows: SpotifyAudienceCsvRow[] } | { songsRows: SpotifySongsCsvRow[] } | { playlistsRows: SpotifyPlaylistsCsvRow[] } {
+  const [headerRow, ...dataRows] = parseCsv(csvText.trim().replace(/^\uFEFF/, ""));
+  if (!headerRow) throw new Error("Spotify CSV is empty.");
+  const headerMap = new Map(headerRow.map((header, index) => [normalizeCsvHeader(header), index]));
+  const rows = dataRows.filter((row) => row.some((cell) => cell.trim()));
+  const audienceHeaders = ["date", "listeners", "monthly listeners", "monthly active listeners", "super listeners", "streams", "playlist adds", "saves", "followers"];
+  const songHeaders = ["song", "listeners", "streams", "saves", "release date"];
+  const playlistHeaders = ["title", "author", "listeners", "streams", "date added"];
+  const hasHeaders = (headers: string[]) => headers.every((header) => headerMap.has(header));
+  if (hasHeaders(audienceHeaders)) return { audienceRows: rows.map((row) => ({
+    date: readSpotifyCsvDate(row, headerMap, "date"), followers: readSpotifyCsvNumber(row, headerMap, "followers"), listeners: readSpotifyCsvNumber(row, headerMap, "listeners"), monthlyActiveListeners: readSpotifyCsvNumber(row, headerMap, "monthly active listeners"), monthlyListeners: readSpotifyCsvNumber(row, headerMap, "monthly listeners"), playlistAdds: readSpotifyCsvNumber(row, headerMap, "playlist adds"), saves: readSpotifyCsvNumber(row, headerMap, "saves"), streams: readSpotifyCsvNumber(row, headerMap, "streams"), superListeners: readSpotifyCsvNumber(row, headerMap, "super listeners")
+  })) };
+  if (hasHeaders(songHeaders)) return { songsRows: rows.map((row) => ({
+    listeners: readSpotifyCsvNumber(row, headerMap, "listeners"), releaseDate: readSpotifyCsvDate(row, headerMap, "release date"), saves: readSpotifyCsvNumber(row, headerMap, "saves"), song: readCsvText(row, headerMap, "song"), streams: readSpotifyCsvNumber(row, headerMap, "streams")
+  })) };
+  if (hasHeaders(playlistHeaders)) return { playlistsRows: rows.map((row) => ({ listeners: readSpotifyCsvNumber(row, headerMap, "listeners"), streams: readSpotifyCsvNumber(row, headerMap, "streams"), title: readCsvText(row, headerMap, "title") })) };
+  throw new Error("Spotify CSV is not an Audience Timeline, Songs, or Playlists export. Check its headers.");
 }
 
-function normalizeAppleMusicSongTitle(title: string) {
-  return title
-    .normalize("NFKD")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
+function getSpotifyImportSuccessMessage(kind: string, sources: string[]) {
+  const loaded = new Set(sources);
+  const audience = loaded.has("spotify-audience-csv");
+  const songs = loaded.has("spotify-songs-csv");
+  const playlists = loaded.has("spotify-playlists-csv");
+  const missingAudience = !audience;
+  const missingSongs = !songs;
+  if (audience && songs && playlists) return `${kind} updated. All available Spotify CSV data is loaded.`;
+  if (audience && !songs && !playlists) return `${kind} updated. Do you also have Songs? You can add Playlists too, if available.`;
+  if (!audience && songs && !playlists) return `${kind} updated. Do you also have Audience? You can add Playlists too, if available.`;
+  if (!audience && !songs && playlists) return `${kind} updated. Do you also have Audience and Songs?`;
+  if (missingAudience) return `${kind} updated. Do you also have Audience?`;
+  if (missingSongs) return `${kind} updated. Do you also have Songs?`;
+  return `${kind} updated. You can also add Playlists, if available.`;
+}
+
+function readSpotifyCsvDate(row: string[], headerMap: Map<string, number>, header: string) {
+  const value = readCsvText(row, headerMap, header);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) throw new Error(`Spotify CSV has an invalid ${header}.`);
+  return value;
+}
+
+function readSpotifyCsvNumber(row: string[], headerMap: Map<string, number>, header: string) {
+  const value = readCsvText(row, headerMap, header).replaceAll(",", "");
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) throw new Error(`Spotify CSV has an invalid ${header}.`);
+  return numeric;
 }
 
 function parseAppleMusicCsvDates(fileName: string) {
@@ -18639,7 +18760,7 @@ function readCsvNumber(row: string[], headerMap: Map<string, number>, header: st
 }
 
 function normalizeCsvHeader(header: string) {
-  return header.trim().replaceAll(".", "").toLowerCase();
+  return header.trim().replaceAll(".", "").replaceAll("_", " ").toLowerCase();
 }
 
 function formatDateForDisplay(date: string) {
@@ -18684,9 +18805,9 @@ function formatPlatformUpdateTimestamp(date: string, importedAt?: string) {
     return fallbackDate;
   }
 
-  const formattedDate = timestamp.toLocaleDateString("de-AT", {
-    day: "2-digit",
-    month: "2-digit",
+  const formattedDate = timestamp.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
     year: "numeric",
     timeZone: "Europe/Vienna"
   });
@@ -18712,6 +18833,7 @@ function formatDashboardPlatformUpdateTimestamp(date: string, importedAt?: strin
     : timestampDate.toLocaleDateString("en-GB", {
         day: "numeric",
         month: "short",
+        year: "numeric",
         timeZone: "UTC"
       });
 
@@ -18728,6 +18850,7 @@ function formatDashboardPlatformUpdateTimestamp(date: string, importedAt?: strin
   const formattedDate = importedTimestamp.toLocaleDateString("en-GB", {
     day: "numeric",
     month: "short",
+    year: "numeric",
     timeZone: "Europe/Vienna"
   });
 
@@ -19416,6 +19539,7 @@ function formatReleaseOffset(offset: number) {
 
 function PlatformStatsSection({
   audienceDashboard,
+  audienceEvolutionHistory,
   description,
   hideHeading = false,
   platforms,
@@ -19425,6 +19549,7 @@ function PlatformStatsSection({
   variant
 }: {
   audienceDashboard?: AudienceDashboardCalculations;
+  audienceEvolutionHistory?: AudienceEvolutionHistory;
   description: string;
   hideHeading?: boolean;
   platforms: PlatformDisplayCard[];
@@ -19496,7 +19621,7 @@ function PlatformStatsSection({
                       !(
                         platform.slug === "apple-music" &&
                         metric.metricName === "last_update_date"
-                      )
+                      ) && !(variant === "dashboard" && platform.slug === "spotify" && (metric.metricName === "all_playlists_listeners" || metric.metricName === "all_playlists_streams"))
                   )
                   .map((metric) => {
                     const dailyDelta = (metric as { dailyDelta?: PlatformMetricDelta })
@@ -19529,7 +19654,7 @@ function PlatformStatsSection({
                       </div>
                     );
                   })}
-                {(["spotify", "deezer", "amazon-music"] as const).includes(platform.slug as "spotify" | "deezer" | "amazon-music") && variant === "full" ? (
+                {(["deezer", "amazon-music"] as const).includes(platform.slug as "deezer" | "amazon-music") && variant === "full" ? (
                   <div className="platform-metric-row platform-info-note">
                     <strong>Historical / manually maintained data</strong>
                     <span>Automatic live API updates are in development.</span>
@@ -19539,7 +19664,6 @@ function PlatformStatsSection({
               {cardAddon}
               </> : null}
             </article>
-  audienceEvolutionHistory,
           );
         })}
       </div>
@@ -19549,7 +19673,6 @@ function PlatformStatsSection({
 
 function RoadmapView({
   campaigns,
-  audienceEvolutionHistory?: AudienceEvolutionHistory;
   onCreatePhase,
   onDeletePhase,
   onOpenMarketing,

@@ -393,14 +393,26 @@ async function refreshYouTubeMusicMetrics(workspaceId: string): Promise<MetricCo
       ...(currentRelease
         ? [
             {
+              metricName: "current_release_name",
+              metricUnit: "text",
+              metricValue: 0,
+              notes: cleanMusicTitle(currentRelease.snippet?.title ?? "Current release")
+            },
+            {
+              metricName: "current_release_published_at",
+              metricUnit: "date",
+              metricValue: 0,
+              notes: String(currentRelease.snippet?.publishedAt ?? "").slice(0, 10)
+            },
+            {
               contentExternalId: currentRelease.id,
-              contentTitle: cleanAsciiTitle(currentRelease.snippet?.title ?? "Current release"),
+              contentTitle: cleanMusicTitle(currentRelease.snippet?.title ?? "Current release"),
               contentType: "track",
               contentUrl: `https://music.youtube.com/watch?v=${currentRelease.id}`,
               metricName: "current_release_plays",
               metricUnit: "plays",
               metricValue: Number(currentRelease.statistics?.viewCount ?? 0),
-              notes: cleanAsciiTitle(currentRelease.snippet?.title ?? "Current release")
+              notes: cleanMusicTitle(currentRelease.snippet?.title ?? "Current release")
             }
           ]
         : [])
@@ -817,4 +829,8 @@ function parseYouTubeDurationSeconds(duration: string) {
 
 function cleanAsciiTitle(title: string) {
   return title.replace(/[^\x20-\x7E]/g, "").replace(/\s+/g, " ").trim();
+}
+
+function cleanMusicTitle(title: string) {
+  return title.replace(/\s+/gu, " ").trim();
 }

@@ -41,6 +41,8 @@
     "test:meta-creator-threads-collector:live": "node --experimental-strip-types scripts/run-meta-creator-threads-collector.mjs --apply",
     "test:meta-fstats-facebook-page-collector": "node --experimental-strip-types scripts/test-meta-fstats-facebook-page-collector.mjs",
     "test:platform-last-update": "node scripts/test-platform-last-update.mjs",
+    "test:apple-current-release-resolution": "node --experimental-strip-types scripts/test-apple-current-release-resolution.mjs",
+    "test:audience-aggregation": "node --experimental-strip-types scripts/test-audience-aggregation.mjs",
     "test:meta-creator-instagram-collector:live": "node --experimental-strip-types scripts/run-meta-creator-instagram-collector.mjs --apply",
     "test:oauth-attempts": "node --experimental-strip-types scripts/test-oauth-attempts.mjs",
     "import:youtube": "node scripts/import-youtube-metrics.mjs --apply"

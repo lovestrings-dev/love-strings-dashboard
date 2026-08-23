@@ -1,5 +1,34 @@
 # Decisions
 
+## 2026-08-22 - Spotify for Artists CSV V1 freshness and history
+
+Decision:
+
+- Spotify V1 uses only manual Spotify for Artists CSV uploads. The original files are parsed in the browser, sent only as normalized metrics, and are not stored.
+- Audience Timeline and Songs exports are detected from their validated headers and can be imported independently.
+- Apple Music and Spotify visible freshness use the latest authoritative data date, never the browser upload timestamp. Apple Music keeps its report-end date from the export filename metadata; Spotify uses the latest Audience date and latest Songs release date, then shows the newer of the two.
+- Spotify Audience Evolution stores the first valid observation in each calendar month. Re-importing a covered month replaces that source's monthly points, preventing duplicate graph observations.
+- Spotify Songs uploads store comparable current totals and latest-release snapshots. `Total Catalog Streams` is the sum in that export, not a claim of lifetime Spotify streams.
+
+Reason:
+
+- These exports are data snapshots, and their data dates are more meaningful than the time a user happened to upload them.
+- A monthly chart remains legible while retaining a deterministic history rule.
+
+## 2026-08-22 - CSV operational freshness is separate from data freshness
+
+Decision:
+
+- `import_logs.finished_at` is the workspace-scoped operational timestamp for
+  the last successful Apple Music or Spotify CSV upload. Focus Queue uses this
+  value and says `last upload`.
+- Apple Music `Data as of` remains the imported report-end date. Spotify `Data
+  as of` is only the newest accepted Audience Timeline observation date; Songs
+  release dates are catalog metadata and never freshness dates.
+- A valid repeat Apple import at the same or older report date, or an Audience
+  import at the same or older timeline date, records a successful upload but
+  does not overwrite existing observations or move data freshness backwards.
+
 ## 2026-06-28 - Initial Hosting Direction
 
 Decision:
@@ -994,3 +1023,58 @@ Reason:
   recipient's first membership. That route remains independently authenticated
   and performs all invitation checks before an atomic database transaction and
   active-workspace cookie response.
+
+## 2026-08-22 - Apple Current-Release Cross-Platform Evidence Rule
+
+Decision:
+
+- Apple Music CSV report periods, row order, and import time are not release
+  metadata and must never select the Apple current release.
+- When Apple itself has no release date/order, resolve the current Apple row
+  only from titles present in that uploaded Apple report: use a matching
+  Spotify Songs and YouTube Topic title first; otherwise use a YouTube Topic
+  title only when its persisted publication date is later than Spotify's
+  persisted release date; otherwise use Spotify's title.
+- If none of those candidates exists in the Apple report, retain the prior
+  accepted Apple title or the report's first row as the explicit fallback.
+- Spotify CSV persists its selected release date, and YouTube Topic persists
+  the selected video's publication date. These are evidence fields, not
+  platform-card freshness timestamps.
+- Re-importing the same Apple report remains no-new-data for totals and report
+  freshness, but may reconcile its three derived current-release fields when
+  new cross-platform evidence changes the deterministic answer.
+
+Reason:
+
+- Apple Music CSVs in ArtistDeck provide per-song metrics but no authoritative
+  song release date. Keeping inference constrained to titles in the report and
+  to separately persisted source dates makes the provisional rule inspectable,
+  deterministic, and safe to extend as more platforms are connected.
+
+## 2026-08-22 - Audience Dashboard V1 Estimation Boundary
+
+Decision:
+
+- Dashboard Audience is a derived interpretation layer over existing
+  provider snapshots. It does not write aggregate rows, modify source
+  metrics, or create a new history store.
+- Its product estimation constants are centralized: Facebook Page followers
+  contribute 50%; the smaller Instagram/Threads contribution is 10%; and the
+  smaller YouTube Channel/Topic contribution is 50%.
+- The displayed lower number is explicitly an overlap-adjusted estimate, not
+  measured unique people. The maximum is the unadjusted sum of connected
+  sources, with website active users included only there.
+- Facebook/Meta-linked Instagram is canonical when both Instagram integrations
+  exist. Current-release plays use Spotify's authoritative Songs CSV release
+  title when available and include only music-platform rows whose normalized
+  titles exactly match it.
+- Deltas are shown only when every active contribution has a source-identical
+  observation on or before the previous calendar day; the latest such value is
+  carried forward. No derived zero or partial delta is shown otherwise.
+
+Reason:
+
+- The existing source-attributed daily snapshots are sufficient for a bounded,
+  deterministic V1. They preserve the distinction between authoritative
+  provider data and a transparent product estimate while leaving room for a
+  detailed Audience view and graphs later.

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { resolveAppleCurrentRelease } from "@/lib/apple-current-release";
 import { requireWorkspaceAccess } from "@/lib/server/workspace-owner";
 
 type AppleMusicCsvRow = {
@@ -91,6 +92,45 @@ async function importAppleMusicCsvMetrics(
     .single();
 
   if (accountError) throw accountError;
+
+  const { data: existingReportDates, error: existingReportDatesError } = await supabase
+    .from("platform_metric_snapshots")
+    .select("notes")
+    .eq("workspace_id", workspaceId)
+    .eq("platform_id", platform.id)
+    .eq("platform_account_id", account.id)
+    .eq("source", source)
+    .eq("metric_name", "report_end_date");
+  if (existingReportDatesError) throw existingReportDatesError;
+  const existingReportEndDate = (existingReportDates ?? [])
+    .map((row) => row.notes ?? "")
+    .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date))
+    .sort((first, second) => second.localeCompare(first))[0];
+
+  if (existingReportEndDate && payload.reportEndDate <= existingReportEndDate) {
+    const selectionUpdated =
+      payload.reportEndDate === existingReportEndDate &&
+      (await reconcileCurrentReleaseSelection({
+        accountId: account.id,
+        currentReleaseRow,
+        existingReportEndDate,
+        platformId: platform.id,
+        source,
+        supabase,
+        workspaceId
+      }));
+    const { error: logError } = await supabase.from("import_logs").insert({
+      finished_at: new Date().toISOString(),
+      import_status: "completed",
+      records_inserted: selectionUpdated ? 3 : 0,
+      records_seen: payload.rows.length,
+      source,
+      source_file: fileName,
+      workspace_id: workspaceId
+    });
+    if (logError) throw logError;
+    return { currentReleaseName: currentReleaseRow.song, importedMetrics: selectionUpdated ? 3 : 0, noNewData: true, reportEndDate: existingReportEndDate, selectionUpdated, songs: payload.rows.length, totalPlays: null, totalShazams: null };
+  }
 
   const songIdsByTitle = new Map<string, string>();
 
@@ -260,6 +300,7 @@ async function importAppleMusicCsvMetrics(
     currentReleaseName: currentReleaseRow.song,
     importedMetrics: importedRows.length,
     reportEndDate: payload.reportEndDate,
+    noNewData: false,
     songs: payload.rows.length,
     totalPlays,
     totalShazams
@@ -271,42 +312,124 @@ async function resolveCurrentReleaseName(
   payload: AppleMusicImportPayload,
   workspaceId: string
 ) {
-  const songsByNormalizedTitle = new Map(
-    payload.rows.map((row) => [normalizeSongTitle(row.song), row.song])
-  );
-  const { data: releasedCampaigns, error } = await supabase
-    .from("marketing_campaigns")
-    .select("title,release_date")
-    .eq("workspace_id", workspaceId)
-    .eq("campaign_kind", "song")
-    .lte("release_date", payload.reportEndDate)
-    .order("release_date", { ascending: false });
+  const [spotify, youtubeTopic] = await Promise.all([
+    getPlatformReleaseEvidence(supabase, workspaceId, {
+      dateMetricName: "latest_release_date",
+      platformSlug: "spotify",
+      source: "spotify-songs-csv",
+      titleMetricNames: ["latest_release_name", "latest_release_streams"]
+    }),
+    getPlatformReleaseEvidence(supabase, workspaceId, {
+      dateMetricName: "current_release_published_at",
+      platformSlug: "youtube-music",
+      source: "youtube-data-api",
+      titleMetricNames: ["current_release_name", "current_release_plays"]
+    })
+  ]);
 
-  if (error) throw error;
-
-  for (const campaign of releasedCampaigns ?? []) {
-    const matchingSong = songsByNormalizedTitle.get(
-      normalizeSongTitle(campaign.title)
-    );
-
-    if (matchingSong) {
-      return matchingSong;
-    }
-  }
-
-  const requestedRelease = songsByNormalizedTitle.get(
-    normalizeSongTitle(payload.currentReleaseName ?? "")
-  );
-
-  return requestedRelease ?? payload.rows[0].song;
+  return resolveAppleCurrentRelease({
+    appleSongs: payload.rows.map((row) => row.song),
+    fallbackTitle: payload.currentReleaseName,
+    spotify,
+    youtubeTopic
+  }).title;
 }
 
-function normalizeSongTitle(title: string) {
-  return title
-    .normalize("NFKD")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
+async function getPlatformReleaseEvidence(
+  supabase: ReturnType<typeof createServiceSupabaseClient>,
+  workspaceId: string,
+  input: {
+    dateMetricName: string;
+    platformSlug: string;
+    source: string;
+    titleMetricNames: string[];
+  }
+) {
+  const { data: platform, error: platformError } = await supabase
+    .from("platforms")
+    .select("id")
+    .eq("slug", input.platformSlug)
+    .maybeSingle();
+  if (platformError) throw platformError;
+  if (!platform) return null;
+
+  const { data: rows, error } = await supabase
+    .from("platform_metric_snapshots")
+    .select("imported_at,metric_name,notes,snapshot_date")
+    .eq("workspace_id", workspaceId)
+    .eq("platform_id", platform.id)
+    .eq("source", input.source)
+    .in("metric_name", [...input.titleMetricNames, input.dateMetricName])
+    .order("snapshot_date", { ascending: false })
+    .order("imported_at", { ascending: false });
+  if (error) throw error;
+
+  const title = input.titleMetricNames
+    .map((metricName) => rows?.find((row) => row.metric_name === metricName)?.notes)
+    .find((value): value is string => Boolean(value));
+  const date = rows?.find((row) => row.metric_name === input.dateMetricName)?.notes;
+
+  return title ? { date, title } : null;
+}
+
+async function reconcileCurrentReleaseSelection({
+  accountId,
+  currentReleaseRow,
+  existingReportEndDate,
+  platformId,
+  source,
+  supabase,
+  workspaceId
+}: {
+  accountId: string;
+  currentReleaseRow: AppleMusicCsvRow;
+  existingReportEndDate: string;
+  platformId: string;
+  source: string;
+  supabase: ReturnType<typeof createServiceSupabaseClient>;
+  workspaceId: string;
+}) {
+  const { data: existingRows, error: existingRowsError } = await supabase
+    .from("platform_metric_snapshots")
+    .select("notes")
+    .eq("workspace_id", workspaceId)
+    .eq("platform_id", platformId)
+    .eq("platform_account_id", accountId)
+    .eq("source", source)
+    .eq("snapshot_date", existingReportEndDate)
+    .eq("metric_name", "current_release_name")
+    .maybeSingle();
+  if (existingRowsError) throw existingRowsError;
+  if (existingRows?.notes === currentReleaseRow.song) return false;
+
+  const rows: AppleMusicMetricRow[] = [
+    { metric_name: "current_release_name", metric_unit: "text", metric_value: 0, notes: currentReleaseRow.song },
+    { metric_name: "current_release_plays", metric_unit: "plays", metric_value: currentReleaseRow.plays, notes: currentReleaseRow.song },
+    { metric_name: "current_release_shazams", metric_unit: "shazams", metric_value: currentReleaseRow.shazams, notes: currentReleaseRow.song }
+  ];
+
+  for (const row of rows) {
+    const { error } = await supabase.from("platform_metric_snapshots").upsert(
+      {
+        metric_name: row.metric_name,
+        metric_unit: row.metric_unit,
+        metric_value: row.metric_value,
+        notes: row.notes,
+        platform_account_id: accountId,
+        platform_id: platformId,
+        snapshot_date: existingReportEndDate,
+        source,
+        workspace_id: workspaceId
+      },
+      {
+        onConflict:
+          "workspace_id,snapshot_date,platform_id,platform_account_id,content_post_id,song_id,release_id,metric_name,source"
+      }
+    );
+    if (error) throw error;
+  }
+
+  return true;
 }
 
 async function findOrCreateSong(
