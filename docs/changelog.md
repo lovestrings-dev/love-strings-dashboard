@@ -2,6 +2,39 @@
 
 This file tracks app versions that are useful to discuss, test, and deploy. It is for product-level changes, not every small database edit.
 
+## Beta 1.23 — ArtistDeck audience and CSV analytics (Prepared for user push)
+
+Headline: **ArtistDeck now turns artist-exported Spotify and Apple Music data
+into current platform statistics and a cross-platform Audience view.**
+
+Includes:
+
+- Spotify for Artists CSV imports for Audience Timeline, Songs, and Playlists,
+  recognized from validated file content rather than filename. The Spotify card
+  now shows followers, monthly active listeners, latest-release streams, total
+  catalogue streams, and playlist listeners/streams, with protected invalid-file
+  and no-new-data handling.
+- Apple Music CSV freshness now distinguishes `Data as of` from the successful
+  upload time. Its current release is resolved only from matching titles in the
+  Apple report using persisted Spotify/YouTube Topic release evidence; Apple
+  report dates, row order, and import time are not treated as release dates.
+- A shared, overlap-adjusted Audience calculation appears as a compact Dashboard
+  2×2 card and a detailed Platforms card. It includes Estimated Total Audience,
+  Current Release Plays, Total Catalogue Plays, and feedback, while preserving
+  same-release comparison and provider-aware daily carry-forward semantics.
+- Platforms now provides daily Audience Evolution graphs reconstructed from
+  existing provider snapshots; no duplicate aggregate-history store was added.
+  Spotify Audience history is bounded to one deterministic observation per
+  metric/month rather than retaining a raw daily warehouse.
+- CSV card controls and freshness labels were polished for stable mobile layout,
+  and both Audience renderers retain their intended 2×2 layout on phone widths.
+
+Deferred:
+
+- The investigated YouTube OAC/YouTube Music architecture, Topic rename, new
+  OAuth scopes, and OAC-to-music mapping remain future work; this beta makes no
+  claim of new YouTube Music/OAC support.
+
 ## Beta 1.22 — ArtistDeck onboarding and workspace lifecycle (Prepared for user push)
 
 Headline: **ArtistDeck now has one clear, ordinary-invitation path from Platform
