@@ -2888,6 +2888,8 @@ h2 {
 
 .platform-section {
   margin-bottom: 20px;
+  min-width: 0;
+  width: 100%;
 }
 
 .dashboard-initial-loading {
@@ -2951,6 +2953,8 @@ h2 {
   display: grid;
   gap: 14px;
   grid-template-columns: repeat(5, minmax(190px, 1fr));
+  min-width: 0;
+  width: 100%;
 }
 
 .platform-grid-dashboard {
@@ -3088,7 +3092,7 @@ h2 {
 }
 
 .dashboard-campaign-card-empty-current h3 {
-  color: #c3372d;
+  color: var(--text);
 }
 
 .dashboard-campaign-card h3 {
@@ -3127,8 +3131,10 @@ h2 {
   font-weight: 700;
 }
 
-.dashboard-campaign-card .campaign-progress-strip {
+.dashboard-campaign-card .campaign-progress-strip,
+.dashboard-production-card .campaign-progress-strip {
   border-bottom: 0;
+  margin-top: 6px;
   padding: 0;
 }
 
@@ -3199,7 +3205,7 @@ h2 {
 }
 
 .dashboard-event-card .dashboard-event-empty {
-  color: #b73131;
+  color: var(--muted);
   font-size: 13px;
   font-weight: 800;
   line-height: 1.35;
@@ -3360,6 +3366,15 @@ h2 {
 
 .dashboard-focus-task-card.is-status-menu-open {
   z-index: 2;
+}
+
+.fq-segment:has(.dashboard-focus-task-card.is-status-menu-open) {
+  position: relative;
+  z-index: 3;
+}
+
+.dashboard-focus-task-card.is-status-menu-open .dashboard-focus-task-topline {
+  overflow: visible;
 }
 
 .dashboard-focus-task-card-marketing {
@@ -3786,11 +3801,6 @@ h2 {
   color: var(--accent);
 }
 
-.dashboard-production-card .campaign-progress-strip {
-  border-bottom: 0;
-  padding: 0;
-}
-
 .dashboard-production-progress-row {
   align-items: center;
   display: flex;
@@ -3884,6 +3894,8 @@ h2 {
   display: grid;
   gap: 16px;
   min-height: 238px;
+  min-width: 0;
+  max-width: 100%;
   padding: 16px;
 }
 
@@ -5330,7 +5342,7 @@ h2 {
 }
 
 .event-summary-card .event-summary-empty {
-  color: #b73131;
+  color: var(--muted);
   font-size: 13px;
   font-weight: 800;
   line-height: 1.35;
@@ -8689,12 +8701,25 @@ h2 {
   }
 
   .dashboard-production-card-header {
+    align-items: start;
     display: grid;
+    gap: 8px;
+    grid-template-columns: 48px minmax(0, 1fr) 76px;
+  }
+
+  .dashboard-production-title-row {
+    display: contents;
+  }
+
+  .dashboard-production-title-row > div {
+    min-width: 0;
   }
 
   .dashboard-production-card .dashboard-campaign-date {
     justify-self: stretch;
+    min-width: 0;
     text-align: left;
+    width: 100%;
   }
 
   .dashboard-other-tasks-header {

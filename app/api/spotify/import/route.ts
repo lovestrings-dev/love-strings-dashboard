@@ -1,8 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireWorkspaceAccess } from "@/lib/server/workspace-owner";
+import { selectSpotifyAudienceHistory, type SpotifyAudienceHistoryRow } from "@/lib/spotify-audience-history";
 
-type AudienceRow = { date: string; followers: number; listeners: number; monthlyActiveListeners: number; monthlyListeners: number; playlistAdds: number; saves: number; streams: number; superListeners: number };
+type AudienceRow = SpotifyAudienceHistoryRow;
 type SongRow = { listeners: number; releaseDate: string; saves: number; song: string; streams: number };
 type PlaylistRow = { listeners: number; streams: number; title: string };
 type Payload = { audienceRows?: AudienceRow[]; fileName?: string; playlistsRows?: PlaylistRow[]; songsRows?: SongRow[] };
@@ -39,12 +40,19 @@ async function importSpotify(payload: Payload, workspaceId: string) {
   let kind = "";
   if (payload.audienceRows) {
     kind = "Audience Timeline";
-    const monthly = firstObservationPerMonth(payload.audienceRows);
+    const monthly = selectSpotifyAudienceHistory(payload.audienceRows);
     authoritativeDate = payload.audienceRows.at(-1)!.date;
     const latest = payload.audienceRows.at(-1)!;
     const { data: existingDates, error: existingDatesError } = await supabase.from("platform_metric_snapshots").select("notes").eq("workspace_id", workspaceId).eq("platform_id", platform.id).eq("platform_account_id", account.id).eq("source", "spotify-audience-current-csv").eq("metric_name", "audience_data_date");
     if (existingDatesError) throw existingDatesError;
     const existingDate = (existingDates ?? []).map((row) => row.notes ?? "").filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)).sort((a, b) => b.localeCompare(a))[0];
+    const historyStartDate = monthly[0]?.date;
+    if (historyStartDate) {
+      // Remove any pre-meaningful rows written by the former zero-padded import
+      // behavior. Repeating the same lifetime export cannot restore them.
+      const { error: cleanupError } = await supabase.from("platform_metric_snapshots").delete().eq("workspace_id", workspaceId).eq("platform_id", platform.id).eq("platform_account_id", account.id).eq("source", sourceAudience).lt("snapshot_date", historyStartDate);
+      if (cleanupError) throw cleanupError;
+    }
     if (existingDate && authoritativeDate <= existingDate) {
       const { error: logError } = await supabase.from("import_logs").insert({ finished_at: new Date().toISOString(), import_status: "completed", records_inserted: 0, records_seen: payload.audienceRows.length, source: sourceAudience, source_file: payload.fileName ?? "Spotify CSV", workspace_id: workspaceId });
       if (logError) throw logError;
@@ -92,7 +100,6 @@ async function importSpotify(payload: Payload, workspaceId: string) {
 }
 
 function metric(workspace_id: string, platform_id: string, platform_account_id: string, snapshot_date: string, source: string, metric_name: string, metric_value: number, notes: string | null = null) { return { metric_name, metric_unit: metric_name.includes("date") ? "date" : "count", metric_value, notes, platform_account_id, platform_id, snapshot_date, source, workspace_id }; }
-function firstObservationPerMonth(rows: AudienceRow[]) { const byMonth = new Map<string, AudienceRow>(); for (const row of rows) if (!byMonth.has(row.date.slice(0, 7))) byMonth.set(row.date.slice(0, 7), row); return [...byMonth.values()]; }
 function getMonthEndDate(date: string) { const [year, month] = date.slice(0, 7).split("-").map(Number); return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10); }
 function validDate(value: string) { const parsed = new Date(`${value}T00:00:00Z`); return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value; }
 function validate(payload: Payload) {

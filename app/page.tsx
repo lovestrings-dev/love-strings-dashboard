@@ -51,6 +51,7 @@ import {
   type AudienceDashboardCalculations,
   type AudienceMetricRow
 } from "@/lib/audience-aggregation";
+import { getSpotifyAudienceHistoryStartDate } from "@/lib/spotify-audience-history";
 import { defaultWorkspaceId } from "@/lib/workspace";
 import { MetaPageConnectionSettings } from "./meta-page-connection-settings";
 import {
@@ -674,7 +675,7 @@ const platformStats = [
   }
 ];
 
-const appVersionLabel = "Beta 1.23";
+const appVersionLabel = "Beta 1.24";
 const defaultAppLogoUrl = "/artistdeck-logo.png";
 
 const sections = [
@@ -3674,6 +3675,12 @@ function getDashboardFocusQueue(
   );
   const activeOtherFocusItems = activeOtherTasks.map(toOtherFocusQueueItem);
   const eligibleOtherFocusItems = eligibleOtherTasks.map(toOtherFocusQueueItem);
+  const upcomingOtherFocusItems = activeOtherTasks
+    .filter((task) => {
+      const dueDate = toIsoDate(task.dueDate);
+      return Boolean(dueDate && dueDate > getWorkspaceDateKey(workspaceTimeZone));
+    })
+    .map(toOtherFocusQueueItem);
   const otherHistoryTasks = otherTasks
     .filter((task) => task.status === "done" || task.status === "irrelevant")
     .sort(
@@ -3688,7 +3695,11 @@ function getDashboardFocusQueue(
     primaryProductionTask,
     ...utilityTasks
   ].filter((task): task is FocusQueueItem => Boolean(task));
-  const visibleTasks = [...coreVisibleTasks, ...eligibleOtherFocusItems].slice(0, 5);
+  const visibleTasks = [
+    ...coreVisibleTasks,
+    ...eligibleOtherFocusItems,
+    ...upcomingOtherFocusItems
+  ].slice(0, 5);
 
   return {
     allTasks: [
@@ -8364,7 +8375,7 @@ export default function Home() {
           <div className="brand-mark">
             <div>
               <strong>{activeWorkspaceName}</strong>
-              <span>Sprint Dashboard</span>
+              <span>ArtistDeck</span>
             </div>
 
             {appLogoUrl ? (
@@ -9957,7 +9968,7 @@ function AboutDashboardView({
           <p className="eyebrow">Current version</p>
           <h2>{appVersionLabel}</h2>
           <p>
-            Love Strings Sprint Dashboard is an internal planning and tracking
+            ArtistDeck is an internal planning and tracking
             tool. Its information is provided as is and should be reviewed before
             it is used for financial, contractual, or publishing decisions.
           </p>
@@ -16166,12 +16177,12 @@ function DashboardCampaignPreview({
   productionSongs: ProductionSongConfig[];
 }) {
   const cards: Partial<Record<DashboardCardId, ReactNode>> = {
-    "marketing.benchmark-song": <DashboardCampaignCard campaign={preview.benchmark} emptyText="No benchmark campaign yet." label="Benchmark campaign" productionSongs={productionSongs} showDate={false} showTasks={false} />,
-    "marketing.benchmark-general": <DashboardCampaignCard campaign={preview.benchmarkGeneral} emptyText="No benchmark general campaign yet." label="Benchmark general" productionSongs={productionSongs} showDate={false} showTasks={false} />,
-    "marketing.current-song": <DashboardCampaignCard campaign={preview.current} emptyText="No campaign is currently running." label="Current" productionSongs={productionSongs} />,
-    "marketing.current-general": <DashboardCampaignCard campaign={preview.currentGeneral} emptyText="No general campaign is currently running." label="Current general" productionSongs={productionSongs} />,
-    "marketing.next-song": <DashboardCampaignCard campaign={preview.next} emptyText="No upcoming campaign is scheduled." label="Next" productionSongs={productionSongs} />,
-    "marketing.next-general": <DashboardCampaignCard campaign={preview.nextGeneral} emptyText="No upcoming general campaign is scheduled." label="Next general" productionSongs={productionSongs} />
+    "marketing.benchmark-song": <DashboardCampaignCard campaign={preview.benchmark} emptyText="No benchmark Song Campaign yet." label="Benchmark Song Campaign" productionSongs={productionSongs} showDate={false} showTasks={false} />,
+    "marketing.benchmark-general": <DashboardCampaignCard campaign={preview.benchmarkGeneral} emptyText="No benchmark General Campaign yet." label="Benchmark General Campaign" productionSongs={productionSongs} showDate={false} showTasks={false} />,
+    "marketing.current-song": <DashboardCampaignCard campaign={preview.current} emptyText="No current Song Campaign yet." label="Current Song Campaign" productionSongs={productionSongs} />,
+    "marketing.current-general": <DashboardCampaignCard campaign={preview.currentGeneral} emptyText="No current General Campaign yet." label="Current General Campaign" productionSongs={productionSongs} />,
+    "marketing.next-song": <DashboardCampaignCard campaign={preview.next} emptyText="No next Song Campaign yet." label="Next Song Campaign" productionSongs={productionSongs} />,
+    "marketing.next-general": <DashboardCampaignCard campaign={preview.nextGeneral} emptyText="No next General Campaign yet." label="Next General Campaign" productionSongs={productionSongs} />
   };
   return (
     <section className="dashboard-campaigns module-accent module-accent-marketing" aria-label="Campaign preview">
@@ -16200,6 +16211,7 @@ function DashboardCampaignCard({
   const [isTaskListOpen, setIsTaskListOpen] = useState(false);
 
   if (!campaign) {
+    const isGeneralCampaign = label.includes("General Campaign");
     return (
       <article
         className={`dashboard-campaign-card module-accent module-accent-marketing dashboard-campaign-card-empty${
@@ -16208,8 +16220,15 @@ function DashboardCampaignCard({
           label === "Current" ? " dashboard-campaign-card-empty-current" : ""
         }`}
       >
-        <p className="eyebrow">{label}</p>
-        <h3>{emptyText}</h3>
+        <div className="dashboard-benchmark-title-row">
+          <span className="dashboard-production-art dashboard-production-art-empty">
+            {isGeneralCampaign ? <Megaphone size={18} aria-hidden /> : <Music2 size={18} aria-hidden />}
+          </span>
+          <div>
+            <p className="eyebrow">{label}</p>
+            <h3>{emptyText}</h3>
+          </div>
+        </div>
       </article>
     );
   }
@@ -16220,13 +16239,18 @@ function DashboardCampaignCard({
   const unfinishedTasks = getNextCampaignTasks(days);
   const visibleTasks = isTaskListOpen ? unfinishedTasks : unfinishedTasks.slice(0, 3);
   const hiddenTaskCount = unfinishedTasks.length - visibleTasks.length;
-  const displayedCampaignTitle =
-    getProductionSongForRelease(campaign.releaseTitle, productionSongs)?.title ??
-    campaign.releaseTitle;
-  const campaignAlbumArtUrl = getProductionAlbumArtForRelease(
-    campaign.releaseTitle,
-    productionSongs
-  );
+  const isGeneralCampaign = (campaign.campaignKind ?? "song") === "general";
+  const linkedProductionSong = isGeneralCampaign
+    ? null
+    : productionSongs.find(
+        (song) => campaign.productionSongDbId && song.dbId === campaign.productionSongDbId
+      ) ?? getProductionSongForRelease(campaign.releaseTitle, productionSongs);
+  const displayedCampaignTitle = isGeneralCampaign
+    ? campaign.releaseTitle
+    : linkedProductionSong?.title ?? campaign.releaseTitle;
+  const campaignAlbumArtUrl = isGeneralCampaign
+    ? campaign.albumArtUrl
+    : linkedProductionSong?.albumArtUrl ?? "";
   const campaignCompletion = calculateCampaignCompletion(days);
 
   return (
@@ -16238,21 +16262,19 @@ function DashboardCampaignCard({
       }
     >
       <div className="dashboard-campaign-card-header">
-        <div className={showTasks ? undefined : "dashboard-benchmark-title-row"}>
-          {!showTasks ? (
-            campaignAlbumArtUrl ? (
-              <span
-                aria-label={`${displayedCampaignTitle} album art preview`}
-                className="dashboard-production-art"
-                role="img"
-                style={{ backgroundImage: `url("${getDashboardImageUrl(campaignAlbumArtUrl, 320)}")` }}
-              />
-            ) : (
-              <span className="dashboard-production-art dashboard-production-art-empty">
-                <Music2 size={18} aria-hidden />
-              </span>
-            )
-          ) : null}
+        <div className="dashboard-benchmark-title-row">
+          {campaignAlbumArtUrl ? (
+            <span
+              aria-label={`${displayedCampaignTitle} album art preview`}
+              className="dashboard-production-art"
+              role="img"
+              style={{ backgroundImage: `url("${getDashboardImageUrl(campaignAlbumArtUrl, 320)}")` }}
+            />
+          ) : (
+            <span className="dashboard-production-art dashboard-production-art-empty">
+              {isGeneralCampaign ? <Megaphone size={18} aria-hidden /> : <Music2 size={18} aria-hidden />}
+            </span>
+          )}
           <div>
             <p className="eyebrow">{label}</p>
             <h3>
@@ -17173,7 +17195,7 @@ function DashboardProductionPreview({
 }) {
   const cards: Partial<Record<DashboardCardId, ReactNode>> = {
     "production.benchmark": <DashboardProductionCard compact emptyText="No benchmark production song yet." label="Benchmark production" song={preview.benchmark} />,
-    "production.current-song": <DashboardProductionCard emptyText="No current production song yet." label="Current song" song={preview.current} />,
+    "production.current-song": <DashboardProductionCard emptyText="No current production song yet." label="Current Song in Production" song={preview.current} />,
     "production.next-song": <DashboardProductionCard emptyText="No next production song yet." label="Next song" song={preview.next} />
   };
   return (
@@ -17502,10 +17524,19 @@ function PlatformsView({
     "total_plays",
     []
   );
-  const spotifyFollowersTrend = getPlatformMetricTrend(platformMetricRows, "spotify", "followers", [], "spotify-audience-csv");
-  const spotifyMonthlyActiveTrend = getPlatformMetricTrend(platformMetricRows, "spotify", "monthly_active_listeners", [], "spotify-audience-csv");
-  const spotifyListenersTrend = getPlatformMetricTrend(platformMetricRows, "spotify", "listeners", [], "spotify-audience-csv");
-  const spotifyStreamsTrend = getPlatformMetricTrend(platformMetricRows, "spotify", "streams", [], "spotify-audience-csv");
+  const spotifyAudienceHistoryStartDate = getSpotifyAudienceHistoryStartDate(
+    platformMetricRows
+      .filter(
+        (row) =>
+          getSingle(row.platforms)?.slug === "spotify" &&
+          row.source === "spotify-audience-csv"
+      )
+      .map((row) => ({ date: row.snapshot_date, [row.metric_name]: row.metric_value }))
+  );
+  const spotifyFollowersTrend = getPlatformMetricTrend(platformMetricRows, "spotify", "followers", [], "spotify-audience-csv", spotifyAudienceHistoryStartDate);
+  const spotifyMonthlyActiveTrend = getPlatformMetricTrend(platformMetricRows, "spotify", "monthly_active_listeners", [], "spotify-audience-csv", spotifyAudienceHistoryStartDate);
+  const spotifyListenersTrend = getPlatformMetricTrend(platformMetricRows, "spotify", "listeners", [], "spotify-audience-csv", spotifyAudienceHistoryStartDate);
+  const spotifyStreamsTrend = getPlatformMetricTrend(platformMetricRows, "spotify", "streams", [], "spotify-audience-csv", spotifyAudienceHistoryStartDate);
   const spotifyLastUpdate = getSpotifyLastUpdateDate(platformMetricRows);
   const appleMusicLastUpdate = getAppleMusicLastUpdateDate(
     platformStatsData,
@@ -18029,7 +18060,8 @@ function getPlatformMetricTrend(
   platformSlug: string,
   metricName: string,
   manualHistory: MetricTrendPoint[],
-  source?: string
+  source?: string,
+  startDate?: string
 ) {
   const pointsByDate = new Map<string, MetricTrendPoint>();
 
@@ -18043,6 +18075,7 @@ function getPlatformMetricTrend(
         getSingle(row.platforms)?.slug === platformSlug &&
         row.metric_name === metricName &&
         (!source || row.source === source) &&
+        (!startDate || row.snapshot_date >= startDate) &&
         (manualHistory.length === 0 || row.snapshot_date > "2026-06-14")
     )
     .forEach((row) => {
@@ -18439,8 +18472,8 @@ function formatTrendDate(date: string) {
   const parsedDate = new Date(`${date}T00:00:00Z`);
 
   return parsedDate.toLocaleDateString("en-US", {
-    day: "numeric",
-    month: "short"
+    month: "short",
+    year: "numeric"
   });
 }
 

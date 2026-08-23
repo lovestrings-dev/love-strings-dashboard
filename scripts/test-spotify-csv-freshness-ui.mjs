@@ -19,7 +19,7 @@ assert.match(appleRoute, /payload\.reportEndDate <= existingReportEndDate/);
 assert.match(appleRoute, /noNewData: true/);
 assert.match(spotifyRoute, /authoritativeDate <= existingDate/);
 assert.match(spotifyRoute, /noNewData: true/);
-assert.match(spotifyRoute, /firstObservationPerMonth/);
+assert.match(spotifyRoute, /selectSpotifyAudienceHistory/);
 assert.match(spotifyRoute, /spotify-playlists-csv/);
 assert.match(page, /No new data dates were found/);
 console.log("Spotify CSV freshness UI checks passed.");

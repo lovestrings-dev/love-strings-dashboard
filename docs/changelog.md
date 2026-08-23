@@ -2,6 +2,39 @@
 
 This file tracks app versions that are useful to discuss, test, and deploy. It is for product-level changes, not every small database edit.
 
+## Beta 1.24 — ArtistDeck mobile stability and trustworthy Spotify evolution (Prepared for user push)
+
+Headline: **ArtistDeck makes the daily Dashboard steadier on mobile, presents
+campaigns more clearly, and keeps Spotify Evolution anchored to real history.**
+
+Includes:
+
+- Mobile Platforms layout is constrained to its module width to prevent Chrome
+  viewport overflow/movement. Dashboard Current Song and campaign cards have a
+  more compact, consistent layout, including clear six-pixel progress-strip
+  separation.
+- Dashboard campaign cards consistently use Production artwork for Song
+  Campaigns, Marketing artwork for General Campaigns, and the appropriate
+  placeholder when the corresponding campaign does not exist. Empty messages
+  now distinguish benchmark, current, and next Song/General Campaign states.
+- ArtistDeck replaces remaining user-facing legacy Sprint Dashboard wording;
+  the Current Song in Production card is named accordingly. Normal Marketing
+  and Events empty states are neutral rather than warning-red.
+- Focus Queue menus stack above adjacent cards, and unfinished upcoming Other
+  Tasks can fill otherwise unused slots up to the existing five-slot limit
+  without displacing current, due, or overdue work.
+- Spotify Audience imports discard artificial leading all-zero history, retain
+  the first meaningful observation (including mid-month), preserve later real
+  zero values, and keep deterministic monthly storage. Evolution start-date
+  detection is order-independent, so newest-first UI rows retain the meaningful
+  May–August Love Strings history rather than collapsing to one August point.
+
+Post-deploy checks:
+
+- Real-iPhone confirmation remains required for Platforms horizontal stability
+  and Focus Queue menu layering. Those original issues were deployment/device
+  specific and are not claimed as production-validated by this release prep.
+
 ## Beta 1.23 — ArtistDeck audience and CSV analytics (Prepared for user push)
 
 Headline: **ArtistDeck now turns artist-exported Spotify and Apple Music data
