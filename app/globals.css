@@ -38,6 +38,8 @@ body {
 
 html,
 body {
+  inline-size: 100%;
+  max-inline-size: 100%;
   max-width: 100%;
   overflow-x: clip;
 }
@@ -127,7 +129,10 @@ button {
 .dashboard-shell {
   display: grid;
   grid-template-columns: 290px minmax(0, 1fr);
+  inline-size: 100%;
   min-height: 100vh;
+  min-width: 0;
+  max-inline-size: 100%;
   max-width: 100%;
   overflow-x: clip;
 }
@@ -2080,6 +2085,7 @@ button {
 }
 
 .workspace {
+  inline-size: 100%;
   max-width: 100%;
   min-width: 0;
   overflow-x: clip;
@@ -3248,6 +3254,7 @@ h2 {
   box-shadow: var(--shadow);
   display: grid;
   gap: 0;
+  position: relative;
 }
 
 .fq-segment {
@@ -3368,7 +3375,8 @@ h2 {
   z-index: 2;
 }
 
-.fq-segment:has(.dashboard-focus-task-card.is-status-menu-open) {
+.fq-segment.is-status-menu-open {
+  overflow: visible;
   position: relative;
   z-index: 3;
 }
@@ -3935,6 +3943,8 @@ h2 {
   font-size: 16px;
   line-height: 1.2;
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .platform-card h3 a {
@@ -8028,7 +8038,7 @@ h2 {
 
   .dashboard-shell {
     align-content: start;
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: max-content max-content;
   }
 
@@ -8263,7 +8273,7 @@ h2 {
   }
 
   .fq-segment {
-    overflow-x: clip;
+    overflow: visible;
     padding: 12px;
   }
 
@@ -8466,7 +8476,7 @@ h2 {
   body,
   .dashboard-shell,
   .workspace {
-    max-width: 100vw;
+    max-width: 100%;
     width: 100%;
   }
 
@@ -8954,7 +8964,7 @@ h2 {
   }
 
   .platform-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .platform-grid-dashboard {

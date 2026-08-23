@@ -16594,7 +16594,7 @@ function DashboardFocusQueueCard({
     isTaskListOpen && completedOtherTasks.length > 0 && showCompletedOtherTasks;
   const mainSegmentClass = `fq-segment ${
     isTaskListOpen ? "fq-segment-first" : "fq-segment-only"
-  }`;
+  }${openStatusTaskId ? " is-status-menu-open" : ""}`;
   const detailsSegmentClass = `fq-segment ${
     isCompletedSegmentVisible ? "fq-segment-middle" : "fq-segment-last"
   }`;

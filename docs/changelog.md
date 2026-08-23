@@ -10,9 +10,11 @@ campaigns more clearly, and keeps Spotify Evolution anchored to real history.**
 Includes:
 
 - Mobile Platforms layout is constrained to its module width to prevent Chrome
-  viewport overflow/movement. Dashboard Current Song and campaign cards have a
-  more compact, consistent layout, including clear six-pixel progress-strip
-  separation.
+  viewport overflow/movement. The Beta 1.24 iPhone repair removes the
+  mobile-root `100vw` constraint and makes the app shell, workspace, and
+  single-column Platforms grid shrinkable. Dashboard Current Song and campaign
+  cards have a more compact, consistent layout, including clear six-pixel
+  progress-strip separation.
 - Dashboard campaign cards consistently use Production artwork for Song
   Campaigns, Marketing artwork for General Campaigns, and the appropriate
   placeholder when the corresponding campaign does not exist. Empty messages
@@ -23,6 +25,9 @@ Includes:
 - Focus Queue menus stack above adjacent cards, and unfinished upcoming Other
   Tasks can fill otherwise unused slots up to the existing five-slot limit
   without displacing current, due, or overdue work.
+- The iPhone repair removes the mobile Focus Queue segment clip boundary and
+  gives the actual open segment explicit stacking above the following section,
+  so a last-task status menu can remain visible and tappable.
 - Spotify Audience imports discard artificial leading all-zero history, retain
   the first meaningful observation (including mid-month), preserve later real
   zero values, and keep deterministic monthly storage. Evolution start-date
@@ -31,9 +36,10 @@ Includes:
 
 Post-deploy checks:
 
-- Real-iPhone confirmation remains required for Platforms horizontal stability
-  and Focus Queue menu layering. Those original issues were deployment/device
-  specific and are not claimed as production-validated by this release prep.
+- Real-iPhone confirmation remains required after redeploy for Platforms
+  horizontal stability and Focus Queue menu layering. Those original issues
+  were deployment/device specific and are not claimed as production-validated
+  by local release preparation.
 
 ## Beta 1.23 — ArtistDeck audience and CSV analytics (Prepared for user push)
 

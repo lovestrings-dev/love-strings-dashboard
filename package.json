@@ -42,6 +42,7 @@
     "test:meta-fstats-facebook-page-collector": "node --experimental-strip-types scripts/test-meta-fstats-facebook-page-collector.mjs",
     "test:platform-last-update": "node scripts/test-platform-last-update.mjs",
     "test:spotify-audience-history": "node --experimental-strip-types scripts/test-spotify-audience-history.mjs",
+    "test:iphone-layout-regressions": "node scripts/test-iphone-layout-regressions.mjs",
     "test:apple-current-release-resolution": "node --experimental-strip-types scripts/test-apple-current-release-resolution.mjs",
     "test:audience-aggregation": "node --experimental-strip-types scripts/test-audience-aggregation.mjs",
     "test:meta-creator-instagram-collector:live": "node --experimental-strip-types scripts/run-meta-creator-instagram-collector.mjs --apply",
