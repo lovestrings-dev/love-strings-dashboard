@@ -8402,19 +8402,21 @@ export default function Home() {
           </div>
         </div>
 
-        <nav className="nav-list">
-          {navigationSections.map((section) => (
-            <button
-              aria-current={activeSection === section ? "page" : undefined}
-              className={`nav-module-${section.toLowerCase().replaceAll(" ", "-")}`}
-              key={section}
-              onClick={() => navigateToSidebarSection(section)}
-              type="button"
-            >
-              {section}
-            </button>
-          ))}
-        </nav>
+        <div className="nav-scroll-shell">
+          <nav className="nav-list">
+            {navigationSections.map((section) => (
+              <button
+                aria-current={activeSection === section ? "page" : undefined}
+                className={`nav-module-${section.toLowerCase().replaceAll(" ", "-")}`}
+                key={section}
+                onClick={() => navigateToSidebarSection(section)}
+                type="button"
+              >
+                {section}
+              </button>
+            ))}
+          </nav>
+        </div>
       </aside>
 
       <section className="workspace">

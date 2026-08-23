@@ -231,3 +231,7 @@ Possible future agents:
 - Budget anomaly checker
 - Sprint retrospective summarizer
 - Platform performance analyst
+# Mobile layout diagnostics
+
+- `?layoutDebug=1` enables a local, authenticated-only layout inspector for real-device mobile debugging. It measures root/body/viewport widths, lists horizontal-overflow candidates with ancestors, and can copy the report. It is inactive in normal URLs.
+- The mobile module navigation deliberately scrolls horizontally inside `.nav-list`. Its `.nav-scroll-shell` owns paint clipping so that this internal scroll area cannot expand the document width on iPhone Safari.

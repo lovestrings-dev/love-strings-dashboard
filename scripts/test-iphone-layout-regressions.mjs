@@ -23,6 +23,17 @@ assert.match(
 );
 assert.match(
   css,
+  /\.nav-scroll-shell\s*\{[\s\S]*?contain:\s*paint;[\s\S]*?overflow:\s*clip;/,
+  "The mobile nav needs an independent paint-clipping owner."
+);
+assert.match(
+  css,
+  /\.nav-list\s*\{[\s\S]*?overflow-x:\s*auto;[\s\S]*?overscroll-behavior-x:\s*contain;/,
+  "The mobile nav must remain horizontally scrollable without chaining to the page."
+);
+assert.match(page, /<div className="nav-scroll-shell">\s*<nav className="nav-list">/, "The mobile nav must have its own clipping wrapper.");
+assert.match(
+  css,
   /\.fq-segment\.is-status-menu-open\s*\{\s*overflow:\s*visible;[\s\S]*?z-index:\s*3;/,
   "An open Focus Queue segment must expose and stack its status menu."
 );

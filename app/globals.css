@@ -191,6 +191,10 @@ button {
   z-index: 20;
 }
 
+.nav-scroll-shell {
+  min-width: 0;
+}
+
 .nav-list button {
   background: transparent;
   border: 0;
@@ -8072,12 +8076,21 @@ h2 {
     display: flex;
     gap: 8px;
     overflow-x: auto;
+    overscroll-behavior-x: contain;
     padding: 4px 16px 10px;
     position: static;
   }
 
   .sidebar .nav-list {
     position: static;
+  }
+
+  .nav-scroll-shell {
+    background: var(--surface-strong);
+    contain: paint;
+    inline-size: 100%;
+    max-inline-size: 100%;
+    overflow: clip;
   }
 
   .nav-list button {
