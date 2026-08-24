@@ -2356,15 +2356,24 @@ h2 {
   font-weight: 800;
   justify-content: center;
   min-height: 36px;
+  overflow: hidden;
   padding: 7px;
+  position: relative;
   width: 36px;
 }
 
 .apple-import-button input {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
   height: 1px;
+  inset: 0 auto auto 0;
+  min-height: 0;
+  min-width: 0;
   opacity: 0;
+  overflow: hidden;
   pointer-events: none;
   position: absolute;
+  white-space: nowrap;
   width: 1px;
 }
 

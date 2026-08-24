@@ -34,6 +34,18 @@ assert.match(
 assert.match(page, /<div className="nav-scroll-shell">\s*<nav className="nav-list">/, "The mobile nav must have its own clipping wrapper.");
 assert.match(
   css,
+  /\.apple-import-button\s*\{[\s\S]*?overflow:\s*hidden;[\s\S]*?position:\s*relative;/,
+  "CSV import buttons must contain their native file inputs."
+);
+assert.match(
+  css,
+  /\.apple-import-button input\s*\{[\s\S]*?clip-path:\s*inset\(50%\);[\s\S]*?overflow:\s*hidden;[\s\S]*?position:\s*absolute;/,
+  "CSV native inputs must be visually hidden and clipped rather than allowed to expose intrinsic width."
+);
+assert.match(page, /function AppleMusicCsvImportControl[\s\S]*?className="apple-import-button"[\s\S]*?type="file"/, "Apple CSV import must retain its native file chooser.");
+assert.match(page, /function SpotifyCsvImportControl[\s\S]*?className="apple-import-button"[\s\S]*?type="file"/, "Spotify CSV import must retain its native file chooser.");
+assert.match(
+  css,
   /\.fq-segment\.is-status-menu-open\s*\{\s*overflow:\s*visible;[\s\S]*?z-index:\s*3;/,
   "An open Focus Queue segment must expose and stack its status menu."
 );
