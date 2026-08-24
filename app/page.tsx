@@ -37,6 +37,14 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { AccountControl } from "./account-control";
 import { PlatformAdministrationView } from "./platform-administration-view";
 import { InitialWorkspaceSetup } from "./initial-workspace-setup";
+import { ProductionWorkflowSettings } from "./production-workflow-settings";
+import {
+  createProductionV1SongPlanFromSnapshot,
+  instantiateProductionV1Song,
+  recalculateProductionV1Song,
+  type ProductionTemplateV1,
+  type ProductionV1SongPlan
+} from "@/lib/production-template-v1";
 import { DateInput } from "./date-input";
 import { toDisplayDate, toIsoDate } from "@/lib/date-input";
 import {
@@ -208,6 +216,12 @@ type ProductionStep = {
   budgetLines?: ProductionBudgetLine[];
   status: MarketingStatus;
   extraTasks: ExtraCampaignTask[];
+  position?: number;
+  templateStepId?: string;
+  templateStepStableKey?: string;
+  templateStepKind?: "idea_anchor" | "production_step" | "release_anchor";
+  templateStepLeadTimeDays?: number;
+  templateStepStandardCostAmount?: number;
 };
 type ProductionSongConfig = {
   id: string;
@@ -218,6 +232,10 @@ type ProductionSongConfig = {
   roadmapPhaseId: string | null;
   albumArtUrl: string;
   steps: ProductionStep[];
+  schedulingModel?: "legacy-v0" | "template-v1";
+  productionTemplateId?: string;
+  productionTemplateVersion?: number;
+  productionTemplateSnapshot?: unknown;
 };
 type ProductionWorkbookSeed = {
   bpm?: number;
@@ -435,6 +453,10 @@ type ProductionSongDbRow = {
   release_date: string;
   roadmap_phase_id: string | null;
   album_art_url: string;
+  scheduling_model?: "legacy-v0" | "template-v1";
+  production_template_id?: string | null;
+  production_template_version?: number | null;
+  production_template_snapshot?: unknown;
 };
 type ProductionStepDbRow = {
   id: string;
@@ -446,6 +468,11 @@ type ProductionStepDbRow = {
   notes: string;
   position: number;
   is_default_step: boolean;
+  template_step_id?: string | null;
+  template_step_stable_key?: string | null;
+  template_step_kind?: "idea_anchor" | "production_step" | "release_anchor" | null;
+  template_step_lead_time_days?: number | null;
+  template_step_standard_cost_amount?: number | string | null;
 };
 type ProductionStepTaskDbRow = {
   id: string;
@@ -1871,6 +1898,55 @@ function sortProductionStepsByDeadline(steps: ProductionStep[]) {
   );
 }
 
+function sortProductionStepsForSong(song: ProductionSongConfig, steps: ProductionStep[]) {
+  return song.schedulingModel === "template-v1"
+    ? [...steps].sort((first, second) => (first.position ?? 0) - (second.position ?? 0))
+    : sortProductionStepsByDeadline(steps);
+}
+
+function createProductionSongFromV1Template({ id, releaseDate, template, title }: {
+  id: string; releaseDate: string; template: ProductionTemplateV1; title: string;
+}): ProductionSongConfig {
+  const plan = instantiateProductionV1Song(template, releaseDate);
+  return {
+    albumArtUrl: "", deadline: formatDateKeyForInput(plan.productionDeadline), id,
+    productionTemplateId: plan.snapshot.templateId, productionTemplateSnapshot: plan.snapshot,
+    productionTemplateVersion: plan.snapshot.templateVersion,
+    releaseDate: formatDateKeyForInput(plan.releaseDate), roadmapPhaseId: null,
+    schedulingModel: "template-v1", title,
+    steps: plan.steps.map((step) => ({
+      budgetLines: step.standardCostAmount ? [{ amount: step.standardCostAmount, bucket: "production", description: step.displayName, id: `template-${step.id}-budget` }] : [],
+      deadline: formatDateKeyForInput(step.deadline), extraTasks: [], id: `v1-${step.id}`,
+      isDefaultStep: true, label: step.displayName, notes: "", position: step.position,
+      status: "not-started", templateStepId: step.id, templateStepKind: step.stepKind,
+      templateStepLeadTimeDays: step.leadTimeDays, templateStepStableKey: step.stableKey,
+      templateStepStandardCostAmount: step.standardCostAmount
+    }))
+  };
+}
+
+function applyProductionV1ReleaseSchedule(song: ProductionSongConfig, releaseDateInput: string) {
+  if (song.schedulingModel !== "template-v1" || !song.productionTemplateSnapshot || !toIsoDate(releaseDateInput)) return song;
+  const plan = createProductionV1SongPlanFromSnapshot({
+    liveSteps: song.steps.map((step) => ({
+      deadline: toIsoDate(step.deadline) ?? "",
+      id: step.templateStepId ?? step.id.replace(/^v1-/, ""),
+      status: step.status as "not-started" | "in-progress" | "done"
+    })),
+    productionDeadline: toIsoDate(song.deadline) ?? "",
+    releaseDate: toIsoDate(song.releaseDate) ?? "",
+    snapshot: song.productionTemplateSnapshot as ProductionV1SongPlan["snapshot"]
+  });
+  const recalculated = recalculateProductionV1Song(plan, toIsoDate(releaseDateInput)!);
+  return {
+    ...song, deadline: formatDateKeyForInput(recalculated.productionDeadline), releaseDate: releaseDateInput,
+    steps: sortProductionStepsForSong(song, song.steps.map((step) => {
+      const next = recalculated.steps.find((candidate) => candidate.id === (step.templateStepId ?? step.id.replace(/^v1-/, "")));
+      return next ? { ...step, deadline: formatDateKeyForInput(next.deadline) } : step;
+    }))
+  };
+}
+
 function getProductionDeadlineSortTime(deadlineInput: string) {
   return parseCampaignDate(deadlineInput)?.getTime() ?? Number.MAX_SAFE_INTEGER;
 }
@@ -2027,7 +2103,7 @@ function normalizeProductionSongsWithBudgetDefaults(
       ...song,
       releaseDate,
       roadmapPhaseId: song.roadmapPhaseId ?? null,
-      steps: sortProductionStepsByDeadline(
+      steps: (song.schedulingModel === "template-v1" ? sortProductionStepsForSong(song, song.steps) : sortProductionStepsByDeadline(
         song.steps
           .filter((step) => {
             const label = step.label.trim().toLowerCase();
@@ -2044,7 +2120,7 @@ function normalizeProductionSongsWithBudgetDefaults(
             budgetLines: task.budgetLines ?? []
           }))
           }))
-      )
+      ))
     };
   });
 }
@@ -4459,6 +4535,10 @@ function mapProductionRows({
       deadline: formatDateKeyForInput(song.production_deadline),
       releaseDate: formatDateKeyForInput(song.release_date),
       roadmapPhaseId: song.roadmap_phase_id,
+      schedulingModel: song.scheduling_model ?? "legacy-v0",
+      productionTemplateId: song.production_template_id ?? undefined,
+      productionTemplateVersion: song.production_template_version ?? undefined,
+      productionTemplateSnapshot: song.production_template_snapshot,
       id: song.slug,
       steps: steps
         .filter((step) => step.production_song_id === song.id)
@@ -4482,7 +4562,13 @@ function mapProductionRows({
           isDefaultStep: step.is_default_step,
           label: step.label,
           notes: step.notes,
+          position: step.position,
           status: step.status
+          ,templateStepId: step.template_step_id ?? undefined,
+          templateStepKind: step.template_step_kind ?? undefined,
+          templateStepLeadTimeDays: step.template_step_lead_time_days ?? undefined,
+          templateStepStableKey: step.template_step_stable_key ?? undefined,
+          templateStepStandardCostAmount: step.template_step_standard_cost_amount === null || step.template_step_standard_cost_amount === undefined ? undefined : Number(step.template_step_standard_cost_amount)
         })),
       title: song.title
     }))
@@ -5297,8 +5383,6 @@ export default function Home() {
   const [isHeaderAccountReady, setIsHeaderAccountReady] = useState(false);
   const [isWorkspaceBrandingReady, setIsWorkspaceBrandingReady] = useState(false);
   const [workspaceTimeZone, setWorkspaceTimeZone] = useState(defaultWorkspaceTimeZone);
-  const [productionDefaultCosts, setProductionDefaultCosts] =
-    useState<ProductionDefaultCosts>(defaultProductionStepCosts);
   const [appLogoPath, setAppLogoPath] = useState("");
   const [appLogoUrl, setAppLogoUrl] = useState(defaultAppLogoUrl);
   const [dailyFocusProgress, setDailyFocusProgress] = useState<
@@ -6395,16 +6479,21 @@ export default function Home() {
     }
   }
 
-  function addProductionSong() {
+  async function addProductionSong() {
     const newSongNumber = productionSongDrafts.length + 1;
     const newDeadline = getNextProductionSongDeadline(productionSongDrafts);
-    const localSong = createProductionSongSeed({
-      defaultCosts: productionDefaultCosts,
-      id: `production-song-${newSongNumber}-${Date.now()}`,
-      title: `New Song ${newSongNumber}`,
-      deadline: formatDateForInput(newDeadline),
-      statusPattern: ["not-started"]
-    });
+    let template: ProductionTemplateV1;
+    try {
+      const response = await fetch("/api/workspace/production-template", { cache: "no-store" });
+      const payload = await response.json() as { template?: ProductionTemplateV1; error?: string };
+      if (!response.ok || !payload.template) throw new Error(payload.error || "Production workflow is unavailable.");
+      template = payload.template;
+    } catch (error) {
+      setProductionSaveStatus({ message: error instanceof Error ? error.message : "Production workflow is unavailable.", state: "error" });
+      return;
+    }
+    const releaseDate = formatDateForInput(addUtcDays(newDeadline, 14));
+    const localSong = createProductionSongFromV1Template({ id: `production-song-${newSongNumber}-${Date.now()}`, releaseDate: toIsoDate(releaseDate)!, template, title: `New Song ${newSongNumber}` });
 
     setProductionSongDrafts((currentSongs) =>
       sortProductionSongsByDeadline([...currentSongs, localSong])
@@ -6443,12 +6532,12 @@ export default function Home() {
           ...currentSong,
           ...updates,
           steps: updates.steps
-            ? sortProductionStepsByDeadline(updates.steps)
+            ? sortProductionStepsForSong(currentSong, updates.steps)
             : currentSong.steps
         } satisfies ProductionSongConfig)
       : null;
     const nextSong = mergedSong && updates.releaseDate
-      ? applyProductionReleaseSchedule(mergedSong, updates.releaseDate)
+      ? (mergedSong.schedulingModel === "template-v1" ? applyProductionV1ReleaseSchedule(mergedSong, updates.releaseDate) : applyProductionReleaseSchedule(mergedSong, updates.releaseDate))
       : mergedSong;
 
     if (currentSong && nextSong && updates.steps) {
@@ -7172,21 +7261,6 @@ export default function Home() {
     return () => {
       isCancelled = true;
       window.removeEventListener("workspace-google-connection-changed", loadGoogleConnection);
-    };
-  }, [activeWorkspaceId]);
-
-  useEffect(() => {
-    let isCancelled = false;
-    void fetch("/api/workspace/production-default-costs", { cache: "no-store" })
-      .then((response) => response.json())
-      .then((payload: { costs?: ProductionDefaultCosts }) => {
-        if (!isCancelled && payload.costs) setProductionDefaultCosts(payload.costs);
-      })
-      .catch(() => {
-        if (!isCancelled) setProductionDefaultCosts(defaultProductionStepCosts);
-      });
-    return () => {
-      isCancelled = true;
     };
   }, [activeWorkspaceId]);
 
@@ -8059,13 +8133,13 @@ export default function Home() {
         ] = await Promise.all([
           supabase
             .from("production_songs")
-            .select("id, slug, title, production_deadline, release_date, roadmap_phase_id, album_art_url")
+            .select("id, slug, title, production_deadline, release_date, roadmap_phase_id, album_art_url, scheduling_model, production_template_id, production_template_version, production_template_snapshot")
             .eq("workspace_id", requestedWorkspaceId)
             .order("production_deadline", { ascending: true }),
           supabase
             .from("production_steps")
             .select(
-              "id, production_song_id, stable_key, label, step_deadline, status, notes, position, is_default_step"
+              "id, production_song_id, stable_key, label, step_deadline, status, notes, position, is_default_step, template_step_id, template_step_stable_key, template_step_kind, template_step_lead_time_days, template_step_standard_cost_amount"
             )
             .order("position", { ascending: true }),
           supabase
@@ -8460,12 +8534,10 @@ export default function Home() {
             }}
             onWorkspaceNameChange={setActiveWorkspaceName}
             onWorkspaceTimeZoneChange={setWorkspaceTimeZone}
-            onProductionDefaultCostsChange={setProductionDefaultCosts}
             workspaceName={activeWorkspaceName}
             workspaceId={activeWorkspaceId}
             workspaceRole={workspaceRole}
             workspaceTimeZone={workspaceTimeZone}
-            productionDefaultCosts={productionDefaultCosts}
           />
         ) : null}
         {settingsView === "platform" ? (
@@ -8979,13 +9051,11 @@ function GeneralSettingsView({
   onBack,
   onLogoChange,
   onWorkspaceNameChange,
-  onProductionDefaultCostsChange,
   onWorkspaceTimeZoneChange,
   workspaceName,
   workspaceId,
   workspaceRole,
   workspaceTimeZone
-  ,productionDefaultCosts
 }: {
   activeSection: Section;
   logoPath: string;
@@ -8993,13 +9063,11 @@ function GeneralSettingsView({
   onBack: () => void;
   onLogoChange: (logoPath: string, logoUrl: string) => void;
   onWorkspaceNameChange: (name: string) => void;
-  onProductionDefaultCostsChange: (costs: ProductionDefaultCosts) => void;
   onWorkspaceTimeZoneChange: (timezone: string) => void;
   workspaceName: string;
   workspaceId: string;
   workspaceRole: "admin";
   workspaceTimeZone: string;
-  productionDefaultCosts: ProductionDefaultCosts;
 }) {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const isCurrentWorkspace = useRef(true);
@@ -9039,16 +9107,14 @@ function GeneralSettingsView({
   const [workspaceNameStatus, setWorkspaceNameStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
   const [workspaceTimeZoneDraft, setWorkspaceTimeZoneDraft] = useState(workspaceTimeZone);
   const [workspaceTimeZoneStatus, setWorkspaceTimeZoneStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
-  const [productionDefaultCostsDraft, setProductionDefaultCostsDraft] = useState(productionDefaultCosts);
-  const [productionDefaultCostsStatus, setProductionDefaultCostsStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
   const [topicCandidate, setTopicCandidate] = useState<{ channelId: string; channelTitle: string; caution: boolean; sameAsMain: boolean } | null>(null);
   const [platformUrls, setPlatformUrls] = useState<Record<string, string>>({});
   const [platformStatuses, setPlatformStatuses] = useState<Record<string, RefreshStatus>>({});
   const [editingPlatformSlug, setEditingPlatformSlug] = useState<string | null>(null);
   const [isWorkspaceNameEditing, setIsWorkspaceNameEditing] = useState(false);
   const [isWorkspaceTimeZoneEditing, setIsWorkspaceTimeZoneEditing] = useState(false);
-  const [isProductionDefaultsOpen, setIsProductionDefaultsOpen] = useState(false);
   const [isLogoOpen, setIsLogoOpen] = useState(false);
+  const [isProductionWorkflowOpen, setIsProductionWorkflowOpen] = useState(false);
   const [areCurrentMembersOpen, setAreCurrentMembersOpen] = useState(false);
   const [isInviteUserOpen, setIsInviteUserOpen] = useState(false);
   const [areInvitationsOpen, setAreInvitationsOpen] = useState(false);
@@ -9156,25 +9222,6 @@ function GeneralSettingsView({
     } catch (error) {
       if (!isCurrentWorkspace.current) return;
       setWorkspaceTimeZoneStatus({ message: error instanceof Error ? error.message : "Workspace timezone update failed.", state: "error" });
-    }
-  }
-
-  async function saveProductionDefaultCosts() {
-    setProductionDefaultCostsStatus({ message: "Saving production defaults...", state: "loading" });
-    try {
-      const response = await fetch("/api/workspace/production-default-costs", {
-        body: JSON.stringify({ costs: productionDefaultCostsDraft }),
-        headers: { "Content-Type": "application/json" },
-        method: "PATCH"
-      });
-      const payload = (await response.json()) as { costs?: ProductionDefaultCosts; error?: string };
-      if (!response.ok || !payload.costs) throw new Error(payload.error || "Production defaults update failed.");
-      onProductionDefaultCostsChange(payload.costs);
-      setProductionDefaultCostsDraft(payload.costs);
-      setProductionDefaultCostsStatus({ message: "Production defaults saved.", state: "success" });
-      setIsProductionDefaultsOpen(false);
-    } catch (error) {
-      setProductionDefaultCostsStatus({ message: error instanceof Error ? error.message : "Production defaults update failed.", state: "error" });
     }
   }
 
@@ -9894,9 +9941,14 @@ function GeneralSettingsView({
         <section className="settings-parent-card settings-parent-production">
           <div className="settings-parent-heading"><p className="eyebrow">Production module</p></div>
           <article className="general-settings-card">
-            <SettingsDisclosure isOpen={isProductionDefaultsOpen} onToggle={() => setIsProductionDefaultsOpen((current) => !current)} summary={`License: ${formatCurrency(productionDefaultCostsDraft.license)} · Distributor: ${formatCurrency(productionDefaultCostsDraft.distributor)}`} title="Default step costs" />
-            {isProductionDefaultsOpen ? <><p className="settings-description">Applied only when creating future Production songs.</p><div className="google-topic-config"><label>License<input aria-label="Default License cost" min="0" onChange={(event) => setProductionDefaultCostsDraft((current) => ({ ...current, license: -Math.abs(Number(event.target.value) || 0) }))} type="number" value={Math.abs(productionDefaultCostsDraft.license)} /></label><label>Distributor<input aria-label="Default Distributor cost" min="0" onChange={(event) => setProductionDefaultCostsDraft((current) => ({ ...current, distributor: -Math.abs(Number(event.target.value) || 0) }))} type="number" value={Math.abs(productionDefaultCostsDraft.distributor)} /></label><button disabled={productionDefaultCostsStatus.state === "loading"} onClick={() => void saveProductionDefaultCosts()} type="button">{productionDefaultCostsStatus.state === "loading" ? "Saving..." : "Save"}</button></div></> : null}
-            {productionDefaultCostsStatus.message ? <p className={productionDefaultCostsStatus.state === "error" ? "settings-error" : "settings-status"} role={productionDefaultCostsStatus.state === "error" ? "alert" : "status"}>{productionDefaultCostsStatus.message}</p> : null}
+            <SettingsDisclosure
+              actionLabel="Edit Production workflow"
+              isOpen={isProductionWorkflowOpen}
+              onToggle={() => setIsProductionWorkflowOpen((current) => !current)}
+              summary="Idea → workflow steps → Release"
+              title="Production workflow"
+            />
+            {isProductionWorkflowOpen ? <ProductionWorkflowSettings /> : null}
           </article>
         </section>
 
@@ -12966,7 +13018,7 @@ function ProductionSongBoard({
 
   function updateSteps(updater: (currentSteps: ProductionStep[]) => ProductionStep[]) {
     onChange(song.id, {
-      steps: sortProductionStepsByDeadline(updater(song.steps))
+      steps: sortProductionStepsForSong(song, updater(song.steps))
     });
   }
 
@@ -13608,6 +13660,10 @@ function ProductionBudgetLineEditor({
 }) {
   const [isDeleteArmed, setIsDeleteArmed] = useState(false);
   const deleteButtonRef = useRef<HTMLButtonElement | null>(null);
+  const budgetTotal = budgetLines.reduce(
+    (total, line) => total + (Number.isFinite(line.amount) ? line.amount : 0),
+    0
+  );
   const visibleBudgetLines =
     budgetLines.length > 0
       ? budgetLines
@@ -13683,7 +13739,14 @@ function ProductionBudgetLineEditor({
   if (compact) {
     return (
       <details className="event-budget-section marketing-budget-section production-step-budget-section">
-        <summary>Budget</summary>
+        <summary>
+          Budget
+          {budgetTotal !== 0 ? (
+            <strong className="production-step-budget-total amount-expense">
+              {formatEditableAmount(budgetTotal)}
+            </strong>
+          ) : null}
+        </summary>
         <div className="production-step-budget-content">
           <div className="event-budget-lines">
             {visibleBudgetLines.map((line) => (

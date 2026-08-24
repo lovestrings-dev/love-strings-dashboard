@@ -96,6 +96,46 @@ Current integration boundary:
   is intentionally deferred rather than silently applying that integration to
   a new workspace.
 
+## Production Template V1 Foundation
+
+- Workspace-level `production_templates` and `production_template_steps` hold
+  future-song Production Defaults. A template has structural `Idea` and
+  `Release` anchors plus ordered configurable middle steps.
+- Template-step UUIDs and semantic kinds, rather than display labels, provide
+  scheduling identity. `distribution` is an optional semantic kind; its own
+  lead time will later define the Production deadline. Without it, the future
+  V1 rule is Production deadline = canonical Release Date.
+- Existing Production songs remain `legacy-v0`. Future template-backed songs
+  will store a template ID/version plus a JSON snapshot and per-step snapshot
+  timing/identity fields, so later template changes cannot rewrite live songs.
+- This foundation deliberately does not change the current UI or legacy
+  release-date recalculation behavior.
+- The V1 domain scheduler walks a snapshotted, position-ordered workflow
+  backwards from the canonical Release Date. It moves only `not-started` live
+  steps, preserves `done` and `in-progress` dates, retains workflow position
+  order, and reports order inversions as future UI-ready schedule conflicts.
+- Release Date changes are automatic; Production workflow upgrades are
+  explicit. Workspace Production template changes affect future songs only.
+  An existing V1 song continues to recalculate exclusively from its stored
+  snapshot until a future controlled replan explicitly adopts the current
+  template. Drift detection compares immutable step identity, position,
+  semantic kind, timing, cost, and anchors, not display labels alone.
+- The future controlled-replan contract will preserve `done` and `in-progress`
+  live state/deadlines, safely reconcile only eligible `not-started` steps and
+  their notes/tasks/budgets, replace the song snapshot/version only on explicit
+  approval, then recalculate eligible deadlines from the canonical Release Date.
+- A song-specific custom V1 step remains outside the workspace template and
+  has a `custom-*` stable identity with no template-step UUID. Its lead time is
+  derived transactionally from the saved deadline to the next later positioned
+  workflow boundary, stored both on the live row and in that song's snapshot.
+  Eligible `not-started` custom steps then recalculate from that song-local
+  lead; `done` and `in-progress` custom steps stay fixed.
+- Template-v1 saves use a protected transactional database function. Existing
+  steps are updated by live stable key, and existing tasks and budget lines are
+  updated in place; only deliberate additions/removals insert or delete rows.
+  This preserves step/task/budget IDs and relationships during normal saves and
+  Release Date recalculation.
+
 ## Data Source Direction
 
 Build the project database early.

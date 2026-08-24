@@ -25,6 +25,12 @@ type ProductionStep = {
   budgetLines?: ProductionBudgetLine[];
   status: MarketingStatus;
   extraTasks: ExtraCampaignTask[];
+  position?: number;
+  templateStepId?: string;
+  templateStepStableKey?: string;
+  templateStepKind?: "idea_anchor" | "production_step" | "release_anchor";
+  templateStepLeadTimeDays?: number;
+  templateStepStandardCostAmount?: number;
 };
 type ProductionSongConfig = {
   id: string;
@@ -35,6 +41,10 @@ type ProductionSongConfig = {
   roadmapPhaseId: string | null;
   albumArtUrl: string;
   steps: ProductionStep[];
+  schedulingModel?: "legacy-v0" | "template-v1";
+  productionTemplateId?: string;
+  productionTemplateVersion?: number;
+  productionTemplateSnapshot?: unknown;
 };
 type ProductionSavePayload = {
   song?: ProductionSongConfig;
@@ -107,6 +117,10 @@ export async function DELETE(request: NextRequest) {
 }
 
 async function saveProductionSong(song: ProductionSongConfig, workspaceId: string) {
+  if (song.schedulingModel === "template-v1") {
+    return saveProductionV1SongAtomically(song, workspaceId);
+  }
+
   const supabase = createServiceSupabaseClient();
   const productionDeadline = formatInputDateForDatabase(song.deadline);
   const releaseDate = formatInputDateForDatabase(song.releaseDate);
@@ -299,6 +313,59 @@ async function saveProductionSong(song: ProductionSongConfig, workspaceId: strin
     dbId: savedSong.id,
     id: savedSong.slug
   };
+}
+
+async function saveProductionV1SongAtomically(
+  song: ProductionSongConfig,
+  workspaceId: string
+) {
+  const productionDeadline = formatInputDateForDatabase(song.deadline);
+  const releaseDate = formatInputDateForDatabase(song.releaseDate);
+
+  if (!productionDeadline || !releaseDate) {
+    throw new Error(`Invalid Production dates for ${song.title}.`);
+  }
+
+  if (!song.productionTemplateId || !song.productionTemplateVersion || !song.productionTemplateSnapshot) {
+    throw new Error(`Missing Production V1 template snapshot for ${song.title}.`);
+  }
+
+  const rpcSong = {
+    ...song,
+    deadline: productionDeadline,
+    releaseDate,
+    slug: createStableId(song.id || song.title) || createStableId(song.title),
+    steps: song.steps.map((step, index) => {
+      const deadline = formatInputDateForDatabase(step.deadline) ?? productionDeadline;
+      return {
+        ...step,
+        deadline,
+        position: step.position ?? index + 1,
+        budgetLines: normalizeBudgetLines(step.budgetLines ?? []),
+        extraTasks: step.extraTasks.map((task, taskIndex) => ({
+          ...task,
+          position: taskIndex + 1,
+          budgetLines: normalizeBudgetLines(task.budgetLines ?? [])
+        }))
+      };
+    })
+  };
+  const supabase = createServiceSupabaseClient();
+  const { data, error } = await supabase.rpc("save_production_v1_song_with_derived_custom_timing", {
+    p_song: rpcSong,
+    p_workspace_id: workspaceId
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  const savedSong = Array.isArray(data) ? data[0] : data;
+  if (!savedSong?.id || !savedSong?.slug) {
+    throw new Error("Atomic Production V1 save did not return a song.");
+  }
+
+  return { dbId: savedSong.id, id: savedSong.slug };
 }
 
 function normalizeBudgetLines(budgetLines: ProductionBudgetLine[]) {

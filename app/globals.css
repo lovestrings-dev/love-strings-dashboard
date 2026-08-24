@@ -799,6 +799,405 @@ button {
   color: var(--accent-strong);
 }
 
+.production-workflow-settings {
+  display: grid;
+  gap: 12px;
+}
+
+.production-workflow-summary {
+  margin: 0;
+}
+
+.production-workflow-list {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.production-workflow-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 72px minmax(150px, 1fr) 142px 56px;
+  min-width: 0;
+  padding: 8px;
+}
+
+.production-workflow-row + .production-workflow-row {
+  border-top: 1px solid var(--line);
+}
+
+.production-workflow-row.is-release {
+  grid-template-columns: 72px minmax(150px, 1fr) 56px;
+}
+
+.production-workflow-move {
+  display: flex;
+  gap: 5px;
+}
+
+.production-workflow-move button,
+.production-workflow-toggle,
+.production-workflow-add button,
+.production-workflow-save {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-weight: 800;
+  justify-content: center;
+}
+
+.production-workflow-columns,
+.production-workflow-row,
+.production-workflow-add {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 58px minmax(0, 1fr) 76px 84px 38px;
+  min-width: 0;
+}
+
+.production-workflow-columns {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  padding: 0 8px;
+}
+
+.production-workflow-row,
+.production-workflow-add {
+  min-height: 52px;
+  padding: 8px;
+}
+
+.production-workflow-row.is-release {
+  grid-template-columns: 58px minmax(0, 1fr) 76px 84px 38px;
+}
+
+.production-workflow-row.is-release .production-workflow-empty {
+  min-height: 34px;
+}
+
+.production-workflow-name,
+.production-workflow-number,
+.production-workflow-add select {
+  min-width: 0;
+  width: 100%;
+}
+
+.production-workflow-number {
+  padding-inline: 6px;
+  text-align: center;
+}
+
+.production-workflow-action {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  display: inline-flex;
+  height: 34px;
+  justify-content: center;
+  padding: 0;
+  width: 38px;
+}
+
+.production-workflow-action.is-delete {
+  background: #fff1f1;
+  border-color: #d75c5c;
+  color: #b33b3b;
+}
+
+.production-workflow-move button {
+  height: 34px;
+  padding: 0;
+  width: 34px;
+}
+
+.production-workflow-move button:disabled,
+.production-workflow-toggle:disabled {
+  cursor: default;
+  opacity: .48;
+}
+
+.production-workflow-name,
+.production-workflow-fields input,
+.production-workflow-add select {
+  min-width: 0;
+}
+
+.production-workflow-fields {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.production-workflow-fields label {
+  color: var(--muted);
+  display: grid;
+  font-size: 11px;
+  font-weight: 800;
+  gap: 3px;
+}
+
+.production-workflow-fields input {
+  padding-inline: 7px;
+  text-align: center;
+  width: 100%;
+}
+
+.production-workflow-toggle {
+  font-size: 12px;
+  height: 34px;
+  padding: 0 7px;
+}
+
+.production-workflow-toggle.is-on {
+  background: var(--soft-green);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.production-workflow-add {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.production-workflow-add select,
+.production-workflow-add button {
+  height: 38px;
+}
+
+.production-workflow-add button,
+.production-workflow-save {
+  gap: 6px;
+  padding: 0 11px;
+}
+
+.production-workflow-save {
+  background: var(--soft-green);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  height: 42px;
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .production-workflow-row,
+  .production-workflow-row.is-release {
+    gap: 6px;
+    grid-template-columns: 72px minmax(0, 1fr) 52px;
+    padding: 8px;
+  }
+
+  .production-workflow-move {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+
+  .production-workflow-name {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .production-workflow-toggle {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .production-workflow-fields {
+    grid-column: 2 / span 2;
+    grid-row: 2;
+  }
+
+  .production-workflow-fields label {
+    align-items: center;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .production-workflow-fields input {
+    height: 34px;
+  }
+
+  .production-workflow-row.is-release .production-workflow-move {
+    grid-row: 1;
+  }
+
+  .production-workflow-fields {
+    display: none;
+  }
+
+  .production-workflow-columns,
+  .production-workflow-row,
+  .production-workflow-add,
+  .production-workflow-row.is-release {
+    gap: 4px;
+    grid-template-columns: 58px minmax(0, 1fr) 42px 48px 34px;
+  }
+
+  .production-workflow-columns {
+    font-size: 0;
+  }
+
+  .production-workflow-columns span:nth-child(2)::after { content: "Step"; font-size: 10px; }
+  .production-workflow-columns span:nth-child(3)::after { content: "Time"; font-size: 10px; }
+  .production-workflow-columns span:nth-child(4)::after { content: "Cost"; font-size: 10px; }
+
+  .production-workflow-row,
+  .production-workflow-add {
+    min-height: 50px;
+    padding: 7px 8px;
+  }
+
+  .production-workflow-move { gap: 2px; grid-column: 1; grid-row: 1; }
+  .production-workflow-name { grid-column: 2; grid-row: 1; }
+  .production-workflow-toggle,
+  .production-workflow-action { grid-column: 5; grid-row: 1; }
+  .production-workflow-move button { height: 28px; width: 28px; }
+  .production-workflow-toggle,
+  .production-workflow-action { height: 32px; width: 34px; }
+  .production-workflow-toggle { font-size: 10px; padding: 0; }
+  .production-workflow-number { padding-inline: 3px; }
+.production-workflow-add select { padding-inline: 5px; }
+}
+
+.production-workflow-columns,
+.production-workflow-row,
+.production-workflow-add,
+.production-workflow-row.is-release {
+  gap: 6px;
+  grid-template-columns: 82px minmax(0, 1fr) 76px 84px 38px;
+}
+
+.production-workflow-row,
+.production-workflow-add {
+  align-items: center;
+  min-height: 54px;
+  padding: 8px;
+}
+
+.production-workflow-move {
+  gap: 6px;
+}
+
+.production-workflow-move button,
+.production-workflow-name,
+.production-workflow-number,
+.production-workflow-add select,
+.production-workflow-toggle,
+.production-workflow-action {
+  box-sizing: border-box;
+  height: 38px;
+}
+
+.production-workflow-move button {
+  width: 38px;
+}
+
+.production-workflow-name,
+.production-workflow-number,
+.production-workflow-add select {
+  min-width: 0;
+  width: 100%;
+}
+
+.production-workflow-action {
+  width: 38px;
+}
+
+.production-workflow-add {
+  display: grid;
+}
+
+.production-workflow-add-action svg {
+  stroke-width: 3;
+}
+
+.production-workflow-row.is-release .production-workflow-empty {
+  min-height: 38px;
+}
+
+@media (max-width: 640px) {
+  .production-workflow-columns,
+  .production-workflow-row,
+  .production-workflow-add,
+  .production-workflow-row.is-release {
+    gap: 4px;
+    grid-template-columns: 52px minmax(0, 1fr) 38px 44px 32px;
+  }
+
+  .production-workflow-row,
+  .production-workflow-add {
+    min-height: 54px;
+    padding: 7px 8px;
+  }
+
+  .production-workflow-move {
+    gap: 4px;
+  }
+
+  .production-workflow-move button,
+  .production-workflow-name,
+  .production-workflow-number,
+  .production-workflow-add select,
+  .production-workflow-toggle,
+  .production-workflow-action {
+    height: 38px;
+  }
+
+  .production-workflow-move button {
+    width: 24px;
+  }
+
+  .production-workflow-toggle,
+  .production-workflow-action {
+    grid-column: 5;
+    grid-row: 1;
+    width: 32px;
+  }
+
+  .production-workflow-toggle {
+    font-size: 10px;
+    padding: 0;
+  }
+}
+
+.production-workflow-hint-label {
+  align-self: end;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  padding-bottom: 3px;
+  text-align: center;
+}
+
+.production-workflow-release-hint {
+  align-self: center;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  grid-column: 3 / 6;
+  line-height: 1.15;
+  text-align: right;
+}
+
+@media (max-width: 640px) {
+  .production-workflow-release-hint {
+    font-size: 9px;
+    grid-column: 3 / 6;
+    line-height: 1.12;
+  }
+}
+
 .user-dashboard-reset:hover,
 .user-dashboard-reorder button:not(:disabled):hover,
 .user-dashboard-visibility:not(:disabled):hover {
@@ -6170,6 +6569,13 @@ h2 {
   font-size: 13px;
   font-weight: 800;
   list-style-position: inside;
+}
+
+.production-step-budget-total {
+  color: #2f6f9f;
+  float: right;
+  font-variant-numeric: tabular-nums;
+  margin: 0;
 }
 
 .production-step-budget-content {
