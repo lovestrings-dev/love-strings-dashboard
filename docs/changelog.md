@@ -2,6 +2,24 @@
 
 This file tracks app versions that are useful to discuss, test, and deploy. It is for product-level changes, not every small database edit.
 
+## Beta 1.25 — ArtistDeck canonical release planning
+
+Headline: **ArtistDeck now closes the Production → Roadmap → Marketing planning loop with snapshot-based Production workflows, canonical Roadmap planning, and future-only Marketing timing defaults.**
+
+Includes:
+
+- Production V1 workspace workflows, immutable song snapshots, status-aware Release-Date recalculation, derived song-local custom timing, and identity-preserving atomic saves. Active Love Strings and BIOGLYCERIN work is on V1 while released Love Strings history remains intentionally legacy V0.
+- Roadmap V1 canonical ordering, workspace cadence, General planner/Replan behavior, Auto plans, Manual Collections with independent ordering, Roadmap-aware new-song creation, and the completed mobile planning polish.
+- Marketing Defaults V1: workspace defaults for Song Campaign length, pre-release lead, and General Campaign length; Song Campaign timing snapshots and saved offsets; General Campaign end-date proposal; and General Campaign as the default Add Campaign flow.
+- Song Campaign Release Date is now read-only in Marketing and explicitly managed through Production or Roadmap. Existing historical Marketing campaigns are unchanged.
+
+Deferred (not release blockers):
+
+- Consolidate canonical Release Date mutations into one atomic Production/Roadmap-owned backend command and retire the legacy Marketing-originated circular write path.
+- Replace Marketing day/task delete-and-reinsert persistence with identity-preserving saves.
+- Consider editable Marketing task templates after timing defaults prove useful.
+- Existing saved Roadmap titles, including names such as `New Phase 2`, remain user data and are not automatically renamed.
+
 ## Beta 1.24 — ArtistDeck mobile stability and trustworthy Spotify evolution (Prepared for user push)
 
 Headline: **ArtistDeck makes the daily Dashboard steadier on mobile, presents
