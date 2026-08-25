@@ -15,6 +15,7 @@ import {
   CalendarDays,
   Camera,
   ChevronDown,
+  ChevronUp,
   Clock3,
   Disc3,
   Headphones,
@@ -29,6 +30,7 @@ import {
   RefreshCw,
   Save,
   Send,
+  Settings,
   Trash2,
   Users,
   Video
@@ -38,6 +40,13 @@ import { AccountControl } from "./account-control";
 import { PlatformAdministrationView } from "./platform-administration-view";
 import { InitialWorkspaceSetup } from "./initial-workspace-setup";
 import { ProductionWorkflowSettings } from "./production-workflow-settings";
+import { MarketingDefaultsSettings } from "./marketing-defaults-settings";
+import {
+  fallbackMarketingTimingDefaults,
+  proposedGeneralCampaignEndDate,
+  songCampaignOffsets,
+  type MarketingTimingDefaults
+} from "@/lib/marketing-defaults";
 import {
   createProductionV1SongPlanFromSnapshot,
   instantiateProductionV1Song,
@@ -230,6 +239,7 @@ type ProductionSongConfig = {
   deadline: string;
   releaseDate: string;
   roadmapPhaseId: string | null;
+  roadmapGeneralPosition?: number;
   albumArtUrl: string;
   steps: ProductionStep[];
   schedulingModel?: "legacy-v0" | "template-v1";
@@ -326,6 +336,17 @@ type RoadmapPhase = {
   milestones: string[];
   startMonth: string;
   endMonth: string;
+};
+type RoadmapPlan = {
+  id: string;
+  planType: "auto" | "manual";
+  title: string;
+  summary: string;
+  startDate: string;
+  endDate: string;
+  displayPosition: number;
+  phaseNumber: number | null;
+  songIds: string[];
 };
 type CampaignDaySeed = {
   dateKey: string;
@@ -452,6 +473,7 @@ type ProductionSongDbRow = {
   production_deadline: string;
   release_date: string;
   roadmap_phase_id: string | null;
+  roadmap_general_position?: number;
   album_art_url: string;
   scheduling_model?: "legacy-v0" | "template-v1";
   production_template_id?: string | null;
@@ -702,7 +724,7 @@ const platformStats = [
   }
 ];
 
-const appVersionLabel = "Beta 1.24";
+const appVersionLabel = "Beta 1.25";
 const defaultAppLogoUrl = "/artistdeck-logo.png";
 
 const sections = [
@@ -973,7 +995,7 @@ const qrCodeLinksStorageKey = "qr-code-links-v1";
 const appleMusicReminderDismissedDateKey = "apple-music-reminder-dismissed-date-v1";
 
 const newMarketingCampaign: Omit<MarketingCampaignConfig, "id"> = {
-  campaignKind: "song",
+  campaignKind: "general",
   releaseTitle: "New Campaign",
   releaseDate: "10/07/2026",
   albumArtUrl: ""
@@ -1853,8 +1875,12 @@ function normalizeRoadmapPhases(phases: Array<Partial<RoadmapPhase>>) {
       startMonth: normalizeRoadmapPhaseDate(phase.startMonth, "2028-01-01"),
       summary: phase.summary ?? "",
       targetCount: 0,
-      title: phase.title ?? `Phase ${phase.phaseNumber}`
+      title: phase.title ?? `Plan ${phase.phaseNumber}`
     })) satisfies RoadmapPhase[];
+}
+
+function normalizeRoadmapPlans(plans: Array<Partial<RoadmapPlan>>) {
+  return plans.filter((plan): plan is RoadmapPlan => Boolean(plan.id && (plan.planType === "auto" || plan.planType === "manual") && plan.title && plan.startDate && plan.endDate)).map((plan) => ({ ...plan, songIds: plan.songIds ?? [] }));
 }
 
 function normalizeRoadmapPhaseDate(value: string | undefined, fallback: string) {
@@ -1949,15 +1975,6 @@ function applyProductionV1ReleaseSchedule(song: ProductionSongConfig, releaseDat
 
 function getProductionDeadlineSortTime(deadlineInput: string) {
   return parseCampaignDate(deadlineInput)?.getTime() ?? Number.MAX_SAFE_INTEGER;
-}
-
-function getNextProductionSongDeadline(songs: ProductionSongConfig[]) {
-  const latestDeadline = songs
-    .map((song) => parseCampaignDate(song.deadline))
-    .filter((date): date is Date => Boolean(date))
-    .sort((firstDate, secondDate) => secondDate.getTime() - firstDate.getTime())[0];
-
-  return latestDeadline ? addUtcDays(latestDeadline, 14) : addUtcDays(getTodayUtcDate(), 28);
 }
 
 function createProductionSongSeed({
@@ -4269,14 +4286,15 @@ function getViennaDateKey() {
 
 function buildCampaignDays(
   releaseDateInput: string,
-  daySeeds: CampaignDaySeed[] = []
+  daySeeds: CampaignDaySeed[] = [],
+  timing = fallbackMarketingTimingDefaults
 ) {
   const releaseDate =
     parseCampaignDate(releaseDateInput) ?? new Date(Date.UTC(2026, 6, 10));
   const seedByDate = new Map(daySeeds.map((seed) => [seed.dateKey, seed]));
 
-  return Array.from({ length: defaultCampaignDayCount }, (_, index) =>
-    applyCampaignDaySeed(buildCampaignDay(releaseDate, index), seedByDate)
+  return songCampaignOffsets(timing).map((releaseOffset, index) =>
+    applyCampaignDaySeed(buildCampaignDay(releaseDate, index, releaseOffset, true), seedByDate)
   );
 }
 
@@ -4535,6 +4553,7 @@ function mapProductionRows({
       deadline: formatDateKeyForInput(song.production_deadline),
       releaseDate: formatDateKeyForInput(song.release_date),
       roadmapPhaseId: song.roadmap_phase_id,
+      roadmapGeneralPosition: song.roadmap_general_position,
       schedulingModel: song.scheduling_model ?? "legacy-v0",
       productionTemplateId: song.production_template_id ?? undefined,
       productionTemplateVersion: song.production_template_version ?? undefined,
@@ -4684,12 +4703,17 @@ function applyCampaignDaySeed(
   };
 }
 
-function buildCampaignDay(releaseDate: Date, index: number): CampaignDay {
-  const date = addUtcDays(releaseDate, index - 4);
+function buildCampaignDay(
+  releaseDate: Date,
+  index: number,
+  offset = index - 4,
+  isDefaultDay = index < defaultCampaignDayCount
+): CampaignDay {
+  const date = addUtcDays(releaseDate, offset);
   const dayNumber = index + 1;
-  const releaseOffset = dayNumber - 5;
+  const releaseOffset = offset;
   const theme =
-    index === 4
+    releaseOffset === 0
       ? "Release day"
       : releaseOffset < 0
         ? `Countdown ${Math.abs(releaseOffset)}`
@@ -4704,7 +4728,7 @@ function buildCampaignDay(releaseDate: Date, index: number): CampaignDay {
       timeZone: "UTC"
     }),
     dateKey: date.toISOString().slice(0, 10),
-    isDefaultDay: dayNumber <= defaultCampaignDayCount,
+    isDefaultDay,
     releaseOffset,
     clipName: `${theme}: vertical performance clip`,
     extraTasks: getPlaceholderExtraTasks(dayNumber),
@@ -4823,6 +4847,99 @@ async function saveMarketingCampaignDays(
 type ProductionSongSaveResult =
   | { dbId: string; id: string; ok: true }
   | { error: string; ok: false };
+
+type RoadmapAwareProductionSongResponse = {
+  song: {
+    id: string;
+    slug: string;
+    title: string;
+    production_deadline: string;
+    release_date: string;
+    roadmap_general_position: number;
+    roadmap_phase_id: string | null;
+    album_art_url: string;
+    scheduling_model: "template-v1";
+    production_template_id: string;
+    production_template_version: number;
+    production_template_snapshot: ProductionV1SongPlan["snapshot"];
+  };
+  steps: Array<{
+    id: string;
+    stable_key: string;
+    label: string;
+    step_deadline: string;
+    status: MarketingStatus;
+    notes: string;
+    position: number;
+    is_default_step: boolean;
+    template_step_id: string | null;
+    template_step_stable_key: string | null;
+    template_step_kind: "idea_anchor" | "production_step" | "release_anchor" | null;
+    template_step_lead_time_days: number | null;
+    template_step_standard_cost_amount: number | null;
+    production_budget_lines: Array<{
+      id: string;
+      description: string;
+      amount: number | string;
+      budget_bucket: BudgetSourceBucket;
+      position: number;
+    }> | null;
+  }>;
+};
+
+async function createRoadmapAwareProductionSong(
+  title: string
+): Promise<ProductionSongConfig> {
+  const response = await fetch("/api/production/songs/create-roadmap-aware", {
+    body: JSON.stringify({ title }),
+    credentials: "same-origin",
+    headers: {
+      "Content-Type": "application/json",
+      "x-love-strings-production": "write"
+    },
+    method: "POST"
+  });
+  const payload = await response.json() as RoadmapAwareProductionSongResponse & { error?: string };
+  if (!response.ok) throw new Error(payload.error ?? "Roadmap-aware Production creation failed.");
+
+  return {
+    albumArtUrl: payload.song.album_art_url,
+    dbId: payload.song.id,
+    deadline: formatDateKeyForInput(payload.song.production_deadline),
+    id: payload.song.slug,
+    productionTemplateId: payload.song.production_template_id,
+    productionTemplateSnapshot: payload.song.production_template_snapshot,
+    productionTemplateVersion: payload.song.production_template_version,
+    releaseDate: formatDateKeyForInput(payload.song.release_date),
+    roadmapGeneralPosition: payload.song.roadmap_general_position,
+    roadmapPhaseId: payload.song.roadmap_phase_id,
+    schedulingModel: payload.song.scheduling_model,
+    title: payload.song.title,
+    steps: payload.steps.map((step) => ({
+      budgetLines: (step.production_budget_lines ?? [])
+        .sort((first, second) => first.position - second.position)
+        .map((line) => ({
+          amount: Number(line.amount),
+          bucket: line.budget_bucket,
+          description: line.description,
+          id: line.id
+        })),
+      deadline: formatDateKeyForInput(step.step_deadline),
+      extraTasks: [],
+      id: step.stable_key,
+      isDefaultStep: step.is_default_step,
+      label: step.label,
+      notes: step.notes,
+      position: step.position,
+      status: step.status,
+      templateStepId: step.template_step_id ?? undefined,
+      templateStepKind: step.template_step_kind ?? undefined,
+      templateStepLeadTimeDays: step.template_step_lead_time_days ?? undefined,
+      templateStepStableKey: step.template_step_stable_key ?? undefined,
+      templateStepStandardCostAmount: step.template_step_standard_cost_amount ?? undefined
+    }))
+  };
+}
 
 async function saveProductionSongToSupabase(
   song: ProductionSongConfig
@@ -5444,8 +5561,11 @@ export default function Home() {
   const consumeEventFocusTarget = useCallback(() => setEventFocusTarget(null), []);
   const consumeLocationFocusTarget = useCallback(() => setLocationFocusTarget(null), []);
   const [campaigns, setCampaigns] = useState<MarketingCampaignConfig[]>([]);
+  const [marketingTimingDefaults, setMarketingTimingDefaults] = useState<MarketingTimingDefaults>(fallbackMarketingTimingDefaults);
   const [productionSongDrafts, setProductionSongDrafts] = useState<ProductionSongConfig[]>([]);
   const [roadmapPhaseDrafts, setRoadmapPhaseDrafts] = useState<RoadmapPhase[]>([]);
+  const [roadmapPlanDrafts, setRoadmapPlanDrafts] = useState<RoadmapPlan[]>([]);
+  const [openProductionWorkflowFromRoadmap, setOpenProductionWorkflowFromRoadmap] = useState(false);
   const [budgetEntryDrafts, setBudgetEntryDrafts] = useState<BudgetEntry[]>([]);
   const [deletedBudgetForecastIds, setDeletedBudgetForecastIds] = useState<string[]>([]);
   const [eventEntryDrafts, setEventEntryDrafts] = useState<EventEntry[]>([]);
@@ -6069,7 +6189,7 @@ export default function Home() {
     const startDateInput =
       input.campaignKind === "general"
         ? input.startDate
-        : formatDateKeyForInput(addUtcDays(releaseDate, -4).toISOString().slice(0, 10));
+        : formatDateKeyForInput(addUtcDays(releaseDate, -marketingTimingDefaults.songCampaignAdvanceDays).toISOString().slice(0, 10));
     const localCampaign: MarketingCampaignConfig = {
       ...newMarketingCampaign,
       id: `campaign-${campaigns.length + 1}-${Date.now()}`,
@@ -6082,7 +6202,7 @@ export default function Home() {
       campaignDays:
         input.campaignKind === "general"
           ? buildGeneralCampaignDays(startDateInput, releaseDateInput)
-          : buildCampaignDays(releaseDateInput)
+          : buildCampaignDays(releaseDateInput, [], marketingTimingDefaults)
     };
 
     setCampaigns((currentCampaigns) =>
@@ -6116,7 +6236,7 @@ export default function Home() {
       }
 
       const result = (await response.json()) as {
-        campaign?: { id: string; slug: string };
+        campaign?: { id: string; slug: string; releaseDate?: string; timing?: MarketingTimingDefaults };
       };
 
       if (!result.campaign) throw new Error("Campaign creation returned no record.");
@@ -6124,7 +6244,11 @@ export default function Home() {
       const savedCampaign = {
         ...localCampaign,
         id: result.campaign.slug,
-        dbId: result.campaign.id
+        dbId: result.campaign.id,
+        releaseDate: result.campaign.releaseDate ? formatDateKeyForInput(result.campaign.releaseDate) : localCampaign.releaseDate,
+        campaignDays: input.campaignKind === "song"
+          ? buildCampaignDays(result.campaign.releaseDate ?? releaseDate.toISOString().slice(0, 10), [], result.campaign.timing ?? marketingTimingDefaults)
+          : localCampaign.campaignDays
       };
 
       setCampaigns((currentCampaigns) =>
@@ -6481,48 +6605,19 @@ export default function Home() {
 
   async function addProductionSong() {
     const newSongNumber = productionSongDrafts.length + 1;
-    const newDeadline = getNextProductionSongDeadline(productionSongDrafts);
-    let template: ProductionTemplateV1;
     try {
-      const response = await fetch("/api/workspace/production-template", { cache: "no-store" });
-      const payload = await response.json() as { template?: ProductionTemplateV1; error?: string };
-      if (!response.ok || !payload.template) throw new Error(payload.error || "Production workflow is unavailable.");
-      template = payload.template;
-    } catch (error) {
-      setProductionSaveStatus({ message: error instanceof Error ? error.message : "Production workflow is unavailable.", state: "error" });
-      return;
-    }
-    const releaseDate = formatDateForInput(addUtcDays(newDeadline, 14));
-    const localSong = createProductionSongFromV1Template({ id: `production-song-${newSongNumber}-${Date.now()}`, releaseDate: toIsoDate(releaseDate)!, template, title: `New Song ${newSongNumber}` });
-
-    setProductionSongDrafts((currentSongs) =>
-      sortProductionSongsByDeadline([...currentSongs, localSong])
-    );
-    setProductionFocusTarget({ songId: localSong.id, token: Date.now() });
-    void saveProductionSongToSupabase(localSong).then((savedSong) => {
-      if (!savedSong.ok) {
-        setProductionSaveStatus({
-          message: savedSong.error,
-          state: "error"
-        });
-        return;
-      }
-
+      const createdSong = await createRoadmapAwareProductionSong(`New Song ${newSongNumber}`);
       setProductionSongDrafts((currentSongs) =>
-        sortProductionSongsByDeadline(
-          currentSongs.map((song) =>
-            song.id === localSong.id
-              ? {
-                  ...song,
-                  dbId: savedSong.dbId,
-                  id: savedSong.id
-                }
-              : song
-          )
-        )
+        sortProductionSongsByDeadline([...currentSongs, createdSong])
       );
-      setProductionFocusTarget({ songId: savedSong.id, token: Date.now() });
-    });
+      setProductionFocusTarget({ songId: createdSong.id, token: Date.now() });
+      setProductionSaveStatus({ message: "", state: "idle" });
+    } catch (error) {
+      setProductionSaveStatus({
+        message: error instanceof Error ? error.message : "Roadmap-aware Production creation failed.",
+        state: "error"
+      });
+    }
   }
 
   function updateProductionSong(songId: string, updates: Partial<ProductionSongConfig>) {
@@ -6578,6 +6673,29 @@ export default function Home() {
     if (nextSong) {
       queueProductionSongSave(nextSong);
     }
+  }
+
+  async function applyGeneralRoadmapPlan(action: { type: "anchor"; songId: string; releaseDate: string } | { type: "move"; songId: string; direction: -1 | 1 } | { type: "auto-move"; songId: string; autoPlanId: string; direction: -1 | 1 } | { type: "replan" }) {
+    const response = await fetch("/api/roadmap/general-plan", {
+      body: JSON.stringify(action), headers: { "Content-Type": "application/json" }, method: "POST"
+    });
+    const payload = await response.json() as { error?: string; songs?: Array<{ id: string; release_date: string; roadmap_general_position: number }> };
+    if (!response.ok) throw new Error(payload.error || "Roadmap planning update failed.");
+    const updates = new Map((payload.songs ?? []).map((song) => [song.id, song]));
+    setProductionSongDrafts((current) => current.map((song) => {
+      if (!song.dbId) return song;
+      const next = updates.get(song.dbId);
+      if (!next) return song;
+      const releaseDate = formatDateKeyForInput(next.release_date);
+      const rescheduled = song.releaseDate === releaseDate ? song : song.schedulingModel === "template-v1"
+        ? applyProductionV1ReleaseSchedule(song, releaseDate)
+        : applyProductionReleaseSchedule(song, releaseDate);
+      return { ...rescheduled, roadmapGeneralPosition: next.roadmap_general_position };
+    }));
+    setCampaigns((current) => current.map((campaign) => {
+      const next = campaign.productionSongDbId ? updates.get(campaign.productionSongDbId) : undefined;
+      return next ? { ...campaign, releaseDate: formatDateKeyForInput(next.release_date), campaignDays: alignCampaignDaysToReleaseDate(campaign.campaignDays, formatDateKeyForInput(next.release_date)) } : campaign;
+    }));
   }
 
   function deleteProductionSong(songId: string) {
@@ -8133,7 +8251,7 @@ export default function Home() {
         ] = await Promise.all([
           supabase
             .from("production_songs")
-            .select("id, slug, title, production_deadline, release_date, roadmap_phase_id, album_art_url, scheduling_model, production_template_id, production_template_version, production_template_snapshot")
+            .select("id, slug, title, production_deadline, release_date, roadmap_phase_id, roadmap_general_position, album_art_url, scheduling_model, production_template_id, production_template_version, production_template_snapshot")
             .eq("workspace_id", requestedWorkspaceId)
             .order("production_deadline", { ascending: true }),
           supabase
@@ -8202,19 +8320,21 @@ export default function Home() {
     if (!activeWorkspaceId) return;
     const requestedWorkspaceId = activeWorkspaceId;
 
-    void fetch("/api/roadmap/phases")
+    void fetch("/api/roadmap/plans")
       .then(async (response) => {
-        if (!response.ok) throw new Error("Roadmap phases load failed.");
-        return response.json() as Promise<{ phases?: Array<Partial<RoadmapPhase>> }>;
+        if (!response.ok) throw new Error("Roadmap plans load failed.");
+        return response.json() as Promise<{ plans?: Array<Partial<RoadmapPlan>> }>;
       })
       .then((result) => {
         if (!isCancelled) {
-          setRoadmapPhaseDrafts(normalizeRoadmapPhases(result.phases ?? []));
+          const plans = normalizeRoadmapPlans(result.plans ?? []);
+          setRoadmapPlanDrafts(plans);
+          setRoadmapPhaseDrafts(normalizeRoadmapPhases(plans.filter((plan) => plan.planType === "auto").map((plan) => ({ ...plan, endMonth: plan.endDate, startMonth: plan.startDate, phaseNumber: plan.phaseNumber ?? 0 }))));
           setDashboardRoadmapWorkspaceId(requestedWorkspaceId);
         }
       })
       .catch((error) => {
-        console.warn("Using Roadmap phase fallback.", error);
+        console.warn("Using Roadmap plan fallback.", error);
         if (!isCancelled) setDashboardRoadmapWorkspaceId(requestedWorkspaceId);
       });
 
@@ -8378,9 +8498,18 @@ export default function Home() {
       phases?: Array<Partial<RoadmapPhase>>;
     };
     if (!response.ok || !result.phases) {
-      throw new Error(result.error ?? "Roadmap phase creation failed.");
+      throw new Error(result.error ?? "Roadmap plan creation failed.");
     }
     setRoadmapPhaseDrafts(normalizeRoadmapPhases(result.phases));
+  }
+
+  async function mutateRoadmapPlans(method: "POST" | "PATCH" | "PUT" | "DELETE", body: Record<string, unknown>) {
+    const response = await fetch("/api/roadmap/plans", { body: JSON.stringify(body), headers: { "content-type": "application/json", "x-love-strings-roadmap": "write" }, method });
+    const result = await response.json() as { error?: string; plans?: Array<Partial<RoadmapPlan>> };
+    if (!response.ok || !result.plans) throw new Error(result.error ?? "Roadmap plan update failed.");
+    const plans = normalizeRoadmapPlans(result.plans);
+    setRoadmapPlanDrafts(plans);
+    setRoadmapPhaseDrafts(normalizeRoadmapPhases(plans.filter((plan) => plan.planType === "auto").map((plan) => ({ ...plan, endMonth: plan.endDate, startMonth: plan.startDate, phaseNumber: plan.phaseNumber ?? 0 }))));
   }
 
   async function saveRoadmapPhase(phase: RoadmapPhase) {
@@ -8403,7 +8532,7 @@ export default function Home() {
       phases?: Array<Partial<RoadmapPhase>>;
     };
     if (!response.ok || !result.phases) {
-      throw new Error(result.error ?? "Roadmap phase save failed.");
+      throw new Error(result.error ?? "Roadmap plan save failed.");
     }
     setRoadmapPhaseDrafts(normalizeRoadmapPhases(result.phases));
   }
@@ -8422,7 +8551,7 @@ export default function Home() {
       phases?: Array<Partial<RoadmapPhase>>;
     };
     if (!response.ok || !result.phases) {
-      throw new Error(result.error ?? "Roadmap phase deletion failed.");
+      throw new Error(result.error ?? "Roadmap plan deletion failed.");
     }
     setRoadmapPhaseDrafts(normalizeRoadmapPhases(result.phases));
     setProductionSongDrafts((currentSongs) =>
@@ -8528,6 +8657,9 @@ export default function Home() {
             logoPath={appLogoPath}
             logoUrl={appLogoUrl}
             onBack={() => setSettingsView(null)}
+            openProductionWorkflowOnMount={openProductionWorkflowFromRoadmap}
+            onProductionWorkflowOpenConsumed={() => setOpenProductionWorkflowFromRoadmap(false)}
+            onMarketingTimingDefaultsChange={setMarketingTimingDefaults}
             onLogoChange={(logoPath, logoUrl) => {
               setAppLogoPath(logoPath);
               setAppLogoUrl(logoUrl);
@@ -8553,17 +8685,21 @@ export default function Home() {
             onCreatePhase={createRoadmapPhase}
             onOpenMarketing={openRoadmapMarketingCampaign}
             onOpenProduction={openRoadmapProductionSong}
+            onOpenProductionWorkflowSettings={() => { setOpenProductionWorkflowFromRoadmap(true); setSettingsView("general"); window.setTimeout(() => document.getElementById("production-workflow-settings")?.scrollIntoView({ block: "start" }), 0); }}
             onNavigationContextChange={setRoadmapNavigationContext}
             onDeletePhase={deleteRoadmapPhase}
-            onSavePhase={saveRoadmapPhase}
             onSongChange={updateProductionSong}
+            onGeneralPlanChange={applyGeneralRoadmapPlan}
             phases={roadmapPhaseDrafts}
+            plans={roadmapPlanDrafts}
+            onPlanMutation={mutateRoadmapPlans}
             songs={productionSongDrafts}
           />
         ) : null}
         {!settingsView && activeSection === "Marketing" ? (
           <MarketingView
             campaigns={campaigns}
+            marketingTimingDefaults={marketingTimingDefaults}
             focusTarget={marketingFocusTarget}
             restoreContext={marketingRestoreContext}
             onAddCampaign={addCampaign}
@@ -8615,7 +8751,7 @@ export default function Home() {
             onSongChange={updateProductionSong}
             phaseOptions={roadmapPhaseDrafts.map((phase) => ({
               id: phase.id,
-              label: `Phase ${phase.phaseNumber}: ${phase.title}`
+              label: `Plan ${phase.phaseNumber}: ${phase.title}`
             }))}
             saveStatus={productionSaveStatus}
             songs={productionSongDrafts}
@@ -8704,7 +8840,7 @@ export default function Home() {
         </div>
       </section>
       <FloatingNavigationBackButton
-        isVisible={!settingsView && navigationStack.length > 0}
+        isVisible={!settingsView && activeSection !== "Roadmap" && navigationStack.length > 0}
         onBack={goBackToPreviousAppState}
       />
       </> : null}
@@ -9049,6 +9185,8 @@ function GeneralSettingsView({
   logoPath,
   logoUrl,
   onBack,
+  onMarketingTimingDefaultsChange,
+  onProductionWorkflowOpenConsumed,
   onLogoChange,
   onWorkspaceNameChange,
   onWorkspaceTimeZoneChange,
@@ -9056,18 +9194,22 @@ function GeneralSettingsView({
   workspaceId,
   workspaceRole,
   workspaceTimeZone
+  ,openProductionWorkflowOnMount
 }: {
   activeSection: Section;
   logoPath: string;
   logoUrl: string;
   onBack: () => void;
+  onProductionWorkflowOpenConsumed: () => void;
   onLogoChange: (logoPath: string, logoUrl: string) => void;
+  onMarketingTimingDefaultsChange: (defaults: MarketingTimingDefaults) => void;
   onWorkspaceNameChange: (name: string) => void;
   onWorkspaceTimeZoneChange: (timezone: string) => void;
   workspaceName: string;
   workspaceId: string;
   workspaceRole: "admin";
   workspaceTimeZone: string;
+  openProductionWorkflowOnMount: boolean;
 }) {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const isCurrentWorkspace = useRef(true);
@@ -9115,6 +9257,13 @@ function GeneralSettingsView({
   const [isWorkspaceTimeZoneEditing, setIsWorkspaceTimeZoneEditing] = useState(false);
   const [isLogoOpen, setIsLogoOpen] = useState(false);
   const [isProductionWorkflowOpen, setIsProductionWorkflowOpen] = useState(false);
+  const [isMarketingDefaultsOpen, setIsMarketingDefaultsOpen] = useState(false);
+
+  useEffect(() => {
+    if (!openProductionWorkflowOnMount) return;
+    setIsProductionWorkflowOpen(true);
+    onProductionWorkflowOpenConsumed();
+  }, [onProductionWorkflowOpenConsumed, openProductionWorkflowOnMount]);
   const [areCurrentMembersOpen, setAreCurrentMembersOpen] = useState(false);
   const [isInviteUserOpen, setIsInviteUserOpen] = useState(false);
   const [areInvitationsOpen, setAreInvitationsOpen] = useState(false);
@@ -9940,7 +10089,7 @@ function GeneralSettingsView({
 
         <section className="settings-parent-card settings-parent-production">
           <div className="settings-parent-heading"><p className="eyebrow">Production module</p></div>
-          <article className="general-settings-card">
+          <article className="general-settings-card" id="production-workflow-settings">
             <SettingsDisclosure
               actionLabel="Edit Production workflow"
               isOpen={isProductionWorkflowOpen}
@@ -9949,6 +10098,20 @@ function GeneralSettingsView({
               title="Production workflow"
             />
             {isProductionWorkflowOpen ? <ProductionWorkflowSettings /> : null}
+          </article>
+        </section>
+
+        <section className="settings-parent-card settings-parent-marketing">
+          <div className="settings-parent-heading"><p className="eyebrow">Marketing module</p></div>
+          <article className="general-settings-card" id="marketing-defaults-settings">
+            <SettingsDisclosure
+              actionLabel="Edit Marketing defaults"
+              isOpen={isMarketingDefaultsOpen}
+              onToggle={() => setIsMarketingDefaultsOpen((current) => !current)}
+              summary="Timing for future campaigns"
+              title="Marketing defaults"
+            />
+            {isMarketingDefaultsOpen ? <MarketingDefaultsSettings onUpdated={onMarketingTimingDefaultsChange} /> : null}
           </article>
         </section>
 
@@ -12843,8 +13006,8 @@ function ProductionSongBoard({
   const [artworkUploadStatus, setArtworkUploadStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
   const [isAlbumArtEditorOpen, setIsAlbumArtEditorOpen] = useState(false);
   const [isFocusHighlighted, setIsFocusHighlighted] = useState(false);
-  const [isReleaseDateEditing, setIsReleaseDateEditing] = useState(false);
   const [isSongOpen, setIsSongOpen] = useState(false);
+  const [isReleaseDateEditing, setIsReleaseDateEditing] = useState(false);
   const [isSongTitleEditorOpen, setIsSongTitleEditorOpen] = useState(false);
   const [isSongDeleteArmed, setIsSongDeleteArmed] = useState(false);
   const releaseDate = parseCampaignDate(appliedDeadlineInput);
@@ -13327,9 +13490,9 @@ function ProductionSongBoard({
               ) : null}
             </div>
             <label className="roadmap-phase-select">
-              <span className="song-option-field-heading">Roadmap phase</span>
+              <span className="song-option-field-heading">Roadmap plan</span>
               <select
-                aria-label={`${songTitle} roadmap phase`}
+                aria-label={`${songTitle} roadmap plan`}
                 onChange={(event) =>
                   onChange(song.id, {
                     roadmapPhaseId: event.target.value || null
@@ -14049,6 +14212,7 @@ function normalizeProductionBudgetLines(budgetLines: ProductionBudgetLine[]) {
 
 function MarketingView({
   campaigns,
+  marketingTimingDefaults,
   focusTarget,
   onAddCampaign,
   onCampaignBudgetLinesChange,
@@ -14064,6 +14228,7 @@ function MarketingView({
   restoreContext
 }: {
   campaigns: MarketingCampaignConfig[];
+  marketingTimingDefaults: MarketingTimingDefaults;
   focusTarget: { campaignId: string; elementId?: string; inputId?: string; token: number } | null;
   onAddCampaign: (input: NewMarketingCampaignInput) => void;
   onCampaignBudgetLinesChange: (
@@ -14089,17 +14254,24 @@ function MarketingView({
   const [selectedProductionSongId, setSelectedProductionSongId] = useState(
     productionSongs[0]?.id ?? ""
   );
-  const [campaignSource, setCampaignSource] = useState<"general" | "song">("song");
+  const [campaignSource, setCampaignSource] = useState<"general" | "song">("general");
   const [generalCampaignTitle, setGeneralCampaignTitle] = useState("");
   const [generalCampaignStartDate, setGeneralCampaignStartDate] = useState(() =>
     formatDateKeyForInput(getViennaDateKey())
   );
   const [generalCampaignEndDate, setGeneralCampaignEndDate] = useState(() => {
     const today = parseCampaignDateKey(getViennaDateKey()) ?? getTodayUtcDate();
-    return formatDateKeyForInput(addUtcDays(today, 13).toISOString().slice(0, 10));
+    return formatDateKeyForInput(addUtcDays(today, marketingTimingDefaults.generalCampaignLengthDays - 1).toISOString().slice(0, 10));
   });
+  const [isGeneralEndDateDirty, setIsGeneralEndDateDirty] = useState(false);
   const generalCampaignStartDateIso = toIsoDate(generalCampaignStartDate);
-  const generalCampaignEndDateIso = toIsoDate(generalCampaignEndDate);
+  const proposedGeneralEndDate = generalCampaignStartDateIso
+    ? formatDateKeyForInput(proposedGeneralCampaignEndDate(generalCampaignStartDateIso, marketingTimingDefaults.generalCampaignLengthDays))
+    : generalCampaignEndDate;
+  const effectiveGeneralCampaignEndDate = isGeneralEndDateDirty
+    ? generalCampaignEndDate
+    : proposedGeneralEndDate;
+  const generalCampaignEndDateIso = toIsoDate(effectiveGeneralCampaignEndDate);
   const canCreateGeneralCampaign = Boolean(
     generalCampaignTitle.trim() &&
       generalCampaignStartDateIso &&
@@ -14278,8 +14450,8 @@ function MarketingView({
                     ? "Enter a valid date."
                     : undefined
                 }
-                onChange={setGeneralCampaignEndDate}
-                value={generalCampaignEndDate}
+                onChange={(value) => { setIsGeneralEndDateDirty(true); setGeneralCampaignEndDate(value); }}
+                value={effectiveGeneralCampaignEndDate}
               />
             </div>
           ) : null}
@@ -14294,7 +14466,7 @@ function MarketingView({
               if (campaignSource === "general") {
                 onAddCampaign({
                   campaignKind: "general",
-                  endDate: generalCampaignEndDate,
+                  endDate: effectiveGeneralCampaignEndDate,
                   startDate: generalCampaignStartDate,
                   title: generalCampaignTitle
                 });
@@ -14369,7 +14541,6 @@ function MarketingCampaignBoard({
   const [armedCampaignDayNumber, setArmedCampaignDayNumber] = useState<
     number | null
   >(null);
-  const [isReleaseDateEditing, setIsReleaseDateEditing] = useState(false);
   const [isGeneralSettingsEditing, setIsGeneralSettingsEditing] = useState(false);
   const [generalAlbumArtUrlInput, setGeneralAlbumArtUrlInput] = useState(
     campaign.albumArtUrl
@@ -14424,16 +14595,12 @@ function MarketingCampaignBoard({
         ];
   const releaseDateIso = toIsoDate(releaseDateInput);
   const generalStartDateIso = toIsoDate(generalStartDateInput);
-  const canUpdateReleaseDate = Boolean(releaseDateIso);
   const canSaveGeneralSettings = Boolean(
     generalTitleInput.trim() &&
       generalStartDateIso &&
       releaseDateIso &&
       generalStartDateIso <= releaseDateIso
   );
-  const dateEditorLabel = "Release date";
-  const dateChangeWarning =
-    "Changing release date will also recalculate Production deadlines and update Roadmap planning!";
 
   useEffect(() => {
     if (!campaign.campaignDays) {
@@ -14447,7 +14614,6 @@ function MarketingCampaignBoard({
     window.setTimeout(() => {
       setReleaseDateInput(campaign.releaseDate);
       setAppliedReleaseDateInput(campaign.releaseDate);
-      setIsReleaseDateEditing(false);
     }, 0);
   }, [campaign.releaseDate]);
 
@@ -14557,29 +14723,6 @@ function MarketingCampaignBoard({
     window.addEventListener("pointerdown", cancelCampaignDayDelete);
     return () => window.removeEventListener("pointerdown", cancelCampaignDayDelete);
   }, [armedCampaignDayNumber]);
-
-  useEffect(() => {
-    if (!isReleaseDateEditing) {
-      return;
-    }
-
-    function cancelReleaseDateEdit(event: PointerEvent) {
-      const target = event.target;
-
-      if (
-        target instanceof Element &&
-        target.closest(".marketing-release-date-editor")
-      ) {
-        return;
-      }
-
-      setReleaseDateInput(appliedReleaseDateInput);
-      setIsReleaseDateEditing(false);
-    }
-
-    window.addEventListener("pointerdown", cancelReleaseDateEdit);
-    return () => window.removeEventListener("pointerdown", cancelReleaseDateEdit);
-  }, [appliedReleaseDateInput, isReleaseDateEditing]);
 
   useEffect(() => {
     if (!isGeneralSettingsEditing) return;
@@ -14722,30 +14865,6 @@ function MarketingCampaignBoard({
     onFocus(campaign.id, getMarketingCampaignDayElementId(campaign.id, dayNumber));
   }
 
-  function applyReleaseDateUpdate() {
-    const nextReleaseDate = parseCampaignDate(releaseDateInput);
-
-    if (!releaseDateIso || !nextReleaseDate) {
-      return;
-    }
-
-    setAppliedReleaseDateInput(releaseDateInput);
-    onFocus(campaign.id);
-    onReleaseDateSave(campaign.id, releaseDateInput);
-    if (isGeneralCampaign) {
-      updateCampaignDaysState((currentDays) =>
-        buildGeneralCampaignDays(
-          appliedGeneralStartDateInput,
-          releaseDateInput,
-          currentDays
-        )
-      );
-    } else {
-      shiftCampaignDates(nextReleaseDate);
-    }
-    setIsReleaseDateEditing(false);
-  }
-
   function applyGeneralSettingsUpdate() {
     if (!canSaveGeneralSettings) return;
 
@@ -14779,36 +14898,6 @@ function MarketingCampaignBoard({
       nextDays
     );
     setIsGeneralSettingsEditing(false);
-  }
-
-  function beginReleaseDateEdit() {
-    setReleaseDateInput(appliedReleaseDateInput);
-    setIsReleaseDateEditing(true);
-  }
-
-  function shiftCampaignDates(nextReleaseDate: Date) {
-    updateCampaignDaysState((currentDays) =>
-      Array.from({ length: currentDays.length }, (_, index) =>
-        buildCampaignDay(nextReleaseDate, index)
-      ).map((nextDay) => {
-        const currentDay = currentDays.find(
-          (day) => day.dayNumber === nextDay.dayNumber
-        );
-
-        return currentDay
-          ? {
-              ...nextDay,
-              clipName: currentDay.clipName,
-              extraTasks: currentDay.extraTasks,
-              statuses: currentDay.statuses
-            }
-          : nextDay;
-      })
-    );
-  }
-
-  function updateReleaseDateInput(value: string) {
-    setReleaseDateInput(value);
   }
 
   function updateClipName(dayNumber: number, clipName: string) {
@@ -15325,40 +15414,11 @@ function MarketingCampaignBoard({
             <details className="campaign-danger-zone">
               <summary>Campaign options</summary>
               <div>
-                <label className="release-date-field marketing-release-date-editor">
-                  <span>{dateEditorLabel}</span>
-                  <div className="release-date-input-row">
-                    <DateInput
-                      aria-label="Release date in dd/mm/yyyy format"
-                      calendarLabel="Choose release date"
-                      disabled={!isReleaseDateEditing}
-                      error={
-                        isReleaseDateEditing && releaseDateInput && !releaseDateIso
-                          ? "Enter a valid date."
-                          : undefined
-                      }
-                      onChange={updateReleaseDateInput}
-                      value={releaseDateInput}
-                    />
-                    <button
-                      aria-label={isReleaseDateEditing ? "Save release date" : "Edit release date"}
-                      disabled={isReleaseDateEditing && !canUpdateReleaseDate}
-                      onClick={isReleaseDateEditing ? applyReleaseDateUpdate : beginReleaseDateEdit}
-                      type="button"
-                    >
-                      {isReleaseDateEditing ? (
-                        <Save size={16} aria-hidden />
-                      ) : (
-                        <Pencil size={16} aria-hidden />
-                      )}
-                    </button>
-                  </div>
-                  {isReleaseDateEditing ? (
-                    <span className="release-date-change-warning">
-                      {dateChangeWarning}
-                    </span>
-                  ) : null}
-                </label>
+                <div className="release-date-field marketing-release-date-editor">
+                  <span>Release date</span>
+                  <strong>{releaseDateDisplay ?? "—"}</strong>
+                  <small>Managed in Production / Roadmap.</small>
+                </div>
                 <button
                   className={`delete-campaign-button marketing-campaign-delete-button${
                     isCampaignDeleteArmed ? " is-armed" : ""
@@ -17608,17 +17668,17 @@ function DashboardRoadmapPhasePreview({
   songs: ProductionSongConfig[];
 }) {
   const [isSongListOpen, setIsSongListOpen] = useState(false);
-  const phaseSongs = sortRoadmapSongs(
-    songs.filter((song) => song.roadmapPhaseId === phase.id)
-  );
+  const phaseSongs = [...songs]
+    .filter((song) => song.roadmapPhaseId === phase.id)
+    .sort((first, second) => (first.roadmapGeneralPosition ?? Number.MAX_SAFE_INTEGER) - (second.roadmapGeneralPosition ?? Number.MAX_SAFE_INTEGER));
   const releasedCount = phaseSongs.filter(isRoadmapSongReleased).length;
 
   return (
-    <section className="dashboard-roadmap" aria-label="Roadmap phase preview">
+    <section className="dashboard-roadmap" aria-label="Roadmap plan preview">
       <article className="roadmap-phase-card module-accent module-accent-roadmap">
         <div className="roadmap-phase-heading">
           <div className="roadmap-phase-kicker-row">
-            <p className="eyebrow">Phase {phase.phaseNumber}</p>
+            <p className="eyebrow">Plan {phase.phaseNumber}</p>
             <span>{formatRoadmapMonthRange(phase.startMonth, phase.endMonth)}</span>
           </div>
           <h2>{phase.title}</h2>
@@ -19976,10 +20036,13 @@ function RoadmapView({
   onDeletePhase,
   onOpenMarketing,
   onOpenProduction,
+  onOpenProductionWorkflowSettings,
   onNavigationContextChange,
-  onSavePhase,
   onSongChange,
+  onGeneralPlanChange,
+  onPlanMutation,
   phases,
+  plans,
   songs,
   restoreContext
 }: {
@@ -19988,21 +20051,94 @@ function RoadmapView({
   onDeletePhase: (phaseId: string) => Promise<void>;
   onOpenMarketing: (song: ProductionSongConfig) => void;
   onOpenProduction: (songId: string) => void;
+  onOpenProductionWorkflowSettings: () => void;
   onNavigationContextChange: (context: RoadmapNavigationContext | null) => void;
-  onSavePhase: (phase: RoadmapPhase) => Promise<void>;
   onSongChange: (songId: string, updates: Partial<ProductionSongConfig>) => void;
+  onGeneralPlanChange: (action: { type: "anchor"; songId: string; releaseDate: string } | { type: "move"; songId: string; direction: -1 | 1 } | { type: "auto-move"; songId: string; autoPlanId: string; direction: -1 | 1 } | { type: "replan" }) => Promise<void>;
+  onPlanMutation: (method: "POST" | "PATCH" | "PUT" | "DELETE", body: Record<string, unknown>) => Promise<void>;
   phases: RoadmapPhase[];
+  plans: RoadmapPlan[];
   songs: ProductionSongConfig[];
   restoreContext: { context: RoadmapNavigationContext; token: number } | null;
 }) {
   const [openCardId, setOpenCardId] = useState<string | null>(
     () => restoreContext?.context.openCardId ?? null
   );
-  const [settingsPhaseId, setSettingsPhaseId] = useState<string | null>(null);
+  const [cadenceDays, setCadenceDays] = useState(30);
+  const [cadenceDraft, setCadenceDraft] = useState("30");
+  const [cadenceLoaded, setCadenceLoaded] = useState(false);
+  const [plannerStatus, setPlannerStatus] = useState("");
+  const [isCreatePlanOpen, setIsCreatePlanOpen] = useState(false);
+  const [isPlanningOpen, setIsPlanningOpen] = useState(false);
+  const [showGeneralReleased, setShowGeneralReleased] = useState(true);
+  const [hiddenAutoReleased, setHiddenAutoReleased] = useState<Set<string>>(() => new Set());
+  const [settingsOpenCardId, setSettingsOpenCardId] = useState<string | null>(null);
+  const [standardProductionPlanDays, setStandardProductionPlanDays] = useState<{ ideaToDistributor: number; ideaToRelease: number } | null>(null);
   const releasedSongs = songs.filter(isRoadmapSongReleased).length;
   const months = buildLiveRoadmapMonths(songs, phases);
   const firstPhase = phases[0] ?? null;
   const lastPhase = phases[phases.length - 1] ?? null;
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/workspace/roadmap-settings", { cache: "no-store" }).then((response) => response.json()).then((payload: { cadenceDays?: number }) => {
+      if (!cancelled && payload.cadenceDays) { setCadenceDays(payload.cadenceDays); setCadenceDraft(String(payload.cadenceDays)); }
+    }).catch(() => undefined).finally(() => { if (!cancelled) setCadenceLoaded(true); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/workspace/production-template", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Production template unavailable.");
+        return response.json() as Promise<{ template?: ProductionTemplateV1 }>;
+      })
+      .then(({ template }) => {
+        if (!cancelled && template) {
+          const scheduledSteps = template.steps.filter((step) => step.isEnabled && step.stepKind !== "idea_anchor" && step.stepKind !== "release_anchor");
+          setStandardProductionPlanDays({
+            ideaToDistributor: scheduledSteps.filter((step) => step.semanticKind !== "distribution").reduce((total, step) => total + step.leadTimeDays, 0),
+            ideaToRelease: scheduledSteps.reduce((total, step) => total + step.leadTimeDays, 0)
+          });
+        }
+      })
+      .catch(() => { if (!cancelled) setStandardProductionPlanDays(null); });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function saveCadence() {
+    const days = Number(cadenceDraft);
+    setPlannerStatus("Saving cadence…");
+    try {
+      const response = await fetch("/api/workspace/roadmap-settings", { body: JSON.stringify({ cadenceDays: days }), headers: { "Content-Type": "application/json" }, method: "PATCH" });
+      const payload = await response.json() as { cadenceDays?: number; error?: string };
+      if (!response.ok || !payload.cadenceDays) throw new Error(payload.error || "Roadmap cadence save failed.");
+      setCadenceDays(payload.cadenceDays); setCadenceDraft(String(payload.cadenceDays)); setPlannerStatus("Cadence saved. Existing dates are unchanged.");
+    } catch (error) { setPlannerStatus(error instanceof Error ? error.message : "Roadmap cadence save failed."); }
+  }
+
+  async function saveAndReplan() {
+    const previous = cadenceDays;
+    const days = Number(cadenceDraft);
+    setPlannerStatus("Updating roadmap…");
+    try {
+      const response = await fetch("/api/workspace/roadmap-settings", { body: JSON.stringify({ cadenceDays: days }), headers: { "Content-Type": "application/json" }, method: "PATCH" });
+      const payload = await response.json() as { cadenceDays?: number; error?: string };
+      if (!response.ok || !payload.cadenceDays) throw new Error(payload.error || "Roadmap cadence save failed.");
+      await onGeneralPlanChange({ type: "replan" });
+      setCadenceDays(payload.cadenceDays); setCadenceDraft(String(payload.cadenceDays)); setPlannerStatus("New release plan rules saved. Release plan and production deadlines recalculated.");
+    } catch (error) {
+      if (Number(cadenceDraft) !== previous) await fetch("/api/workspace/roadmap-settings", { body: JSON.stringify({ cadenceDays: previous }), headers: { "Content-Type": "application/json" }, method: "PATCH" }).catch(() => undefined);
+      setCadenceDraft(String(previous)); setPlannerStatus(error instanceof Error ? error.message : "Roadmap update failed.");
+    }
+  }
+
+  async function runPlan(action: { type: "anchor"; songId: string; releaseDate: string } | { type: "move"; songId: string; direction: -1 | 1 } | { type: "auto-move"; songId: string; autoPlanId: string; direction: -1 | 1 } | { type: "replan" }) {
+    setPlannerStatus("Updating roadmap…");
+    try { await onGeneralPlanChange(action); setPlannerStatus("Roadmap updated."); }
+    catch (error) { setPlannerStatus(error instanceof Error ? error.message : "Roadmap update failed."); }
+  }
 
   return (
     <>
@@ -20013,6 +20149,22 @@ function RoadmapView({
         </div>
         <ModuleHeaderDate />
       </header>
+
+      <section className={`roadmap-overview roadmap-planning-parent panel module-accent module-accent-roadmap${isPlanningOpen ? " is-open" : ""}`} aria-label="Roadmap planning settings">
+        <div className="roadmap-overview-header roadmap-planning-header"><p className="eyebrow">General Roadmap planning</p><div className="roadmap-overview-toggle-row"><button className="roadmap-toggle" onClick={() => setIsPlanningOpen((current) => !current)} type="button" aria-expanded={isPlanningOpen} aria-label={isPlanningOpen ? "Hide General Roadmap Planning" : "Show General Roadmap Planning"}><ChevronDown size={19} /></button></div></div>
+        {isPlanningOpen ? <><div className="roadmap-planning-child"><div className="roadmap-production-plan-summary"><p>Your Idea→Release window: <strong>{standardProductionPlanDays?.ideaToRelease ?? "…"} days</strong></p><p>Your Idea→Distributor window: <strong>{standardProductionPlanDays?.ideaToDistributor ?? "…"} days</strong></p><span>You can change this in <button onClick={onOpenProductionWorkflowSettings} type="button">Settings</button></span></div>
+        <div aria-busy={!cadenceLoaded} className="roadmap-cadence-control">
+          {cadenceLoaded ? <>
+            <label className="roadmap-cadence-select"><span>How often do you plan to release your songs?</span><select aria-label="Roadmap release cadence" onChange={(event) => { const value = event.target.value; if (value !== "custom") setCadenceDraft(value); }} value={["7", "14", "21", "28"].includes(cadenceDraft) ? cadenceDraft : "custom"}><option value="7">1 week</option><option value="14">2 weeks</option><option value="21">3 weeks</option><option value="28">4 weeks</option><option value="custom">Custom</option></select></label>
+            <label className="roadmap-cadence-days"><span className="visually-hidden">Days</span><input aria-label="Release cadence days" min="1" onChange={(event) => setCadenceDraft(event.target.value)} step="1" type="number" value={cadenceDraft === "custom" ? "" : cadenceDraft} /></label>
+            <button className="roadmap-cadence-save" disabled={!Number.isInteger(Number(cadenceDraft)) || Number(cadenceDraft) <= 0} onClick={() => void saveAndReplan()} type="button"><Save size={15} aria-hidden /><span>Replan</span></button>
+          </> : <p className="roadmap-cadence-loading">Loading cadence settings…</p>}
+        </div>
+        {plannerStatus ? <p className="settings-status">{plannerStatus}</p> : null}
+        </div>
+        {isCreatePlanOpen ? <RoadmapPlanCreateForm onCancel={() => setIsCreatePlanOpen(false)} onCreate={async (draft) => { await onPlanMutation("POST", draft); setIsCreatePlanOpen(false); }} /> : <button className="add-campaign-button roadmap-add-phase" onClick={() => setIsCreatePlanOpen(true)} type="button"><Plus size={16} aria-hidden />Create new Plan/Collection</button>}
+        </> : null}
+      </section>
 
       {firstPhase && lastPhase ? <section className="roadmap-overview panel module-accent module-accent-roadmap" aria-label="General roadmap progress">
         <div className="roadmap-overview-header">
@@ -20044,29 +20196,49 @@ function RoadmapView({
           </button>
         </div>
         {openCardId === "general" ? (
+          <>
+          {songs.some(isRoadmapSongReleased) ? <button className="roadmap-settings-link roadmap-released-songs-toggle" onClick={() => setShowGeneralReleased((current) => !current)} type="button">{showGeneralReleased ? "Hide released songs" : "Show released songs"}</button> : null}
           <RoadmapSongList
             campaigns={campaigns}
             onOpenMarketing={onOpenMarketing}
             onOpenProduction={onOpenProduction}
             onSongChange={onSongChange}
+            generalPlanner
+            onGeneralPlanChange={runPlan}
             phases={phases}
-            songs={songs}
+            songs={showGeneralReleased ? songs : songs.filter((song) => !isRoadmapSongReleased(song))}
           />
+          </>
         ) : null}
       </section> : (
         <section className="roadmap-overview panel module-accent module-accent-roadmap" aria-label="General roadmap progress">
           <p className="eyebrow">General Roadmap Progress</p>
-          <h2>No roadmap phases yet.</h2>
-          <p>Create a phase when this workspace is ready to plan its release roadmap.</p>
+          <h2>No roadmap plans yet.</h2>
+          <p>Create a plan when this workspace is ready to plan its release roadmap.</p>
         </section>
       )}
 
-      <section className="roadmap-phase-grid" aria-label="Roadmap phases">
+      <section className="roadmap-phase-grid" aria-label="Roadmap plans">
         {phases.map((phase) => {
-          const phaseSongs = sortRoadmapSongs(
-            songs.filter((song) => song.roadmapPhaseId === phase.id)
-          );
+          const phaseSongs = [...songs]
+            .filter((song) => song.roadmapPhaseId === phase.id)
+            .sort((first, second) => (first.roadmapGeneralPosition ?? Number.MAX_SAFE_INTEGER) - (second.roadmapGeneralPosition ?? Number.MAX_SAFE_INTEGER));
           const phaseReleasedCount = phaseSongs.filter(isRoadmapSongReleased).length;
+          const outsideTimeframeCount = phaseSongs.filter((song) => {
+            const releaseDate = toIsoDate(song.releaseDate);
+            return Boolean(releaseDate && (releaseDate < phase.startMonth || releaseDate > phase.endMonth));
+          }).length;
+          const plan = plans.find((candidate) => candidate.id === phase.id) ?? {
+            displayPosition: phase.phaseNumber,
+            endDate: phase.endMonth,
+            id: phase.id,
+            phaseNumber: phase.phaseNumber,
+            planType: "auto" as const,
+            songIds: phaseSongs.map((song) => song.dbId ?? song.id),
+            startDate: phase.startMonth,
+            summary: phase.summary,
+            title: phase.title
+          };
 
           return (
             <article
@@ -20075,7 +20247,7 @@ function RoadmapView({
             >
               <div className="roadmap-phase-heading">
                 <div className="roadmap-phase-kicker-row">
-                  <p className="eyebrow">Phase {phase.phaseNumber}</p>
+                  <p className="eyebrow">Plan {phase.phaseNumber}</p>
                   <span>{formatRoadmapMonthRange(phase.startMonth, phase.endMonth)}</span>
                 </div>
                 <h2>{phase.title}</h2>
@@ -20088,11 +20260,26 @@ function RoadmapView({
                 />
               </div>
               <p>{phase.summary}</p>
+              {outsideTimeframeCount > 0 ? <p className="roadmap-timeframe-warning" role="status">{outsideTimeframeCount} song{outsideTimeframeCount === 1 ? "" : "s"} outside plan timeframe</p> : null}
 
-              <div className="roadmap-overview-toggle-row">
+              <div className="roadmap-overview-toggle-row roadmap-plan-card-actions">
+                <button
+                  aria-expanded={settingsOpenCardId === phase.id}
+                  aria-label={`${settingsOpenCardId === phase.id ? "Hide" : "Show"} settings for ${phase.title}`}
+                  className="roadmap-plan-settings-button"
+                  onClick={() => {
+                    setOpenCardId(phase.id);
+                    onNavigationContextChange({ openCardId: phase.id });
+                    setSettingsOpenCardId((current) => current === phase.id ? null : phase.id);
+                  }}
+                  type="button"
+                >
+                  <Settings size={16} aria-hidden />
+                  <span>Settings</span>
+                </button>
                 <button
                   aria-expanded={openCardId === phase.id}
-                  aria-label={openCardId === phase.id ? `Hide Phase ${phase.phaseNumber} songs` : `Show Phase ${phase.phaseNumber} songs`}
+                  aria-label={openCardId === phase.id ? `Hide Plan ${phase.phaseNumber} songs` : `Show Plan ${phase.phaseNumber} songs`}
                   className="roadmap-toggle"
                   onClick={() => {
                     const nextOpenCardId = openCardId === phase.id ? null : phase.id;
@@ -20109,45 +20296,67 @@ function RoadmapView({
 
               {openCardId === phase.id ? (
                 <>
+                  <RoadmapPlanSettings
+                    open={settingsOpenCardId === phase.id}
+                    onDelete={async () => {
+                      await onDeletePhase(phase.id);
+                      setOpenCardId(null);
+                      setSettingsOpenCardId(null);
+                    }}
+                    onSave={(draft) => onPlanMutation("PATCH", { id: plan.id, ...draft })}
+                    plan={plan}
+                  />
+                  {phaseSongs.some(isRoadmapSongReleased) ? <button className="roadmap-settings-link roadmap-released-songs-toggle" onClick={() => setHiddenAutoReleased((current) => { const next = new Set(current); if (next.has(phase.id)) next.delete(phase.id); else next.add(phase.id); return next; })} type="button">{hiddenAutoReleased.has(phase.id) ? "Show released songs" : "Hide released songs"}</button> : null}
                   <RoadmapSongList
                     campaigns={campaigns}
                     onOpenMarketing={onOpenMarketing}
                     onOpenProduction={onOpenProduction}
                     onSongChange={onSongChange}
                     phases={phases}
-                    songs={phaseSongs}
+                    songs={hiddenAutoReleased.has(phase.id) ? phaseSongs.filter((song) => !isRoadmapSongReleased(song)) : phaseSongs}
+                    autoPlanId={phase.id}
+                    onGeneralPlanChange={runPlan}
                   />
-                  <button
-                    className="roadmap-settings-link"
-                    onClick={() => setSettingsPhaseId((current) => current === phase.id ? null : phase.id)}
-                    type="button"
-                  >
-                    Phase settings
-                  </button>
-                  {settingsPhaseId === phase.id ? (
-                    <RoadmapPhaseSettings
-                      onDelete={async (phaseId) => {
-                        await onDeletePhase(phaseId);
-                        setOpenCardId(null);
-                        setSettingsPhaseId(null);
-                      }}
-                      phase={phase}
-                      onSave={onSavePhase}
-                    />
-                  ) : null}
                 </>
               ) : null}
             </article>
           );
         })}
       </section>
-      <button className="add-campaign-button roadmap-add-phase" onClick={() => void onCreatePhase()} type="button">
-        <Plus size={16} aria-hidden />
-        Create new phase
-      </button>
+      {plans.filter((plan) => plan.planType === "manual").map((plan) => (
+        <ManualRoadmapPlanCard campaigns={campaigns} key={plan.id} onOpenMarketing={onOpenMarketing} onOpenProduction={onOpenProduction} onPlanMutation={onPlanMutation} onSongChange={onSongChange} plan={plan} songs={songs} />
+      ))}
     </>
   );
 }
+
+function RoadmapPlanCreateForm({ onCancel, onCreate }: { onCancel: () => void; onCreate: (draft: Record<string, unknown>) => Promise<void> }) {
+  const start = getViennaDateKey();
+  const [title, setTitle] = useState(""); const [planType, setPlanType] = useState<"auto" | "manual">("manual"); const [startDate, setStartDate] = useState(toDisplayDate(start)); const [endDate, setEndDate] = useState(() => toDisplayDate(addCalendarMonth(start))); const [status, setStatus] = useState("");
+  return <section className="roadmap-phase-settings roadmap-plan-create-card module-accent-thin module-accent-roadmap" aria-label="Create Roadmap Plan"><p className="object-settings-label">Create Roadmap Plan</p><label><span>Plan name</span><input autoFocus onChange={(event) => setTitle(event.target.value)} value={title} /></label><div className="roadmap-plan-type-help"><strong>Choose how this plan should behave</strong><p><b>Release &amp; Production Plan (Auto)</b><br />Plan your next singles/album production and release automatically.</p><p><b>Manual Collection Plan</b><br />Organizes songs independently for custom collections (ex. setlists).</p></div><label><span>Plan type</span><select aria-label="Plan type" onChange={(event) => setPlanType(event.target.value as "auto" | "manual")} value={planType}><option value="auto">Release &amp; Production Plan (Auto)</option><option value="manual">Manual Collection Plan</option></select><small>Plan type cannot be changed after creation.</small></label><div className="roadmap-plan-date-row"><label><span>Start date</span><DateInput aria-label="Plan start date" calendarLabel="Choose plan start date" onChange={setStartDate} value={startDate} /></label><label><span>End date</span><DateInput aria-label="Plan end date" calendarLabel="Choose plan end date" onChange={setEndDate} value={endDate} /></label></div><div className="roadmap-phase-settings-actions"><span className="refresh-status refresh-status-error">{status}</span><button disabled={!title.trim() || !toIsoDate(startDate) || !toIsoDate(endDate) || toIsoDate(endDate)! < toIsoDate(startDate)!} onClick={() => void onCreate({ title, planType, startDate: toIsoDate(startDate), endDate: toIsoDate(endDate) }).catch((error) => setStatus(error instanceof Error ? error.message : "Plan creation failed."))} type="button"><Plus size={15} />Create plan</button><button onClick={onCancel} type="button">Cancel</button></div></section>;
+}
+
+function ManualRoadmapPlanCard({ campaigns, onOpenMarketing, onOpenProduction, onPlanMutation, onSongChange, plan, songs }: { campaigns: MarketingCampaignConfig[]; onOpenMarketing: (song: ProductionSongConfig) => void; onOpenProduction: (songId: string) => void; onPlanMutation: (method: "POST" | "PATCH" | "PUT" | "DELETE", body: Record<string, unknown>) => Promise<void>; onSongChange: (songId: string, updates: Partial<ProductionSongConfig>) => void; plan: RoadmapPlan; songs: ProductionSongConfig[] }) {
+  const [open, setOpen] = useState(false); const [settingsOpen, setSettingsOpen] = useState(false); const [selectedSongId, setSelectedSongId] = useState(""); const [isAdding, setIsAdding] = useState(false); const [status, setStatus] = useState("");
+  const members = plan.songIds.map((id) => songs.find((song) => song.dbId === id)).filter((song): song is ProductionSongConfig => Boolean(song));
+  const mutate = (action: string, songId: string, direction?: number) => void onPlanMutation("PUT", { id: plan.id, action, songId, direction }).catch((error) => setStatus(error instanceof Error ? error.message : "Manual plan update failed."));
+  const addSong = async () => {
+    if (!selectedSongId || isAdding) return;
+    setIsAdding(true);
+    setStatus("");
+    try {
+      await onPlanMutation("PUT", { action: "add", id: plan.id, songId: selectedSongId });
+      setSelectedSongId("");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Manual plan update failed.");
+    } finally {
+      setIsAdding(false);
+    }
+  };
+  return <article className="roadmap-phase-card module-accent module-accent-roadmap"><div className="roadmap-phase-heading"><div className="roadmap-phase-kicker-row"><p className="eyebrow">Manual Collection Plan</p><span>{formatRoadmapMonthRange(plan.startDate, plan.endDate)}</span></div><h2>{plan.title}</h2></div>{plan.summary ? <p>{plan.summary}</p> : null}<div className="roadmap-overview-toggle-row roadmap-plan-card-actions"><button aria-expanded={settingsOpen} aria-label={`${settingsOpen ? "Hide" : "Show"} settings for ${plan.title}`} className="roadmap-plan-settings-button" onClick={() => { setOpen(true); setSettingsOpen((current) => !current); }} type="button"><Settings size={16} aria-hidden /><span>Settings</span></button><button className="roadmap-toggle" onClick={() => setOpen((current) => !current)} type="button" aria-expanded={open}><ChevronDown size={19} /></button></div>{open ? <><RoadmapPlanSettings onDelete={() => onPlanMutation("DELETE", { id: plan.id })} open={settingsOpen} onSave={(draft) => onPlanMutation("PATCH", { id: plan.id, ...draft })} plan={plan} /><div className="roadmap-song-list"><label className="roadmap-manual-picker"><span className="visually-hidden">Add Production song</span><select aria-label="Add Production song" onChange={(event) => setSelectedSongId(event.target.value)} value={selectedSongId}><option value="">Choose a song</option>{songs.filter((song) => song.dbId && !plan.songIds.includes(song.dbId)).map((song) => <option key={song.id} value={song.dbId}>{song.title}</option>)}</select><button disabled={!selectedSongId || isAdding} onClick={() => void addSong()} type="button">Add</button></label>{members.map((song) => <RoadmapSongRow campaign={getRoadmapMarketingCampaign(song, campaigns)} key={song.id} manualPlan={{ onMove: (songId, direction) => mutate("move", songId, direction), onRemove: (songId) => mutate("remove", songId), title: plan.title }} onOpenMarketing={onOpenMarketing} onOpenProduction={onOpenProduction} onSongChange={onSongChange} phases={[]} song={song} />)}{status ? <p className="settings-status">{status}</p> : null}</div></> : null}</article>;
+}
+
+function addCalendarMonth(value: string) { const [year, month, day] = value.split("-").map(Number); const last = new Date(Date.UTC(year, month + 1, 0)).getUTCDate(); return new Date(Date.UTC(year, month, Math.min(day, last))).toISOString().slice(0, 10); }
 
 function RoadmapMonthStrip({ months }: { months: RoadmapMonth[] }) {
   const currentMonthKey = getViennaDateKey().slice(0, 7);
@@ -20373,10 +20582,10 @@ function RoadmapPhaseSettings({
     setSaveStatus({ message: "Saving...", state: "loading" });
     try {
       await onSave({ ...draft, endMonth: endDate!, startMonth: startDate! });
-      setSaveStatus({ message: "Phase saved.", state: "success" });
+      setSaveStatus({ message: "Plan saved.", state: "success" });
     } catch (error) {
       setSaveStatus({
-        message: error instanceof Error ? error.message : "Phase save failed.",
+        message: error instanceof Error ? error.message : "Plan save failed.",
         state: "error"
       });
     }
@@ -20408,12 +20617,12 @@ function RoadmapPhaseSettings({
       return;
     }
 
-    setSaveStatus({ message: "Deleting phase...", state: "loading" });
+    setSaveStatus({ message: "Deleting plan...", state: "loading" });
     try {
       await onDelete(phase.id);
     } catch (error) {
       setSaveStatus({
-        message: error instanceof Error ? error.message : "Phase deletion failed.",
+        message: error instanceof Error ? error.message : "Plan deletion failed.",
         state: "error"
       });
       setIsDeleteArmed(false);
@@ -20421,10 +20630,10 @@ function RoadmapPhaseSettings({
   }
 
   return (
-    <section className="roadmap-phase-settings module-accent-thin module-accent-roadmap" aria-label={`Phase ${phase.phaseNumber} settings`}>
-      <p className="object-settings-label">Phase settings</p>
+    <section className="roadmap-phase-settings module-accent-thin module-accent-roadmap" aria-label={`Plan ${phase.phaseNumber} settings`}>
+      <p className="object-settings-label">Plan settings</p>
       <label>
-        <span>Phase name</span>
+        <span>Plan name</span>
         <input
           onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
           value={draft.title}
@@ -20433,8 +20642,8 @@ function RoadmapPhaseSettings({
       <label>
         <span>Begin date</span>
         <DateInput
-          aria-label={`Phase ${phase.phaseNumber} begin date`}
-          calendarLabel={`Choose Phase ${phase.phaseNumber} begin date`}
+          aria-label={`Plan ${phase.phaseNumber} begin date`}
+          calendarLabel={`Choose Plan ${phase.phaseNumber} begin date`}
           error={Boolean(startDateDraft && !startDate)}
           onChange={setStartDateDraft}
           value={startDateDraft}
@@ -20443,8 +20652,8 @@ function RoadmapPhaseSettings({
       <label>
         <span>End date</span>
         <DateInput
-          aria-label={`Phase ${phase.phaseNumber} end date`}
-          calendarLabel={`Choose Phase ${phase.phaseNumber} end date`}
+          aria-label={`Plan ${phase.phaseNumber} end date`}
+          calendarLabel={`Choose Plan ${phase.phaseNumber} end date`}
           error={
             hasInvalidPhaseRange
               ? "End date must not be before the begin date."
@@ -20468,13 +20677,13 @@ function RoadmapPhaseSettings({
         ) : null}
         <button disabled={!canSave} onClick={() => void saveSettings()} type="button">
           <Save size={15} aria-hidden />
-          Save phase
+          Save plan
         </button>
         <button
           aria-label={
             isDeleteArmed
-              ? `Confirm delete Phase ${phase.phaseNumber}`
-              : `Delete Phase ${phase.phaseNumber}`
+              ? `Confirm delete Plan ${phase.phaseNumber}`
+              : `Delete Plan ${phase.phaseNumber}`
           }
           className={`roadmap-phase-delete-button${isDeleteArmed ? " is-armed" : ""}`}
           onClick={() => void deletePhase()}
@@ -20482,11 +20691,65 @@ function RoadmapPhaseSettings({
           type="button"
         >
           <Trash2 size={15} aria-hidden />
-          {isDeleteArmed ? "Confirm delete" : "Delete phase"}
+          {isDeleteArmed ? "Confirm delete" : "Delete plan"}
         </button>
       </div>
     </section>
   );
+}
+
+function RoadmapPlanSettings({
+  open,
+  onDelete,
+  onSave,
+  plan
+}: {
+  open: boolean;
+  onDelete?: () => Promise<void>;
+  onSave: (draft: { description: string; endDate: string; startDate: string; title: string }) => Promise<void>;
+  plan: RoadmapPlan;
+}) {
+  const [title, setTitle] = useState(plan.title);
+  const [description, setDescription] = useState(plan.summary);
+  const [startDate, setStartDate] = useState(() => toDisplayDate(plan.startDate));
+  const [endDate, setEndDate] = useState(() => toDisplayDate(plan.endDate));
+  const [status, setStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
+  const [isDeleteArmed, setIsDeleteArmed] = useState(false);
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
+  const planTypeLabel = plan.planType === "auto" ? "Release & Production Plan (Auto)" : "Manual Collection Plan";
+  const startDateIso = toIsoDate(startDate);
+  const endDateIso = toIsoDate(endDate);
+  const canSave = Boolean(title.trim() && startDateIso && endDateIso && endDateIso >= startDateIso);
+
+  useEffect(() => {
+    if (!isDeleteArmed) return;
+    function cancelDelete(event: PointerEvent) {
+      if (event.target instanceof Node && deleteButtonRef.current?.contains(event.target)) return;
+      setIsDeleteArmed(false);
+    }
+    window.addEventListener("pointerdown", cancelDelete);
+    return () => window.removeEventListener("pointerdown", cancelDelete);
+  }, [isDeleteArmed]);
+
+  async function save() {
+    if (!canSave) return;
+    setStatus({ message: "Saving plan…", state: "loading" });
+    try {
+      await onSave({ description, endDate: endDateIso!, startDate: startDateIso!, title: title.trim() });
+      setStatus({ message: "Plan saved.", state: "success" });
+    } catch (error) { setStatus({ message: error instanceof Error ? error.message : "Plan save failed.", state: "error" }); }
+  }
+
+  async function deletePlan() {
+    if (!onDelete) return;
+    if (!isDeleteArmed) { setIsDeleteArmed(true); return; }
+    setStatus({ message: "Deleting plan…", state: "loading" });
+    try { await onDelete(); }
+    catch (error) { setStatus({ message: error instanceof Error ? error.message : "Plan deletion failed.", state: "error" }); setIsDeleteArmed(false); }
+  }
+
+  if (!open) return null;
+  return <section className="roadmap-plan-settings-card is-open"><section className="roadmap-phase-settings roadmap-plan-settings-content" aria-label={`${planTypeLabel} settings`}><label><span>Plan name</span><input onChange={(event) => setTitle(event.target.value)} value={title} /></label><div className="roadmap-plan-date-row"><label><span>Begin date</span><DateInput aria-label={`${planTypeLabel} begin date`} calendarLabel={`Choose ${planTypeLabel} begin date`} error={Boolean(startDate && !startDateIso)} onChange={setStartDate} value={startDate} /></label><label><span>End date</span><DateInput aria-label={`${planTypeLabel} end date`} calendarLabel={`Choose ${planTypeLabel} end date`} error={Boolean(endDate && (!endDateIso || (startDateIso && endDateIso < startDateIso)))} onChange={setEndDate} value={endDate} /></label></div><label className="roadmap-phase-description-field"><span>Description</span><textarea onChange={(event) => setDescription(event.target.value)} rows={3} value={description} /></label><div className="roadmap-phase-settings-actions">{status.message ? <span className={`refresh-status refresh-status-${status.state}`}>{status.message}</span> : null}<button disabled={!canSave} onClick={() => void save()} type="button"><Save size={15} aria-hidden />Save plan</button>{onDelete ? <button aria-label={isDeleteArmed ? `Confirm delete ${plan.title}` : `Delete ${plan.title}`} className={`roadmap-phase-delete-button${isDeleteArmed ? " is-armed" : ""}`} onClick={() => void deletePlan()} ref={deleteButtonRef} type="button"><Trash2 size={15} aria-hidden />{isDeleteArmed ? "Confirm delete" : "Delete plan"}</button> : null}</div></section></section>;
 }
 
 function RoadmapSongList({
@@ -20495,7 +20758,10 @@ function RoadmapSongList({
   onOpenProduction,
   onSongChange,
   phases,
-  songs
+  songs,
+  generalPlanner = false,
+  autoPlanId,
+  onGeneralPlanChange
 }: {
   campaigns: MarketingCampaignConfig[];
   onOpenMarketing: (song: ProductionSongConfig) => void;
@@ -20503,10 +20769,13 @@ function RoadmapSongList({
   onSongChange: (songId: string, updates: Partial<ProductionSongConfig>) => void;
   phases: RoadmapPhase[];
   songs: ProductionSongConfig[];
+  generalPlanner?: boolean;
+  autoPlanId?: string;
+  onGeneralPlanChange?: (action: { type: "anchor"; songId: string; releaseDate: string } | { type: "move"; songId: string; direction: -1 | 1 } | { type: "auto-move"; songId: string; autoPlanId: string; direction: -1 | 1 }) => Promise<void>;
 }) {
   return (
     <div className="roadmap-song-list">
-      {sortRoadmapSongs(songs).map((song) => (
+      {(generalPlanner || autoPlanId ? [...songs].sort((first, second) => (first.roadmapGeneralPosition ?? Number.MAX_SAFE_INTEGER) - (second.roadmapGeneralPosition ?? Number.MAX_SAFE_INTEGER)) : sortRoadmapSongs(songs)).map((song) => (
         <RoadmapSongRow
           campaign={getRoadmapMarketingCampaign(song, campaigns)}
           key={`${song.id}-${song.releaseDate}`}
@@ -20515,10 +20784,13 @@ function RoadmapSongList({
           onSongChange={onSongChange}
           phases={phases}
           song={song}
+          generalPlanner={generalPlanner}
+          autoPlanId={autoPlanId}
+          onGeneralPlanChange={onGeneralPlanChange}
         />
       ))}
       {songs.length === 0 ? (
-        <p className="roadmap-empty-list">No songs assigned to this phase yet.</p>
+        <p className="roadmap-empty-list">No songs assigned to this plan yet.</p>
       ) : null}
     </div>
   );
@@ -20530,7 +20802,11 @@ function RoadmapSongRow({
   onOpenProduction,
   onSongChange,
   phases,
-  song
+  song,
+  generalPlanner = false,
+  autoPlanId,
+  manualPlan,
+  onGeneralPlanChange
 }: {
   campaign: MarketingCampaignConfig | null;
   onOpenMarketing: (song: ProductionSongConfig) => void;
@@ -20538,21 +20814,67 @@ function RoadmapSongRow({
   onSongChange: (songId: string, updates: Partial<ProductionSongConfig>) => void;
   phases: RoadmapPhase[];
   song: ProductionSongConfig;
+  generalPlanner?: boolean;
+  autoPlanId?: string;
+  manualPlan?: { onMove: (songId: string, direction: -1 | 1) => void; onRemove: (songId: string) => void; title: string };
+  onGeneralPlanChange?: (action: { type: "anchor"; songId: string; releaseDate: string } | { type: "move"; songId: string; direction: -1 | 1 } | { type: "auto-move"; songId: string; autoPlanId: string; direction: -1 | 1 }) => Promise<void>;
 }) {
   const [releaseDateInput, setReleaseDateInput] = useState(song.releaseDate);
   const canSaveReleaseDate = Boolean(toIsoDate(releaseDateInput));
   const productionStatus = getRoadmapProductionStatus(song);
   const marketingStatus = getRoadmapMarketingStatus(campaign, song);
+  const [isManualRemoveArmed, setIsManualRemoveArmed] = useState(false);
+  const manualRemoveButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!isManualRemoveArmed) return;
+
+    function cancelManualRemove(event: PointerEvent) {
+      if (event.target instanceof Node && manualRemoveButtonRef.current?.contains(event.target)) return;
+      setIsManualRemoveArmed(false);
+    }
+
+    window.addEventListener("pointerdown", cancelManualRemove);
+    return () => window.removeEventListener("pointerdown", cancelManualRemove);
+  }, [isManualRemoveArmed]);
 
   function saveReleaseDate() {
     if (!canSaveReleaseDate) return;
+    if (generalPlanner && onGeneralPlanChange) { void onGeneralPlanChange({ type: "anchor", songId: song.dbId ?? song.id, releaseDate: toIsoDate(releaseDateInput)! }); return; }
     onSongChange(song.id, {
       releaseDate: releaseDateInput
     });
   }
 
+  function removeManualMember() {
+    if (!manualPlan) return;
+    if (!isManualRemoveArmed) { setIsManualRemoveArmed(true); return; }
+    manualPlan.onRemove(song.dbId ?? song.id);
+  }
+
   return (
-    <div className="roadmap-song-row module-accent-thin module-accent-roadmap">
+    <div className={`roadmap-song-row roadmap-production-song-row module-accent-thin module-accent-roadmap${manualPlan ? " is-manual-plan-member" : ""}`}>
+      <button
+        aria-label={`Open ${song.title} in Production`}
+        className="roadmap-song-art"
+        onClick={() => onOpenProduction(song.id)}
+        title="Open in Production"
+        type="button"
+      >
+        {song.albumArtUrl ? (
+          <span
+            aria-label={`${song.title} artwork preview`}
+            className="roadmap-song-art-image"
+            role="img"
+            style={{ backgroundImage: `url("${getDashboardImageUrl(song.albumArtUrl, 240)}")` }}
+          />
+        ) : (
+          <>
+            <Music2 aria-hidden size={20} />
+            <span>Artwork</span>
+          </>
+        )}
+      </button>
       <div className="roadmap-song-identity">
         <strong>{song.title}</strong>
         <button
@@ -20565,6 +20887,7 @@ function RoadmapSongRow({
           <ArrowUpRight size={14} aria-hidden />
         </button>
       </div>
+      {generalPlanner || autoPlanId || manualPlan ? <div className="roadmap-heading-actions"><button aria-label={`Move ${song.title} up`} disabled={!manualPlan && isRoadmapSongReleased(song)} onClick={() => manualPlan ? manualPlan.onMove(song.dbId ?? song.id, -1) : void onGeneralPlanChange?.(generalPlanner ? { type: "move", songId: song.dbId ?? song.id, direction: -1 } : { type: "auto-move", autoPlanId: autoPlanId!, songId: song.dbId ?? song.id, direction: -1 })} type="button"><ChevronUp size={15} /></button><button aria-label={`Move ${song.title} down`} disabled={!manualPlan && isRoadmapSongReleased(song)} onClick={() => manualPlan ? manualPlan.onMove(song.dbId ?? song.id, 1) : void onGeneralPlanChange?.(generalPlanner ? { type: "move", songId: song.dbId ?? song.id, direction: 1 } : { type: "auto-move", autoPlanId: autoPlanId!, songId: song.dbId ?? song.id, direction: 1 })} type="button"><ChevronDown size={15} /></button></div> : null}
       <div className="roadmap-song-marketing-status">
         <span>Marketing</span>
         {campaign ? (
@@ -20574,7 +20897,7 @@ function RoadmapSongRow({
             type="button"
           >
             <StatusDot label={`Marketing: ${statusLabels[marketingStatus]}`} status={marketingStatus} />
-            {isCampaignActive(campaign, getTodayUtcDate()) ? "Active" : isRoadmapSongReleased(song) ? "Completed" : "Planned"}
+            {isCampaignActive(campaign, getTodayUtcDate()) ? "Active" : isRoadmapSongReleased(song) ? "Promoted" : "Planned"}
             <ArrowUpRight size={14} aria-hidden />
           </button>
         ) : (
@@ -20584,9 +20907,9 @@ function RoadmapSongRow({
           </strong>
         )}
       </div>
-      <label>
+      {manualPlan ? <div className="roadmap-manual-plan-assignment"><span className="roadmap-manual-plan-name">{manualPlan.title}</span><button aria-label={isManualRemoveArmed ? `Confirm remove ${song.title} from ${manualPlan.title}` : `Remove ${song.title} from ${manualPlan.title}`} className={`roadmap-manual-remove-button${isManualRemoveArmed ? " is-armed" : ""}`} onClick={removeManualMember} ref={manualRemoveButtonRef} type="button"><Trash2 size={15} aria-hidden /></button></div> : <label className="roadmap-phase-selector">
         <select
-          aria-label={`${song.title} Roadmap phase`}
+          aria-label={`${song.title} Roadmap plan`}
           onChange={(event) =>
             onSongChange(song.id, {
               roadmapPhaseId: event.target.value || null
@@ -20597,30 +20920,36 @@ function RoadmapSongRow({
           <option value="">Unassigned</option>
           {phases.map((phase) => (
             <option key={phase.id} value={phase.id}>
-              Phase {phase.phaseNumber}: {phase.title}
+              {phase.title}
             </option>
           ))}
         </select>
-      </label>
-      <label>
-        <div className="roadmap-release-date-control">
-          <DateInput
-            aria-label={`${song.title} release date`}
-            calendarLabel={`Choose ${song.title} release date`}
-            error={Boolean(releaseDateInput && !toIsoDate(releaseDateInput))}
-            onChange={setReleaseDateInput}
-            value={releaseDateInput}
-          />
-          <button
-            aria-label={`Save ${song.title} release date`}
-            disabled={!canSaveReleaseDate || releaseDateInput === song.releaseDate}
-            onClick={saveReleaseDate}
-            type="button"
-          >
-            <Save size={15} aria-hidden />
-          </button>
-        </div>
-      </label>
+      </label>}
+      {((autoPlanId && !generalPlanner) || manualPlan) ? (
+        <span className="roadmap-phase-release-date" title="Edit release dates in General Roadmap">
+          {formatCampaignDate(new Date(`${toIsoDate(song.releaseDate) ?? song.releaseDate}T00:00:00`))}
+        </span>
+      ) : (
+        <label className="roadmap-release-date-row">
+          <div className="roadmap-release-date-control">
+            <DateInput
+              aria-label={`${song.title} release date`}
+              calendarLabel={`Choose ${song.title} release date`}
+              error={Boolean(releaseDateInput && !toIsoDate(releaseDateInput))}
+              onChange={setReleaseDateInput}
+              value={releaseDateInput}
+            />
+            <button
+              aria-label={`Save ${song.title} release date`}
+              disabled={!canSaveReleaseDate || releaseDateInput === song.releaseDate}
+              onClick={saveReleaseDate}
+              type="button"
+            >
+              <Save size={15} aria-hidden />
+            </button>
+          </div>
+        </label>
+      )}
     </div>
   );
 }

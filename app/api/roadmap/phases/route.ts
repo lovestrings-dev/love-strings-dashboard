@@ -44,13 +44,13 @@ export async function POST(request: NextRequest) {
     const startMonth = addMonths(latestPhase?.end_month ?? getCurrentMonth(), 1);
     const endMonth = addMonths(startMonth, 11);
     const { error } = await supabase.from("roadmap_phases").insert({
-      description: "Define the purpose and expected outcome of this phase.",
+      description: "Define the purpose and expected outcome of this plan.",
       end_month: endMonth,
       id: `${workspaceId}-phase-${phaseNumber}`,
       phase_number: phaseNumber,
       position: phaseNumber,
       start_month: startMonth,
-      title: `New Phase ${phaseNumber}`,
+      title: `New Plan ${phaseNumber}`,
       workspace_id: workspaceId
     });
     if (error) throw error;
@@ -73,7 +73,7 @@ export async function PATCH(request: NextRequest) {
     const startDate = normalizePhaseDate(payload.startMonth);
     const endDate = normalizePhaseDate(payload.endMonth);
     if (!id || !startDate || !endDate || endDate < startDate) {
-      return NextResponse.json({ error: "Invalid phase settings." }, { status: 400 });
+      return NextResponse.json({ error: "Invalid plan settings." }, { status: 400 });
     }
 
     const supabase = createServiceSupabaseClient();
@@ -83,7 +83,7 @@ export async function PATCH(request: NextRequest) {
         description: payload.description?.trim() ?? "",
         end_month: endDate,
         start_month: startDate,
-        title: payload.title?.trim() || "Untitled phase"
+        title: payload.title?.trim() || "Untitled plan"
       })
       .eq("id", id)
       .eq("workspace_id", workspaceId);
@@ -103,13 +103,13 @@ export async function DELETE(request: NextRequest) {
   try {
     const { role, workspaceId } = await requireWorkspaceAccess(request);
     if (role !== "admin") {
-      return NextResponse.json({ error: "Only a workspace Admin can delete phases." }, { status: 403 });
+      return NextResponse.json({ error: "Only a workspace Admin can delete plans." }, { status: 403 });
     }
 
     const payload = (await request.json()) as RoadmapPhasePayload;
     const id = payload.id?.trim();
     if (!id) {
-      return NextResponse.json({ error: "Invalid phase." }, { status: 400 });
+      return NextResponse.json({ error: "Invalid plan." }, { status: 400 });
     }
 
     const supabase = createServiceSupabaseClient();
@@ -190,5 +190,5 @@ function isAuthorizedRequest(request: NextRequest) {
 }
 
 function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Roadmap phase request failed.";
+  return error instanceof Error ? error.message : "Roadmap plan request failed.";
 }

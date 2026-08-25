@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireWorkspaceAccess } from "@/lib/server/workspace-owner";
+import { fallbackMarketingTimingDefaults, type MarketingTimingDefaults } from "@/lib/marketing-defaults";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -25,34 +26,53 @@ export async function POST(request: NextRequest) {
     const slug = normalizeText(payload.slug, 240);
     const campaignKind = payload.campaignKind === "general" ? "general" : "song";
 
-    if (
-      !title ||
-      !slug ||
-      !isIsoDate(payload.releaseDate) ||
-      !isIsoDate(payload.startDate) ||
-      payload.startDate > payload.releaseDate
-    ) {
+    if (!title || !slug) {
       return NextResponse.json({ error: "Campaign data is invalid." }, { status: 400 });
     }
 
     const supabase = createServiceSupabaseClient();
+    let releaseDate = payload.releaseDate;
+    let startDate = payload.startDate;
+    let timing: MarketingTimingDefaults | undefined;
+    if (campaignKind === "song") {
+      if (!isUuid(payload.productionSongDbId)) return NextResponse.json({ error: "A Song Campaign needs a Production song." }, { status: 400 });
+      const [{ data: song, error: songError }, { data: settings, error: settingsError }] = await Promise.all([
+        supabase.from("production_songs").select("release_date").eq("id", payload.productionSongDbId).eq("workspace_id", workspaceId).single(),
+        supabase.from("app_workspace_settings").select("marketing_song_campaign_length_days, marketing_song_campaign_advance_days, marketing_general_campaign_length_days").eq("workspace_id", workspaceId).single()
+      ]);
+      if (songError) throw songError;
+      if (settingsError) throw settingsError;
+      releaseDate = song.release_date;
+      if (!isIsoDate(releaseDate)) return NextResponse.json({ error: "Production Release Date is invalid." }, { status: 400 });
+      timing = {
+        songCampaignLengthDays: Number(settings.marketing_song_campaign_length_days ?? fallbackMarketingTimingDefaults.songCampaignLengthDays),
+        songCampaignAdvanceDays: Number(settings.marketing_song_campaign_advance_days ?? fallbackMarketingTimingDefaults.songCampaignAdvanceDays),
+        generalCampaignLengthDays: Number(settings.marketing_general_campaign_length_days ?? fallbackMarketingTimingDefaults.generalCampaignLengthDays)
+      };
+      startDate = addDays(releaseDate, -timing.songCampaignAdvanceDays);
+    }
+    if (!isIsoDate(releaseDate) || !isIsoDate(startDate) || startDate > releaseDate) {
+      return NextResponse.json({ error: "Campaign dates are invalid." }, { status: 400 });
+    }
     const { data, error } = await supabase
       .from("marketing_campaigns")
       .insert({
         album_art_url: normalizeText(payload.albumArtUrl, 2000),
         campaign_kind: campaignKind,
-        release_date: payload.releaseDate,
+        release_date: releaseDate,
+        marketing_song_campaign_length_days: campaignKind === "song" ? timing?.songCampaignLengthDays : null,
+        marketing_song_campaign_advance_days: campaignKind === "song" ? timing?.songCampaignAdvanceDays : null,
         production_song_id: campaignKind === "song" && isUuid(payload.productionSongDbId)
           ? payload.productionSongDbId
           : null,
         slug,
         source: "app",
-        start_date: payload.startDate,
+        start_date: startDate,
         status: "planned",
         title,
         workspace_id: workspaceId
       })
-      .select("id, slug, campaign_kind, production_song_id")
+      .select("id, slug, campaign_kind, production_song_id, release_date")
       .single();
 
     if (error) throw error;
@@ -60,13 +80,13 @@ export async function POST(request: NextRequest) {
     if (data.campaign_kind === "song" && data.production_song_id) {
       const { error: productionSyncError } = await supabase
         .from("production_songs")
-        .update({ release_date: payload.releaseDate })
+        .update({ release_date: releaseDate })
         .eq("id", data.production_song_id)
         .eq("workspace_id", workspaceId);
 
       if (productionSyncError) throw productionSyncError;
     }
-    return NextResponse.json({ campaign: data, status: "ok" });
+    return NextResponse.json({ campaign: { ...data, releaseDate, timing }, status: "ok" });
   } catch (error) {
     return errorResponse(error, "Marketing campaign creation failed.");
   }
@@ -213,6 +233,12 @@ function isUuid(value?: string): value is string {
     value &&
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
   );
+}
+
+function addDays(dateKey: string, days: number) {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
 function createServiceSupabaseClient() {

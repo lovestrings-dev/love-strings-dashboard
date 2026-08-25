@@ -1,6 +1,6 @@
 {
   "name": "love-strings-dashboard",
-  "version": "1.24.0-beta.1",
+  "version": "1.25.0-beta.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -26,6 +26,12 @@
     "test:production-v1-identity-preserving-save": "node scripts/test-production-v1-identity-preserving-save.mjs",
     "test:production-v1-identity-save:live": "node --experimental-strip-types scripts/test-production-v1-identity-save-live.mjs",
     "test:lovestrings-active-v0-v1-migration": "node scripts/test-lovestrings-active-v0-v1-migration.mjs",
+    "test:roadmap-planner-v1-foundation": "node scripts/test-roadmap-planner-v1-foundation.mjs",
+    "test:manual-roadmap-plan-delete": "node scripts/test-manual-roadmap-plan-delete.mjs",
+    "test:manual-roadmap-plan-add-hotfix": "node scripts/test-manual-roadmap-plan-add-hotfix.mjs",
+    "test:roadmap-general-planner": "node --experimental-strip-types scripts/test-roadmap-general-planner.mjs",
+    "test:production-v1-legacy-demo-cleanup": "node scripts/test-production-v1-legacy-demo-cleanup.mjs",
+    "test:production-v1-template-step-identity-repair": "node scripts/test-production-v1-template-step-identity-repair.mjs",
     "test:platform-administration-routing": "node --experimental-strip-types scripts/test-platform-administration-routing.mjs",
     "test:set-password-session-binding": "node scripts/test-set-password-session-binding.mjs",
     "test:meta-connection-foundation": "node --experimental-strip-types scripts/test-meta-connection-foundation.mjs",
