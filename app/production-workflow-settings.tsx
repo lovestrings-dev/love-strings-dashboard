@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type WorkflowStep = { id: string; stableKey: string; displayName: string; position: number; stepKind: "idea_anchor" | "production_step" | "release_anchor"; semanticKind: "standard" | "distribution"; isEnabled: boolean; leadTimeDays: number; standardCostAmount: number; };
 type WorkflowTemplate = { id: string; name: string; templateVersion: number; steps: WorkflowStep[] };
@@ -23,23 +23,30 @@ export function ProductionWorkflowSettings() {
   const [addSelection, setAddSelection] = useState(addOptions[0]);
   const [addTime, setAddTime] = useState("1");
   const [addCost, setAddCost] = useState("");
+  const saveChain = useRef<Promise<void>>(Promise.resolve());
+  const saveVersion = useRef(0);
   const steps = useMemo(() => template?.steps ?? [], [template]);
   const windowDays = useMemo(() => steps.filter((step) => step.isEnabled && step.stepKind === "production_step").reduce((total, step) => total + step.leadTimeDays, 0), [steps]);
 
   async function persist(nextSteps: WorkflowStep[]) {
     if (!template) return;
     const normalized = normalizePositions(nextSteps);
+    const version = ++saveVersion.current;
     setTemplate((current) => current ? { ...current, steps: normalized } : current);
     setStatus("Saving…");
-    try {
+    const save = saveChain.current.catch(() => undefined).then(async () => {
       const response = await fetch("/api/workspace/production-template", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ steps: normalized }) });
       const body = await response.json() as { template?: WorkflowTemplate; error?: string };
       if (!response.ok || !body.template) throw new Error(body.error || "Production workflow save failed.");
-      setTemplate({ ...body.template, steps: ordered(body.template.steps) });
-      setStatus("Saved");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Production workflow save failed.");
-    }
+      if (saveVersion.current === version) {
+        setTemplate({ ...body.template, steps: ordered(body.template.steps) });
+        setStatus("Saved");
+      }
+    }).catch((error) => {
+      if (saveVersion.current === version) setStatus(error instanceof Error ? error.message : "Production workflow save failed.");
+    });
+    saveChain.current = save;
+    await save;
   }
 
   useEffect(() => {

@@ -16,8 +16,13 @@ export async function POST(request: NextRequest) {
   if (!authorized(request)) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   try {
     const { workspaceId } = await requireWorkspaceAccess(request); const body = await request.json() as Record<string, unknown>;
-    const title = typeof body.title === "string" ? body.title.trim() : ""; const planType = body.planType;
-    const start = date(body.startDate), end = date(body.endDate); if (!title || (planType !== "auto" && planType !== "manual") || !start || !end || end < start) return NextResponse.json({ error: "Invalid roadmap plan." }, { status: 400 });
+    const planType = body.planType;
+    const suppliedTitle = typeof body.title === "string" ? body.title.trim() : "";
+    const title = suppliedTitle || (planType === "auto" ? "My Album Name" : "");
+    const suppliedStart = date(body.startDate), suppliedEnd = date(body.endDate);
+    const start = planType === "auto" && suppliedStart ? `${suppliedStart.slice(0, 7)}-01` : suppliedStart;
+    const end = planType === "auto" && suppliedEnd ? `${suppliedEnd.slice(0, 7)}-01` : suppliedEnd;
+    if (!title || (planType !== "auto" && planType !== "manual") || !start || !end || end < start) return NextResponse.json({ error: "Invalid roadmap plan." }, { status: 400 });
     const db = client(); const description = typeof body.description === "string" ? body.description.trim() : "";
     const [{ data: last, error: lastError }, { data: lastAuto, error: lastAutoError }] = await Promise.all([db.from("roadmap_planning_instances").select("display_position").eq("workspace_id", workspaceId).order("display_position", { ascending: false }).limit(1).maybeSingle(), db.from("roadmap_planning_instances").select("phase_number").eq("workspace_id", workspaceId).eq("plan_type", "auto").order("phase_number", { ascending: false }).limit(1).maybeSingle()]); if (lastError || lastAutoError) throw lastError ?? lastAutoError;
     const position = Number(last?.display_position ?? 0) + 1;

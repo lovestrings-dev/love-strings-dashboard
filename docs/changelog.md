@@ -2,6 +2,32 @@
 
 This file tracks app versions that are useful to discuss, test, and deploy. It is for product-level changes, not every small database edit.
 
+## Beta 1.26 — ArtistDeck first-admin and reliable Production planning
+
+Headline: **ArtistDeck can now seed a complete first-admin workspace and first release plan, while Production saves and Release-Date scheduling are deterministic and ISO-safe.**
+
+Includes:
+
+- First-admin onboarding now collects release frequency and Distributor state, then atomically seeds Production, Roadmap, Marketing, Distributor defaults, and the first active workspace configuration.
+- First-song bootstrap creates `My Song Name`, its first canonical Roadmap position, and the 12-inclusive-calendar-month `My Album Name` Auto Plan. Later songs retain ordinary cadence behavior.
+- Platform-owned, versioned Dashboard defaults are snapshotted per user. User Settings now has compact Account identity and My Dashboard parent cards, while Platform Administration reports live workspace onboarding, service, and statistics status.
+- Production workflow and song saves are serialized/version-fenced. V1 Release-Date edits recalculate from the stored immutable snapshot, preserve Done/In Progress dates, move eligible Not Started steps, reconcile the returned canonical schedule immediately, and preserve server-derived ISO dates through atomic persistence.
+- General Settings and related mobile layouts were standardized: member access, workspace setup, Google/Meta connections, upcoming services, Production/Marketing defaults, Roadmap song cards, and Production cards were regrouped without changing their underlying product boundaries.
+
+Migrations included and synchronized:
+
+- `202608260001_add_first_admin_onboarding_workspace_seeding`
+- `202608260002_fix_first_admin_onboarding_finalization_workspace_id`
+- `202608260003_add_first_song_bootstrap`
+- `202608260004_add_versioned_dashboard_preference_templates`
+- `202608260005_fix_dashboard_template_activation_ambiguity`
+
+Deferred:
+
+- Guidance Engine/helper implementation and a clean-user onboarding rehearsal.
+- Remaining optional mobile/UI refinement after tomorrow’s review.
+- Future connection rollout controls and optional Meta/Upcoming Services refinements.
+
 ## Beta 1.25 — ArtistDeck canonical release planning
 
 Headline: **ArtistDeck now closes the Production → Roadmap → Marketing planning loop with snapshot-based Production workflows, canonical Roadmap planning, and future-only Marketing timing defaults.**

@@ -16,13 +16,23 @@ export async function GET(request: NextRequest) {
     const { serviceClient, workspaceId } = await requireWorkspaceAdministrator(request);
     const { data, error } = await serviceClient
       .from("app_workspace_invitations")
-      .select("id, email, role, created_at, expires_at, accepted_at, revoked_at, created_by")
+      .select("id, email, role, created_at, expires_at, accepted_at, accepted_by, revoked_at, created_by")
       .eq("workspace_id", workspaceId)
       .order("created_at", { ascending: false });
     if (error) throw error;
 
+    const { data: memberships, error: membershipError } = await serviceClient
+      .from("app_workspace_members")
+      .select("user_id")
+      .eq("workspace_id", workspaceId);
+    if (membershipError) throw membershipError;
+    const activeMemberIds = new Set((memberships ?? []).map((membership) => membership.user_id));
+    const visibleInvitations = (data ?? []).filter(
+      (invitation) => !invitation.accepted_at || !invitation.accepted_by || activeMemberIds.has(invitation.accepted_by)
+    );
+
     const invitations = await Promise.all(
-      (data ?? []).map(async (invitation) => {
+      visibleInvitations.map(async (invitation) => {
         const { data: invitedBy } = await serviceClient.auth.admin.getUserById(invitation.created_by);
         return {
           createdAt: invitation.created_at,

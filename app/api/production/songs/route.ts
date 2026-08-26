@@ -1,5 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  createProductionV1SongPlanFromSnapshot,
+  recalculateProductionV1Song,
+  type ProductionV1SongPlan
+} from "@/lib/production-template-v1";
+import { normalizeProductionDateForPersistence } from "@/lib/production-date-format";
 import { requireWorkspaceAccess } from "@/lib/server/workspace-owner";
 
 type MarketingStatus = "not-started" | "in-progress" | "done";
@@ -319,10 +325,9 @@ async function saveProductionV1SongAtomically(
   song: ProductionSongConfig,
   workspaceId: string
 ) {
-  const productionDeadline = formatInputDateForDatabase(song.deadline);
-  const releaseDate = formatInputDateForDatabase(song.releaseDate);
+  const releaseDate = normalizeProductionDateForPersistence(song.releaseDate);
 
-  if (!productionDeadline || !releaseDate) {
+  if (!releaseDate) {
     throw new Error(`Invalid Production dates for ${song.title}.`);
   }
 
@@ -330,13 +335,48 @@ async function saveProductionV1SongAtomically(
     throw new Error(`Missing Production V1 template snapshot for ${song.title}.`);
   }
 
+  const supabase = createServiceSupabaseClient();
+  let canonicalSong = song;
+  if (song.dbId) {
+    const [{ data: existingSong, error: songError }, { data: existingSteps, error: stepsError }] = await Promise.all([
+      supabase.from("production_songs").select("production_deadline, release_date, production_template_id, production_template_version, production_template_snapshot").eq("id", song.dbId).eq("workspace_id", workspaceId).eq("scheduling_model", "template-v1").single(),
+      supabase.from("production_steps").select("stable_key, step_deadline, status, template_step_id").eq("production_song_id", song.dbId).order("position")
+    ]);
+    if (songError || stepsError || !existingSong || !existingSteps) throw songError ?? stepsError ?? new Error("Template-v1 Production song was not found.");
+    // The persisted snapshot, not a debounced client document, owns schedule semantics.
+    if (existingSong.release_date !== releaseDate) {
+      const requestedStatusByStableKey = new Map(song.steps.map((step) => [step.id, step.status]));
+      const plan = createProductionV1SongPlanFromSnapshot({
+        liveSteps: existingSteps.map((step) => ({ deadline: step.step_deadline, id: step.template_step_id ?? step.stable_key, status: requestedStatusByStableKey.get(step.stable_key) ?? step.status })),
+        productionDeadline: existingSong.production_deadline,
+        releaseDate: existingSong.release_date,
+        snapshot: existingSong.production_template_snapshot as ProductionV1SongPlan["snapshot"]
+      });
+      const recalculated = recalculateProductionV1Song(plan, releaseDate);
+      canonicalSong = {
+        ...song,
+        deadline: recalculated.productionDeadline,
+        productionTemplateId: existingSong.production_template_id,
+        productionTemplateSnapshot: existingSong.production_template_snapshot,
+        productionTemplateVersion: existingSong.production_template_version,
+        steps: song.steps.map((step) => ({
+          ...step,
+          deadline: recalculated.steps.find((candidate) => candidate.id === (step.templateStepId ?? step.id))?.deadline ?? step.deadline
+        }))
+      };
+    } else {
+      canonicalSong = { ...song, productionTemplateId: existingSong.production_template_id, productionTemplateSnapshot: existingSong.production_template_snapshot, productionTemplateVersion: existingSong.production_template_version };
+    }
+  }
+  const productionDeadline = normalizeProductionDateForPersistence(canonicalSong.deadline);
+  if (!productionDeadline) throw new Error(`Invalid Production dates for ${song.title}.`);
   const rpcSong = {
-    ...song,
+    ...canonicalSong,
     deadline: productionDeadline,
     releaseDate,
     slug: createStableId(song.id || song.title) || createStableId(song.title),
-    steps: song.steps.map((step, index) => {
-      const deadline = formatInputDateForDatabase(step.deadline) ?? productionDeadline;
+    steps: canonicalSong.steps.map((step, index) => {
+      const deadline = normalizeProductionDateForPersistence(step.deadline) ?? productionDeadline;
       return {
         ...step,
         deadline,
@@ -350,7 +390,6 @@ async function saveProductionV1SongAtomically(
       };
     })
   };
-  const supabase = createServiceSupabaseClient();
   const { data, error } = await supabase.rpc("save_production_v1_song_with_derived_custom_timing", {
     p_song: rpcSong,
     p_workspace_id: workspaceId
@@ -365,7 +404,7 @@ async function saveProductionV1SongAtomically(
     throw new Error("Atomic Production V1 save did not return a song.");
   }
 
-  return { dbId: savedSong.id, id: savedSong.slug };
+  return { dbId: savedSong.id, id: savedSong.slug, song: canonicalSong };
 }
 
 function normalizeBudgetLines(budgetLines: ProductionBudgetLine[]) {
@@ -438,36 +477,12 @@ function createStableId(value: string) {
     .replace(/^-|-$/g, "");
 }
 
+// Legacy V0 requests still arrive exclusively from the display-date fields.
 function formatInputDateForDatabase(value: string) {
-  const date = parseInputDate(value);
-
-  if (!date) {
-    return null;
-  }
-
-  return date.toISOString().slice(0, 10);
-}
-
-function parseInputDate(value: string) {
-  const normalizedValue = value.trim();
-  const match = normalizedValue.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-
-  if (!match) {
-    return null;
-  }
-
+  const match = value.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) return null;
   const [, day, month, year] = match;
-  const parsedDate = new Date(
-    Date.UTC(Number(year), Number(month) - 1, Number(day))
-  );
-
-  if (
-    parsedDate.getUTCFullYear() !== Number(year) ||
-    parsedDate.getUTCMonth() !== Number(month) - 1 ||
-    parsedDate.getUTCDate() !== Number(day)
-  ) {
-    return null;
-  }
-
-  return parsedDate;
+  const parsedDate = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  if (parsedDate.getUTCFullYear() !== Number(year) || parsedDate.getUTCMonth() !== Number(month) - 1 || parsedDate.getUTCDate() !== Number(day)) return null;
+  return parsedDate.toISOString().slice(0, 10);
 }

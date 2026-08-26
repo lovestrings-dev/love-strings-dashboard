@@ -1,11 +1,10 @@
 "use client";
 
-import { Link as LinkIcon, Pencil, RefreshCw } from "lucide-react";
+import { Link as LinkIcon, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
 import { cleanConsumedFstatsLoginContinuation, hasFstatsLoginContinuation } from "@/lib/meta/fstats-login-continuation";
 import type { FstatsLoginState, InstagramIdentity } from "@/lib/meta/fstats-login-state";
-import { deriveFstatsLoginUiModel } from "@/lib/meta/fstats-login-ui";
 import { cleanCreatorSocialContinuation, readCreatorSocialContinuation, type CreatorSocialContinuation } from "@/lib/meta/creator-social-continuation";
 import type { CreatorInstagramContinuationResult } from "@/lib/meta/creator-instagram-continuation";
 
@@ -27,11 +26,10 @@ function instagramHandle(identity: InstagramIdentity) {
   return identity.displayName.startsWith("@") ? identity.displayName : `@${identity.displayName}`;
 }
 
-export function MetaPageConnectionSettings() {
+export function MetaPageConnectionSettings({ isOpen, onOpen }: { isOpen: boolean; onOpen: () => void }) {
   const [data, setData] = useState<FstatsLoginState | null>(null);
   const [requestState, setRequestState] = useState<RequestState>("loading");
   const [message, setMessage] = useState("");
-  const [isOpen, setIsOpen] = useState(false);
   const [armedAction, setArmedAction] = useState<"disconnect_instagram" | "disconnect_page" | null>(null);
   const [creatorInstagram, setCreatorInstagram] = useState<CreatorInstagramState | null>(null);
   const [creatorInstagramBusy, setCreatorInstagramBusy] = useState(false);
@@ -102,7 +100,7 @@ export function MetaPageConnectionSettings() {
     if (!creatorSocialContinuation || creatorSocialContinuationStarted.current) return;
     creatorSocialContinuationStarted.current = true;
     queueMicrotask(async () => {
-      setIsOpen(true);
+      onOpen();
       try {
         if (creatorSocialContinuation.target === "standalone-instagram") {
           setCreatorInstagramReturnResult(creatorSocialContinuation.result === "duplicate" ? "duplicate" : creatorSocialContinuation.result === "error" ? "error" : null);
@@ -114,7 +112,7 @@ export function MetaPageConnectionSettings() {
         }
       } finally { setCreatorSocialReturnReady(true); }
     });
-  }, [creatorSocialContinuation, loadCreatorInstagram, loadCreatorThreads]);
+  }, [creatorSocialContinuation, loadCreatorInstagram, loadCreatorThreads, onOpen]);
   useEffect(() => {
     if (!creatorSocialContinuation || creatorSocialContinuationConsumed.current || !creatorSocialReturnReady || !isOpen || !creatorSocialContinuationStarted.current) return;
     const frame = window.requestAnimationFrame(() => {
@@ -130,8 +128,8 @@ export function MetaPageConnectionSettings() {
   }, [creatorSocialContinuation, creatorInstagram, creatorSocialReturnReady, creatorThreads, isOpen]);
   useEffect(() => {
     if (!hasMetaContinuation) return;
-    queueMicrotask(() => setIsOpen(true));
-  }, [hasMetaContinuation]);
+    queueMicrotask(onOpen);
+  }, [hasMetaContinuation, onOpen]);
   useEffect(() => {
     if (!hasMetaContinuation || metaContinuationConsumed.current || !data || !isOpen || requestState === "loading") return;
     const frame = window.requestAnimationFrame(() => {
@@ -222,16 +220,17 @@ export function MetaPageConnectionSettings() {
     void performAction(action, details);
   }
 
-  const summary = data ? deriveFstatsLoginUiModel(data).summary : "Checking Meta connection…";
   const busy = requestState === "loading";
   const currentInstagram = data ? instagramIdentity(data) : null;
+  const currentPageName = data && "page" in data && data.page ? data.page.displayName : "Not connected";
+  const currentInstagramName = currentInstagram ? instagramHandle(currentInstagram).replace(/ Instagram$/i, "") : "Not connected";
+  if (!isOpen) return null;
   return (
-    <article className="general-settings-card settings-provider-card meta-settings-card" ref={sectionRef} tabIndex={-1}>
-      <div className="settings-disclosure">
-        <div><h3>Meta</h3><p>{summary}</p></div>
-        <button aria-expanded={isOpen} aria-label="Edit Meta connection" className="settings-icon-button" onClick={() => setIsOpen((value) => !value)} type="button"><Pencil aria-hidden size={16} /></button>
-      </div>
-      {!isOpen ? null : <div className="meta-onboarding-panel">
+    <>
+      <article className="general-settings-card settings-provider-card meta-settings-card" ref={sectionRef} tabIndex={-1}>
+        <h3>Facebook Page &amp; Instagram (Business)</h3>
+        <div className="meta-business-summary"><p><strong>FB Page:</strong> {currentPageName}</p><p><strong>Instagram:</strong> {currentInstagramName}</p></div>
+        <div className="meta-onboarding-panel">
         {!data ? <div className="meta-loading-state" role="status">Checking Meta connection…</div> : null}
 
         {data?.stage === "not_authorized" || (data && "connection" in data && data.connection) ? <MetaAuthorizationRow
@@ -264,9 +263,9 @@ export function MetaPageConnectionSettings() {
 
         {data?.stage === "connected" ? <>
           <FacebookConnectedRow busy={busy} armed={armedAction === "disconnect_page"} name={data.page.displayName} onDisconnect={() => confirmDisconnect("disconnect_page", { pageExternalId: data.page.externalId })} />
-          {data.instagram.status === "connected" && currentInstagram ? <div className="google-service-row"><div><strong>Instagram</strong><span className="meta-account-identity">{instagramHandle(currentInstagram)}</span><span>Connected</span><small>Disconnects Instagram from this workspace only. Facebook stays connected.</small></div><button className={`settings-destructive-button${armedAction === "disconnect_instagram" ? " is-armed" : ""}`} disabled={busy} onClick={() => confirmDisconnect("disconnect_instagram", { pageExternalId: data.page.externalId, instagramExternalId: currentInstagram.externalId })} type="button">{armedAction === "disconnect_instagram" ? "Confirm disconnect" : "Disconnect Instagram"}</button></div>
-            : data.instagram.status === "skipped" && currentInstagram ? <div className="google-service-row"><div><strong>Instagram</strong><span className="meta-account-identity">{instagramHandle(currentInstagram)}</span><span>Not connected</span><small>Previously skipped. You can connect this account whenever you are ready.</small></div><button disabled={busy} onClick={() => void performAction("connect_instagram", { pageExternalId: data.page.externalId, instagramExternalId: currentInstagram.externalId })} type="button">Connect Instagram</button></div>
-              : <div className="google-service-row"><div><strong>Instagram</strong><span>No linked professional account found</span></div></div>}
+          {data.instagram.status === "connected" && currentInstagram ? <div className="meta-action-row"><button className={`settings-destructive-button${armedAction === "disconnect_instagram" ? " is-armed" : ""}`} disabled={busy} onClick={() => confirmDisconnect("disconnect_instagram", { pageExternalId: data.page.externalId, instagramExternalId: currentInstagram.externalId })} type="button">{armedAction === "disconnect_instagram" ? "Confirm disconnect" : "Disconnect Instagram"}</button></div>
+            : data.instagram.status === "skipped" && currentInstagram ? <div className="meta-action-row"><button disabled={busy} onClick={() => void performAction("connect_instagram", { pageExternalId: data.page.externalId, instagramExternalId: currentInstagram.externalId })} type="button">Connect Instagram</button></div>
+              : null}
         </> : null}
 
         {data?.stage === "needs_attention" ? <>
@@ -282,6 +281,11 @@ export function MetaPageConnectionSettings() {
           onRefresh={data.connection.authorization === "valid" ? () => void performAction("refresh_pages") : undefined}
         /> : null}
 
+        {message ? <p className={requestState === "error" ? "settings-error" : "settings-status"} role={requestState === "error" ? "alert" : "status"}>{message}</p> : null}
+        </div>
+      </article>
+
+      <article className="general-settings-card settings-provider-card meta-settings-card meta-creator-card meta-instagram-creator-card">
         <StandaloneInstagramRow
           busy={creatorInstagramBusy}
           message={creatorInstagramMessage}
@@ -292,6 +296,9 @@ export function MetaPageConnectionSettings() {
           focusRef={creatorInstagramRef}
         />
 
+      </article>
+
+      <article className="general-settings-card settings-provider-card meta-settings-card meta-creator-card meta-threads-card">
         <ThreadsRow
           busy={creatorThreadsBusy}
           message={creatorThreadsMessage}
@@ -301,9 +308,8 @@ export function MetaPageConnectionSettings() {
           focusRef={creatorThreadsRef}
         />
 
-        {message ? <p className={requestState === "error" ? "settings-error" : "settings-status"} role={requestState === "error" ? "alert" : "status"}>{message}</p> : null}
-      </div>}
-    </article>
+      </article>
+    </>
   );
 }
 
@@ -313,7 +319,7 @@ function StandaloneInstagramRow({ busy, focusRef, message, onConnect, onDisconne
   const identity = account ? account.displayName.startsWith("@") ? account.displayName : `@${account.displayName}` : null;
   const duplicate = returnResult === "duplicate";
   const visibleMessage = duplicate ? "This Instagram account is already connected through your Facebook Page." : message;
-  return <div className="google-service-row standalone-instagram-row" ref={focusRef} tabIndex={-1}><div><strong>Standalone Instagram</strong>{!state ? <span>Checking connection…</span> : connected ? <><span className="meta-account-identity">{identity}</span><span>Connected</span><small>Connected directly through Instagram and independent from your Facebook Page.</small></> : duplicate ? <><span>Not connected</span><small>Connect a different professional Instagram account directly through Instagram.</small></> : state.state === "degraded" ? <><span>Needs reconnection</span><small>Reconnect this professional Instagram account to restore access.</small></> : <><span>Not connected</span><small>Connect an additional professional Instagram account directly through Instagram. This account is independent from the Instagram linked to your Facebook Page.</small></>}</div><div className="meta-row-actions">{connected ? <><button disabled={busy} onClick={onConnect} type="button">Reconnect Instagram</button><button className="settings-destructive-button" disabled={busy} onClick={onDisconnect} type="button">Disconnect Instagram</button></> : <button disabled={busy || !state} onClick={onConnect} type="button">Connect standalone Instagram</button>}</div>{visibleMessage ? <small className="settings-status">{visibleMessage}</small> : null}</div>;
+  return <div className="google-service-row standalone-instagram-row" ref={focusRef} tabIndex={-1}><div><strong>Instagram (Creator)</strong>{!state ? <span>Checking connection…</span> : connected ? <><span className="meta-account-identity">{identity}</span><span>Connected</span><small>Connected directly through Instagram and independent from your Facebook Page.</small></> : duplicate ? <><span>Not connected</span><small>Connect a different professional Instagram account directly through Instagram.</small></> : state.state === "degraded" ? <><span>Needs reconnection</span><small>Reconnect this professional Instagram account to restore access.</small></> : <><span>Not connected</span><small>Connect an additional professional Instagram account directly through Instagram. This account is independent from the Instagram linked to your Facebook Page.</small></>}</div><div className="meta-row-actions">{connected ? <><button disabled={busy} onClick={onConnect} type="button">Reconnect Instagram</button><button className="settings-destructive-button" disabled={busy} onClick={onDisconnect} type="button">Disconnect Instagram</button></> : <button disabled={busy || !state} onClick={onConnect} type="button">Connect Instagram (Creator)</button>}</div>{visibleMessage ? <small className="settings-status">{visibleMessage}</small> : null}</div>;
 }
 
 function ThreadsRow({ busy, focusRef, message, onConnect, onDisconnect, state }: { busy: boolean; focusRef: RefObject<HTMLDivElement | null>; message: string; onConnect: () => void; onDisconnect: () => void; state: CreatorThreadsState | null }) {
@@ -321,18 +327,17 @@ function ThreadsRow({ busy, focusRef, message, onConnect, onDisconnect, state }:
   return <div className="google-service-row threads-row" ref={focusRef} tabIndex={-1}><div><strong>Threads</strong>{!state ? <span>Checking connection…</span> : account ? <><span className="meta-account-identity">{account.displayName}</span><span>Connected</span>{account.url ? <a className="meta-profile-link" href={account.url} rel="noreferrer" target="_blank">View Threads profile</a> : null}<small>Connects this workspace’s Threads account independently from Instagram.</small></> : state.state === "degraded" ? <><span>Needs reconnection</span><small>Reconnect this Threads account to restore access.</small></> : <><span>Not connected</span><small>Connect this workspace’s Threads account independently from Instagram.</small></>}</div><div className="meta-row-actions">{account ? <><button disabled={busy} onClick={onConnect} type="button">Reconnect Threads</button><button className="settings-destructive-button" disabled={busy} onClick={onDisconnect} type="button">Disconnect Threads</button></> : <button disabled={busy || !state} onClick={onConnect} type="button">Connect Threads</button>}</div>{message ? <small className="settings-status">{message}</small> : null}</div>;
 }
 
-function FacebookConnectedRow({ armed, busy, name, onDisconnect }: { armed: boolean; busy: boolean; name: string; onDisconnect: () => void }) {
-  return <div className="google-service-row"><div><strong>Facebook</strong><span className="meta-account-identity">{name}</span><span>Connected</span><small>Disconnects this Page and its Instagram selection from this workspace. Meta authorization stays active.</small></div><button className={`settings-destructive-button${armed ? " is-armed" : ""}`} disabled={busy} onClick={onDisconnect} type="button">{armed ? "Confirm disconnect" : "Disconnect Facebook Page"}</button></div>;
+function FacebookConnectedRow({ armed, busy, onDisconnect }: { armed: boolean; busy: boolean; name: string; onDisconnect: () => void }) {
+  return <div className="meta-action-row"><button className={`settings-destructive-button${armed ? " is-armed" : ""}`} disabled={busy} onClick={onDisconnect} type="button">{armed ? "Confirm disconnect" : "Disconnect Facebook Page"}</button></div>;
 }
 
-function MetaAuthorizationRow({ busy, connected, onReconnect }: { busy: boolean; connected: boolean; onReconnect: () => void }) {
-  return <div className="google-service-row meta-authorization-row"><div><strong>Meta authorization</strong><span>{connected ? "Facebook access is active for Love Strings Dashboard." : "Facebook access is missing or needs to be restored."}</span></div><button disabled={busy} onClick={onReconnect} type="button"><LinkIcon aria-hidden size={16} />Reconnect Facebook access</button></div>;
+function MetaAuthorizationRow({ busy, onReconnect }: { busy: boolean; connected: boolean; onReconnect: () => void }) {
+  return <div className="meta-action-row"><button disabled={busy} onClick={onReconnect} type="button"><LinkIcon aria-hidden size={16} />Reconnect Facebook access</button></div>;
 }
 
 function MetaPageAccessActions({ busy, onRefresh }: { busy: boolean; onRefresh?: () => void }) {
   return <div className="meta-access-helper">
     <h4>Need a different Page?</h4>
-    <p><strong>Manage Facebook access</strong> opens Facebook Business Integrations so you can change which Pages Love Strings Dashboard may access. <strong>Refresh available Pages</strong> stays in Love Strings Dashboard and updates the candidate list from that authorized access.</p>
     <div className="meta-access-actions">
       <a href={manageFacebookAccessUrl} rel="noreferrer" target="_blank">Manage Facebook access</a>
       {onRefresh ? <button className="meta-secondary-button" disabled={busy} onClick={onRefresh} type="button"><RefreshCw aria-hidden size={15} />Refresh available Pages</button> : null}

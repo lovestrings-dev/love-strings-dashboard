@@ -27,14 +27,14 @@ export async function POST(request: NextRequest) {
     }
 
     const { title } = await request.json() as { title?: unknown };
-    if (typeof title !== "string" || !title.trim()) {
-      return NextResponse.json({ error: "Production song title is required." }, { status: 400 });
+    if (title !== undefined && typeof title !== "string") {
+      return NextResponse.json({ error: "Production song title must be text." }, { status: 400 });
     }
 
     const { workspaceId } = await requireWorkspaceAccess(request);
     const supabase = createServiceSupabaseClient();
     const { data, error } = await supabase.rpc("create_roadmap_aware_production_v1_song", {
-      p_title: title.trim(),
+      p_title: typeof title === "string" ? title.trim() : "",
       p_workspace_id: workspaceId
     });
     if (error) throw error;

@@ -136,13 +136,19 @@ Current integration boundary:
   This preserves step/task/budget IDs and relationships during normal saves and
   Release Date recalculation.
 
-## Current Planning Boundary (Beta 1.25)
+## Current Planning Boundary (Beta 1.26)
 
 - `production_songs.release_date` is the canonical Release Date for Production,
   Roadmap, and linked Song Campaigns. Marketing displays it but no longer
   offers a Song Campaign date editor.
 - General Roadmap planning owns canonical future-song ordering and cadence;
   Production V1 recalculates from each song's immutable workflow snapshot.
+  Production-side Release Date edits affect that song only; a General Roadmap
+  anchor edit intentionally replans later future songs.
+- Production persistence uses ISO dates beyond the UI input boundary. The V1
+  server save path recalculates its canonical schedule before its atomic
+  persistence function, preserving fixed Done/In Progress steps and moving
+  eligible Not Started steps only.
 - Workspace Marketing Defaults V1 applies only when creating future campaigns:
   Song Campaign length, pre-release lead, and General Campaign length. Each new
   Song Campaign saves its own timing snapshot and day offsets; later workspace

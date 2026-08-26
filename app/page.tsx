@@ -724,7 +724,7 @@ const platformStats = [
   }
 ];
 
-const appVersionLabel = "Beta 1.25";
+const appVersionLabel = "Beta 1.26";
 const defaultAppLogoUrl = "/artistdeck-logo.png";
 
 const sections = [
@@ -4845,7 +4845,7 @@ async function saveMarketingCampaignDays(
 }
 
 type ProductionSongSaveResult =
-  | { dbId: string; id: string; ok: true }
+  | { dbId: string; id: string; ok: true; song?: ProductionSongConfig }
   | { error: string; ok: false };
 
 type RoadmapAwareProductionSongResponse = {
@@ -4888,7 +4888,7 @@ type RoadmapAwareProductionSongResponse = {
 };
 
 async function createRoadmapAwareProductionSong(
-  title: string
+  title = ""
 ): Promise<ProductionSongConfig> {
   const response = await fetch("/api/production/songs/create-roadmap-aware", {
     body: JSON.stringify({ title }),
@@ -4965,7 +4965,7 @@ async function saveProductionSongToSupabase(
 
     const result = await response.json();
     const savedSong = result.savedSongs?.[0] as
-      | { dbId: string; id: string }
+      | { dbId: string; id: string; song?: ProductionSongConfig }
       | undefined;
 
     if (!savedSong) {
@@ -5415,6 +5415,9 @@ async function saveBudgetSnapshotToSupabase({
 
 export default function Home() {
   const productionSaveTimers = useRef<Record<string, number>>({});
+  const productionSaveChains = useRef(new Map<string, Promise<void>>());
+  const productionSaveVersions = useRef(new Map<string, number>());
+  const productionLastConfirmedSongs = useRef(new Map<string, ProductionSongConfig>());
   const marketingBudgetSaveTimers = useRef<Record<string, number>>({});
   const otherTaskSaveTimers = useRef<Record<string, number>>({});
   const eventSaveTimers = useRef<Record<string, number>>({});
@@ -5791,6 +5794,8 @@ export default function Home() {
       window.clearTimeout(existingTimer);
     }
 
+    const saveVersion = (productionSaveVersions.current.get(song.id) ?? 0) + 1;
+    productionSaveVersions.current.set(song.id, saveVersion);
     productionSaveTimers.current[song.id] = window.setTimeout(() => {
       delete productionSaveTimers.current[song.id];
       if (!songWorkspaceId || activeWorkspaceIdRef.current !== songWorkspaceId) {
@@ -5800,23 +5805,25 @@ export default function Home() {
         message: "Saving production changes...",
         state: "loading"
       });
-      void saveProductionSongToSupabase(song).then((savedSong) => {
-        if (activeWorkspaceIdRef.current !== songWorkspaceId) {
-          return;
-        }
-
+      const previousSave = productionSaveChains.current.get(song.id) ?? Promise.resolve();
+      const nextSave = previousSave.catch(() => undefined).then(async () => {
+        const savedSong = await saveProductionSongToSupabase(song);
+        if (activeWorkspaceIdRef.current !== songWorkspaceId || productionSaveVersions.current.get(song.id) !== saveVersion) return;
         if (!savedSong.ok) {
-          setProductionSaveStatus({
-            message: savedSong.error,
-            state: "error"
-          });
+          const lastConfirmed = productionLastConfirmedSongs.current.get(song.id);
+          if (lastConfirmed) setProductionSongDrafts((current) => sortProductionSongsByDeadline(current.map((currentSong) => currentSong.id === song.id ? lastConfirmed : currentSong)));
+          setProductionSaveStatus({ message: savedSong.error, state: "error" });
           return;
         }
-
-        setProductionSaveStatus({
-          message: "Production saved.",
-          state: "success"
-        });
+        if (savedSong.song) {
+          productionLastConfirmedSongs.current.set(song.id, savedSong.song);
+          setProductionSongDrafts((current) => sortProductionSongsByDeadline(current.map((currentSong) => currentSong.id === song.id ? savedSong.song! : currentSong)));
+        }
+        setProductionSaveStatus({ message: "Production saved.", state: "success" });
+      });
+      productionSaveChains.current.set(song.id, nextSave);
+      void nextSave.finally(() => {
+        if (productionSaveChains.current.get(song.id) === nextSave) productionSaveChains.current.delete(song.id);
       });
     }, 900);
   }
@@ -6603,13 +6610,42 @@ export default function Home() {
     }
   }
 
+  async function refreshRoadmapPlansAfterProductionCreate() {
+    const response = await fetch("/api/roadmap/plans");
+    const result = (await response.json()) as {
+      error?: string;
+      plans?: Array<Partial<RoadmapPlan>>;
+    };
+    if (!response.ok || !result.plans) {
+      throw new Error(result.error ?? "Roadmap plans refresh failed.");
+    }
+    const plans = normalizeRoadmapPlans(result.plans);
+    setRoadmapPlanDrafts(plans);
+    setRoadmapPhaseDrafts(
+      normalizeRoadmapPhases(
+        plans
+          .filter((plan) => plan.planType === "auto")
+          .map((plan) => ({
+            ...plan,
+            endMonth: plan.endDate,
+            phaseNumber: plan.phaseNumber ?? 0,
+            startMonth: plan.startDate
+          }))
+      )
+    );
+  }
+
   async function addProductionSong() {
-    const newSongNumber = productionSongDrafts.length + 1;
     try {
-      const createdSong = await createRoadmapAwareProductionSong(`New Song ${newSongNumber}`);
+      const createdSong = await createRoadmapAwareProductionSong();
       setProductionSongDrafts((currentSongs) =>
         sortProductionSongsByDeadline([...currentSongs, createdSong])
       );
+      try {
+        await refreshRoadmapPlansAfterProductionCreate();
+      } catch (error) {
+        console.warn("Roadmap plans could not be refreshed after Production creation.", error);
+      }
       setProductionFocusTarget({ songId: createdSong.id, token: Date.now() });
       setProductionSaveStatus({ message: "", state: "idle" });
     } catch (error) {
@@ -8297,6 +8333,7 @@ export default function Home() {
         );
 
         setProductionSongDrafts(nextSongs);
+        productionLastConfirmedSongs.current = new Map(nextSongs.map((song) => [song.id, song]));
         setHasLoadedProductionDrafts(true);
       } catch (error) {
         if (!isCancelled && activeWorkspaceIdRef.current === requestedWorkspaceId) {
@@ -8568,8 +8605,9 @@ export default function Home() {
       setActiveWorkspaceName(workspaceName);
       setActiveWorkspaceSetupState("active");
       setActiveWorkspaceId(pendingSetupWorkspaceId);
-      setActiveWorkspaceResolvedId("");
+      setActiveWorkspaceResolvedId(pendingSetupWorkspaceId);
       setPendingSetupWorkspaceId("");
+      setIsResolvingInitialWorkspace(false);
     }} />;
   }
 
@@ -9253,26 +9291,50 @@ function GeneralSettingsView({
   const [platformUrls, setPlatformUrls] = useState<Record<string, string>>({});
   const [platformStatuses, setPlatformStatuses] = useState<Record<string, RefreshStatus>>({});
   const [editingPlatformSlug, setEditingPlatformSlug] = useState<string | null>(null);
-  const [isWorkspaceNameEditing, setIsWorkspaceNameEditing] = useState(false);
-  const [isWorkspaceTimeZoneEditing, setIsWorkspaceTimeZoneEditing] = useState(false);
-  const [isLogoOpen, setIsLogoOpen] = useState(false);
+  const [isWorkspaceSetupOpen, setIsWorkspaceSetupOpen] = useState(false);
   const [isProductionWorkflowOpen, setIsProductionWorkflowOpen] = useState(false);
   const [isMarketingDefaultsOpen, setIsMarketingDefaultsOpen] = useState(false);
-
-  useEffect(() => {
-    if (!openProductionWorkflowOnMount) return;
-    setIsProductionWorkflowOpen(true);
-    onProductionWorkflowOpenConsumed();
-  }, [onProductionWorkflowOpenConsumed, openProductionWorkflowOnMount]);
-  const [areCurrentMembersOpen, setAreCurrentMembersOpen] = useState(false);
-  const [isInviteUserOpen, setIsInviteUserOpen] = useState(false);
-  const [areInvitationsOpen, setAreInvitationsOpen] = useState(false);
+  const [isMemberAccessOpen, setIsMemberAccessOpen] = useState(false);
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
   const [areGoogleServicesOpen, setAreGoogleServicesOpen] = useState(false);
+  const [areMetaServicesOpen, setAreMetaServicesOpen] = useState(false);
+  const [areUpcomingServicesOpen, setAreUpcomingServicesOpen] = useState(false);
   const [arePlatformLinksOpen, setArePlatformLinksOpen] = useState(false);
   const [isTopicOnboardingOpen, setIsTopicOnboardingOpen] = useState(false);
   const [analyticsProperties, setAnalyticsProperties] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedAnalyticsProperty, setSelectedAnalyticsProperty] = useState("");
   const [armedSettingsAction, setArmedSettingsAction] = useState<string | null>(null);
+
+  type GeneralSettingsPanel = "workspace" | "members" | "production" | "marketing" | "google" | "meta" | "upcoming";
+  const setActiveGeneralSettingsPanel = useCallback((panel: GeneralSettingsPanel | null) => {
+    setIsWorkspaceSetupOpen(panel === "workspace");
+    setIsMemberAccessOpen(panel === "members");
+    setIsProductionWorkflowOpen(panel === "production");
+    setIsMarketingDefaultsOpen(panel === "marketing");
+    setAreGoogleServicesOpen(panel === "google");
+    setAreMetaServicesOpen(panel === "meta");
+    setAreUpcomingServicesOpen(panel === "upcoming");
+  }, []);
+  const toggleGeneralSettingsPanel = useCallback((panel: GeneralSettingsPanel) => {
+    const isOpen = panel === "workspace" ? isWorkspaceSetupOpen
+      : panel === "members" ? isMemberAccessOpen
+        : panel === "production" ? isProductionWorkflowOpen
+          : panel === "marketing" ? isMarketingDefaultsOpen
+            : panel === "google" ? areGoogleServicesOpen
+              : panel === "meta" ? areMetaServicesOpen
+                : areUpcomingServicesOpen;
+    setActiveGeneralSettingsPanel(isOpen ? null : panel);
+  }, [areGoogleServicesOpen, areMetaServicesOpen, areUpcomingServicesOpen, isMarketingDefaultsOpen, isMemberAccessOpen, isProductionWorkflowOpen, isWorkspaceSetupOpen, setActiveGeneralSettingsPanel]);
+
+  useEffect(() => {
+    if (!openProductionWorkflowOnMount) return;
+    setActiveGeneralSettingsPanel("production");
+    onProductionWorkflowOpenConsumed();
+  }, [onProductionWorkflowOpenConsumed, openProductionWorkflowOnMount, setActiveGeneralSettingsPanel]);
+
+  useEffect(() => {
+    if (!isMemberAccessOpen) setEditingMemberId(null);
+  }, [isMemberAccessOpen]);
 
   useEffect(() => {
     // React development Strict Mode replays effect cleanup after mount. Resetting
@@ -9282,24 +9344,6 @@ function GeneralSettingsView({
       isCurrentWorkspace.current = false;
     };
   }, []);
-
-  useEffect(() => {
-    if (!isWorkspaceNameEditing) return;
-    const cancel = (event: PointerEvent) => {
-      if (event.target instanceof Element && event.target.closest("[data-workspace-name-editor]")) return;
-      setWorkspaceNameDraft(workspaceName);
-      setWorkspaceNameStatus({ message: "", state: "idle" });
-      setIsWorkspaceNameEditing(false);
-    };
-    document.addEventListener("pointerdown", cancel);
-    return () => document.removeEventListener("pointerdown", cancel);
-  }, [isWorkspaceNameEditing, workspaceName]);
-
-  useEffect(() => {
-    if (!isWorkspaceNameEditing) {
-      setWorkspaceNameDraft(workspaceName);
-    }
-  }, [isWorkspaceNameEditing, workspaceName]);
 
   useEffect(() => {
     let cancelled = false;
@@ -9350,7 +9394,7 @@ function GeneralSettingsView({
 
   async function saveWorkspaceName() {
     setWorkspaceNameStatus({ message: "Saving workspace name...", state: "loading" });
-    try { const response = await fetch("/api/workspace/name", { body: JSON.stringify({ name: workspaceNameDraft }), headers: { "Content-Type": "application/json" }, method: "PATCH" }); const payload = (await response.json()) as { name?: string; error?: string }; if (!response.ok) throw new Error(payload.error || "Workspace rename failed."); if (!isCurrentWorkspace.current) return; onWorkspaceNameChange(payload.name!); setWorkspaceNameDraft(payload.name!); setWorkspaceNameStatus({ message: "Workspace name saved.", state: "success" }); setIsWorkspaceNameEditing(false); } catch (error) { if (!isCurrentWorkspace.current) return; setWorkspaceNameStatus({ message: error instanceof Error ? error.message : "Workspace rename failed.", state: "error" }); }
+    try { const response = await fetch("/api/workspace/name", { body: JSON.stringify({ name: workspaceNameDraft }), headers: { "Content-Type": "application/json" }, method: "PATCH" }); const payload = (await response.json()) as { name?: string; error?: string }; if (!response.ok) throw new Error(payload.error || "Workspace rename failed."); if (!isCurrentWorkspace.current) return; onWorkspaceNameChange(payload.name!); setWorkspaceNameDraft(payload.name!); setWorkspaceNameStatus({ message: "Workspace name saved.", state: "success" }); } catch (error) { if (!isCurrentWorkspace.current) return; setWorkspaceNameStatus({ message: error instanceof Error ? error.message : "Workspace name could not be saved.", state: "error" }); }
   }
 
   async function saveWorkspaceTimeZone(timezone = workspaceTimeZoneDraft) {
@@ -9367,7 +9411,6 @@ function GeneralSettingsView({
       setWorkspaceTimeZoneDraft(payload.timezone);
       onWorkspaceTimeZoneChange(payload.timezone);
       setWorkspaceTimeZoneStatus({ message: "Workspace timezone saved.", state: "success" });
-      setIsWorkspaceTimeZoneEditing(false);
     } catch (error) {
       if (!isCurrentWorkspace.current) return;
       setWorkspaceTimeZoneStatus({ message: error instanceof Error ? error.message : "Workspace timezone update failed.", state: "error" });
@@ -9704,6 +9747,7 @@ function GeneralSettingsView({
       setWorkspaceMembers((members) =>
         members.filter((candidate) => candidate.userId !== member.userId)
       );
+      await refreshWorkspaceInvitations();
       setMembershipStatus({ message: "Member removed from this workspace.", state: "success" });
     } catch (error) {
       setMembershipStatus({
@@ -9789,12 +9833,13 @@ function GeneralSettingsView({
 
       <div className="user-settings-content general-settings-content">
         <section className="settings-parent-card settings-parent-members">
-          <div className="settings-parent-heading">
-            <p className="eyebrow">Member access</p>
+          <div className="settings-parent-heading member-access-parent-heading">
+            <div><p className="eyebrow">Member access</p>{!isMemberAccessOpen ? <p className="settings-parent-summary">Invite and manage Members</p> : null}</div>
+            <button aria-expanded={isMemberAccessOpen} aria-label={isMemberAccessOpen ? "Collapse member access" : "Edit member access"} className="settings-icon-button" onClick={() => toggleGeneralSettingsPanel("members")} type="button"><Pencil aria-hidden size={16} /></button>
           </div>
+          {isMemberAccessOpen ? <>
         <article className="general-settings-card general-settings-invitations settings-member-invite">
-          <SettingsDisclosure isOpen={isInviteUserOpen} onToggle={() => setIsInviteUserOpen((current) => !current)} summary="Invite a workspace member" title="Invite user" />
-          {isInviteUserOpen ? <>
+          <h2>Invite Member</h2>
 
           <form className="workspace-invitation-form" onSubmit={sendInvitation}>
             <label>
@@ -9840,17 +9885,10 @@ function GeneralSettingsView({
               {invitationStatus.message}
             </p>
           ) : null}
-          </> : null}
         </article>
 
         <article className="general-settings-card">
-          <SettingsDisclosure
-            isOpen={areInvitationsOpen}
-            onToggle={() => setAreInvitationsOpen((current) => !current)}
-            summary={`${workspaceInvitations.filter((invitation) => invitation.status === "pending").length} pending · ${workspaceInvitations.filter((invitation) => invitation.status === "accepted").length} accepted`}
-            title="Invitations"
-          />
-          {areInvitationsOpen ? <>
+          <h2>Invitations</h2>
           <div className="workspace-invitation-list">
             {workspaceInvitations.map((invitation) => {
               const isPending = invitation.status === "pending";
@@ -9937,18 +9975,14 @@ function GeneralSettingsView({
               {invitationLifecycleStatus.message}
             </p>
           ) : null}
-          </> : null}
         </article>
 
         <article className="general-settings-card settings-current-members">
-          <div className="general-settings-heading">
-            <SettingsDisclosure isOpen={areCurrentMembersOpen} onToggle={() => setAreCurrentMembersOpen((current) => !current)} summary={`${workspaceMembers.length} members`} title="Current members" />
-          </div>
-          {areCurrentMembersOpen ? <>
-          <p className="settings-description">Role changes apply only to this workspace. Your Admin role is protected.</p>
+          <h2>Current members</h2>
           <div className="workspace-member-list">
             {workspaceMembers.map((member) => {
               const isCurrentUser = member.userId === currentMemberId;
+              const isEditing = editingMemberId === member.userId;
               return (
                 <div className="workspace-member-row" key={member.userId}>
                   {member.avatarUrl ? (
@@ -9966,27 +10000,13 @@ function GeneralSettingsView({
                     </span>
                   )}
                   <div className="workspace-member-identity">
-                    <strong>{member.displayName}</strong>
+                    <strong>{isCurrentUser ? `${member.displayName} (You)` : member.displayName}</strong>
                     <span>{member.email}</span>
                   </div>
-                  <select
-                    aria-label={`Role for ${member.displayName}`}
-                    disabled={isCurrentUser || membershipStatus.state === "loading"}
-                    onChange={(event) =>
-                      void updateWorkspaceMemberRole(member.userId, event.target.value as WorkspaceRole)
-                    }
-                    value={member.role}
-                  >
-                    <option value="admin">Admin</option>
-                    <option value="member">Member</option>
-                    <option value="viewer">Viewer</option>
-                  </select>
-                  {isCurrentUser ? (
-                    <span className="workspace-member-self">You</span>
-                  ) : (
+                  <div className="workspace-member-actions">
                     <button
                       aria-label={
-                        armedSettingsAction === `remove-member-${member.userId}`
+                        !isCurrentUser && armedSettingsAction === `remove-member-${member.userId}`
                           ? `Confirm remove ${member.displayName} from this workspace`
                           : `Remove ${member.displayName} from this workspace`
                       }
@@ -9996,7 +10016,7 @@ function GeneralSettingsView({
                           : ""
                       }`}
                       data-settings-destructive
-                      disabled={membershipStatus.state === "loading"}
+                      disabled={isCurrentUser || !isEditing || membershipStatus.state === "loading"}
                       onClick={() =>
                         confirmSettingsAction(`remove-member-${member.userId}`, () =>
                           void removeWorkspaceMember(member)
@@ -10006,12 +10026,23 @@ function GeneralSettingsView({
                     >
                       <Trash2 aria-hidden size={16} />
                       <span>
-                        {armedSettingsAction === `remove-member-${member.userId}`
+                        {!isCurrentUser && armedSettingsAction === `remove-member-${member.userId}`
                           ? "Confirm remove"
                           : "Remove"}
                       </span>
                     </button>
-                  )}
+                    <select
+                      aria-label={`Role for ${member.displayName}`}
+                      disabled={isCurrentUser || !isEditing || membershipStatus.state === "loading"}
+                      onChange={(event) => void updateWorkspaceMemberRole(member.userId, event.target.value as WorkspaceRole)}
+                      value={member.role}
+                    >
+                      <option value="admin">Admin</option>
+                      <option value="member">Member</option>
+                      <option value="viewer">Viewer</option>
+                    </select>
+                    <button aria-label={isCurrentUser ? `Edit ${member.displayName} role unavailable` : `${isEditing ? "Finish editing" : "Edit"} ${member.displayName} role`} className="settings-icon-button" disabled={isCurrentUser || membershipStatus.state === "loading"} onClick={() => setEditingMemberId((current) => current === member.userId ? null : member.userId)} type="button"><Pencil aria-hidden size={16} /></button>
+                  </div>
                 </div>
               );
             })}
@@ -10024,120 +10055,97 @@ function GeneralSettingsView({
               {membershipStatus.message}
             </p>
           ) : null}
-          </> : null}
         </article>
 
+          </> : null}
         </section>
 
         <section className="settings-parent-card settings-parent-identity">
-          <div className="settings-parent-heading">
-            <p className="eyebrow">Workspace setup</p>
-          </div>
-        <article className="general-settings-card">
-          <div className="settings-disclosure">
-            <div><h2>Artist / Band name</h2><p title={workspaceNameDraft}>{workspaceNameDraft}</p></div>
-            {!isWorkspaceNameEditing ? <button aria-label="Edit workspace name" className="settings-icon-button" onClick={() => setIsWorkspaceNameEditing(true)} type="button"><Pencil aria-hidden size={16} /></button> : null}
-          </div>
-          {isWorkspaceNameEditing ? <div className="workspace-name-editor" data-workspace-name-editor><input aria-label="Artist / Band name" className="workspace-name-input" onChange={(event) => setWorkspaceNameDraft(event.target.value)} value={workspaceNameDraft} /><button aria-label="Save workspace name" className="settings-icon-button" disabled={workspaceNameStatus.state === "loading"} onClick={() => void saveWorkspaceName()} type="button"><Save aria-hidden size={16} /></button></div> : null}
-          {workspaceNameStatus.message ? <p className={workspaceNameStatus.state === "error" ? "settings-error" : "settings-status"} role={workspaceNameStatus.state === "error" ? "alert" : "status"}>{workspaceNameStatus.message}</p> : null}
-        </article>
-        <article className="general-settings-card">
-          <SettingsDisclosure
-            actionLabel="Edit workspace time zone"
-            isOpen={isWorkspaceTimeZoneEditing}
-            onToggle={() => setIsWorkspaceTimeZoneEditing((current) => !current)}
-            summary={workspaceTimeZoneDraft}
-            title="Time zone"
-          />
-          {isWorkspaceTimeZoneEditing ? <><p className="settings-description">All members use this timezone for workspace-day calculations such as Focus Queue today.</p><div className="workspace-timezone-row"><TimeZoneSelector isSaving={workspaceTimeZoneStatus.state === "loading"} onSelect={(timezone) => void saveWorkspaceTimeZone(timezone)} value={workspaceTimeZoneDraft} /></div></> : null}
-          {workspaceTimeZoneStatus.message ? <p className={workspaceTimeZoneStatus.state === "error" ? "settings-error" : "settings-status"} role={workspaceTimeZoneStatus.state === "error" ? "alert" : "status"}>{workspaceTimeZoneStatus.message}</p> : null}
-        </article>
-        <article className="general-settings-card">
-          <SettingsDisclosure isOpen={isLogoOpen} onToggle={() => setIsLogoOpen((current) => !current)} summary={logoUrl ? "Current logo configured" : "No logo configured"} title="App logo" />
-          {isLogoOpen ? <>
-          <div className="general-settings-heading">
-            {logoUrl ? (
-              <Image alt="Current app logo" className="general-settings-logo" height={72} src={logoUrl} unoptimized width={72} />
-            ) : (
-              <span aria-label="No app logo uploaded" className="general-settings-logo general-settings-logo-neutral">LS</span>
-            )}
-            <div><p className="eyebrow">App identity</p><h2>App logo</h2></div>
-          </div>
-          <input
-            accept="image/jpeg,image/png,image/webp"
-            aria-label="Choose app logo image"
-            className="user-avatar-file-input"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = "";
-              if (file) void uploadLogo(file);
-            }}
-            ref={logoInputRef}
-            type="file"
-          />
-          <div className="general-settings-actions">
-            <button disabled={logoStatus.state === "loading"} onClick={() => logoInputRef.current?.click()} type="button">
-              <Upload aria-hidden size={16} />
-              <span>{logoStatus.state === "loading" ? "Uploading..." : "Upload logo"}</span>
+          <div className="settings-parent-heading workspace-setup-parent-heading">
+            <div><p className="eyebrow">Workspace setup</p>{!isWorkspaceSetupOpen ? <p className="settings-parent-summary">Artist / Band Name, Logo, Time zone</p> : null}</div>
+            <button
+              aria-expanded={isWorkspaceSetupOpen}
+              aria-label={isWorkspaceSetupOpen ? "Collapse workspace setup" : "Edit workspace setup"}
+              className="settings-icon-button"
+              onClick={() => toggleGeneralSettingsPanel("workspace")}
+              type="button"
+            >
+              <Pencil aria-hidden size={16} />
             </button>
-            {logoStatus.message ? <p className={logoStatus.state === "error" ? "settings-error" : "settings-status"} role={logoStatus.state === "error" ? "alert" : "status"}>{logoStatus.message}</p> : null}
           </div>
-          </> : null}
-        </article>
+        {isWorkspaceSetupOpen ? <>
+          <article className="general-settings-card workspace-setup-card">
+            <h2>Artist / Band Name</h2>
+            <div className="workspace-name-editor">
+              <input aria-label="Artist / Band Name" className="workspace-name-input workspace-setup-name-input" onChange={(event) => setWorkspaceNameDraft(event.target.value)} value={workspaceNameDraft} />
+              <button aria-label="Save workspace name" className="settings-icon-button" disabled={workspaceNameStatus.state === "loading"} onClick={() => void saveWorkspaceName()} type="button"><Save aria-hidden size={16} /></button>
+            </div>
+            {workspaceNameStatus.message ? <p className={workspaceNameStatus.state === "error" ? "settings-error" : "settings-status"} role={workspaceNameStatus.state === "error" ? "alert" : "status"}>{workspaceNameStatus.message}</p> : null}
+          </article>
+          <article className="general-settings-card workspace-setup-card">
+            <h2>App logo</h2>
+            <input
+              accept="image/jpeg,image/png,image/webp"
+              aria-label="Choose app logo image"
+              className="user-avatar-file-input"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (file) void uploadLogo(file);
+              }}
+              ref={logoInputRef}
+              type="file"
+            />
+            <div className="workspace-logo-editor">
+              {logoUrl ? (
+                <Image alt="Current app logo" className="general-settings-logo" height={72} src={logoUrl} unoptimized width={72} />
+              ) : (
+                <span aria-label="No app logo uploaded" className="general-settings-logo general-settings-logo-neutral">LS</span>
+              )}
+              <button disabled={logoStatus.state === "loading"} onClick={() => logoInputRef.current?.click()} type="button">
+                <Upload aria-hidden size={16} />
+                <span>{logoStatus.state === "loading" ? "Uploading..." : "Upload logo"}</span>
+              </button>
+            </div>
+            {logoStatus.message ? <p className={logoStatus.state === "error" ? "settings-error" : "settings-status"} role={logoStatus.state === "error" ? "alert" : "status"}>{logoStatus.message}</p> : null}
+          </article>
+          <article className="general-settings-card workspace-setup-card">
+            <h2>Time zone</h2>
+            <p className="settings-description">All members use this timezone for workspace-day calculations such as Focus Queue today.</p>
+            <div className="workspace-timezone-row"><TimeZoneSelector isSaving={workspaceTimeZoneStatus.state === "loading"} onSelect={(timezone) => void saveWorkspaceTimeZone(timezone)} value={workspaceTimeZoneDraft} /></div>
+            {workspaceTimeZoneStatus.message ? <p className={workspaceTimeZoneStatus.state === "error" ? "settings-error" : "settings-status"} role={workspaceTimeZoneStatus.state === "error" ? "alert" : "status"}>{workspaceTimeZoneStatus.message}</p> : null}
+          </article>
+        </> : null}
 
         </section>
 
         <section className="settings-parent-card settings-parent-production">
-          <div className="settings-parent-heading"><p className="eyebrow">Production module</p></div>
-          <article className="general-settings-card" id="production-workflow-settings">
-            <SettingsDisclosure
-              actionLabel="Edit Production workflow"
-              isOpen={isProductionWorkflowOpen}
-              onToggle={() => setIsProductionWorkflowOpen((current) => !current)}
-              summary="Idea → workflow steps → Release"
-              title="Production workflow"
-            />
-            {isProductionWorkflowOpen ? <ProductionWorkflowSettings /> : null}
-          </article>
+          <div className="settings-parent-heading workspace-setup-parent-heading">
+            <div><p className="eyebrow">Production module</p>{!isProductionWorkflowOpen ? <p className="settings-parent-summary">Manage you new song defaults.</p> : null}</div>
+            <button aria-expanded={isProductionWorkflowOpen} aria-label={isProductionWorkflowOpen ? "Collapse Production module" : "Edit Production module"} className="settings-icon-button" onClick={() => toggleGeneralSettingsPanel("production")} type="button"><Pencil aria-hidden size={16} /></button>
+          </div>
+          {isProductionWorkflowOpen ? <div id="production-workflow-settings"><ProductionWorkflowSettings /></div> : null}
         </section>
 
         <section className="settings-parent-card settings-parent-marketing">
-          <div className="settings-parent-heading"><p className="eyebrow">Marketing module</p></div>
-          <article className="general-settings-card" id="marketing-defaults-settings">
-            <SettingsDisclosure
-              actionLabel="Edit Marketing defaults"
-              isOpen={isMarketingDefaultsOpen}
-              onToggle={() => setIsMarketingDefaultsOpen((current) => !current)}
-              summary="Timing for future campaigns"
-              title="Marketing defaults"
-            />
-            {isMarketingDefaultsOpen ? <MarketingDefaultsSettings onUpdated={onMarketingTimingDefaultsChange} /> : null}
-          </article>
+          <div className="settings-parent-heading workspace-setup-parent-heading">
+            <div><p className="eyebrow">Marketing module</p>{!isMarketingDefaultsOpen ? <p className="settings-parent-summary">Timing for future campaigns</p> : null}</div>
+            <button aria-expanded={isMarketingDefaultsOpen} aria-label={isMarketingDefaultsOpen ? "Collapse Marketing module" : "Edit Marketing module"} className="settings-icon-button" onClick={() => toggleGeneralSettingsPanel("marketing")} type="button"><Pencil aria-hidden size={16} /></button>
+          </div>
+          {isMarketingDefaultsOpen ? <div id="marketing-defaults-settings"><MarketingDefaultsSettings onUpdated={onMarketingTimingDefaultsChange} /></div> : null}
         </section>
 
-        <section className="settings-parent-card settings-parent-connections">
-          <div className="settings-parent-heading">
-            <p className="eyebrow">App Integrations</p>
+        <section className="settings-parent-card settings-parent-connections settings-parent-google">
+          <div className="settings-parent-heading workspace-setup-parent-heading">
+            <div><p className="eyebrow">Google services</p><p className="settings-parent-summary">{googleConnection?.accountEmail ? `Connected: ${googleConnection.accountEmail}` : "Connect YouTube, Analytics and other services"}</p></div>
+            <button aria-expanded={areGoogleServicesOpen} aria-label={areGoogleServicesOpen ? "Collapse Google services" : "Edit Google services"} className="settings-icon-button" onClick={() => toggleGeneralSettingsPanel("google")} type="button"><Pencil aria-hidden size={16} /></button>
           </div>
-        <article className="general-settings-card google-services-card settings-provider-card">
-          <SettingsDisclosure
-            isOpen={areGoogleServicesOpen}
-            onToggle={() => setAreGoogleServicesOpen((current) => !current)}
-            summary={`Google ${googleConnection?.accountEmail ? "connected" : "not connected"} · YouTube ${googleConnection?.youtube.enabled ? "configured" : "not configured"} · Analytics ${googleConnection?.analytics.enabled ? "configured" : "not configured"}`}
-            title="Google services"
-          />
-
           {areGoogleServicesOpen ? <>
-
-          <div className="google-account-summary">
-            <span>Google account</span>
-            <strong>{googleConnection?.accountEmail ?? "Not connected"}</strong>
-          </div>
 
           <div className="google-service-list">
             <div className="google-service-row">
               <div>
-                <strong>YouTube</strong>
+                <strong>YouTube Channel</strong>
                 <span>
                   {googleConnection?.youtube.enabled
                     ? googleConnection.youtube.channelTitle || "Connected channel"
@@ -10194,13 +10202,6 @@ function GeneralSettingsView({
               </> : null}
             </section>
 
-            <div className="google-service-row google-service-placeholder">
-              <div>
-                <strong>YouTube Music</strong>
-                <span>Connection onboarding is in development.</span>
-              </div>
-            </div>
-
             <div className="google-service-row">
               <div>
                 <strong>Google Analytics</strong>
@@ -10246,12 +10247,6 @@ function GeneralSettingsView({
             </div>
             {!googleConnection?.analytics.enabled && googleConnection?.accountEmail && analyticsProperties.length > 1 ? <div className="google-analytics-property-selector"><span>Choose the Google Analytics property LS Dashboard should track.</span><div className="google-topic-config"><select aria-label="Analytics property" onChange={(event) => setSelectedAnalyticsProperty(event.target.value)} value={selectedAnalyticsProperty}><option value="">Choose Analytics property</option>{analyticsProperties.map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}</select><button disabled={!selectedAnalyticsProperty || googleStatus.state === "loading"} onClick={() => void selectAnalyticsProperty()} type="button">Use property</button></div></div> : null}
 
-            <div className="google-service-row google-service-placeholder">
-              <div>
-                <strong>Gmail</strong>
-                <span>Connection onboarding is in development.</span>
-              </div>
-            </div>
           </div>
 
           {googleStatus.message ? (
@@ -10263,11 +10258,32 @@ function GeneralSettingsView({
             </p>
           ) : null}
           </> : null}
-        </article>
+        </section>
 
-        <MetaPageConnectionSettings />
+        <section className="settings-parent-card settings-parent-meta">
+          <div className="settings-parent-heading workspace-setup-parent-heading">
+            <div><p className="eyebrow">Meta services</p>{!areMetaServicesOpen ? <p className="settings-parent-summary">Connect Instagram, Threads and other Meta services</p> : null}</div>
+            <button aria-expanded={areMetaServicesOpen} aria-label={areMetaServicesOpen ? "Collapse Meta services" : "Edit Meta services"} className="settings-icon-button" onClick={() => toggleGeneralSettingsPanel("meta")} type="button"><Pencil aria-hidden size={16} /></button>
+          </div>
+          <MetaPageConnectionSettings isOpen={areMetaServicesOpen} onOpen={() => setActiveGeneralSettingsPanel("meta")} />
+        </section>
+
+        <section className="settings-parent-card settings-parent-upcoming">
+          <div className="settings-parent-heading workspace-setup-parent-heading">
+            <div><p className="eyebrow">Upcoming services</p>{!areUpcomingServicesOpen ? <p className="settings-parent-summary">Services under construction</p> : null}</div>
+            <button aria-expanded={areUpcomingServicesOpen} aria-label={areUpcomingServicesOpen ? "Collapse upcoming services" : "Edit upcoming services"} className="settings-icon-button" onClick={() => toggleGeneralSettingsPanel("upcoming")} type="button"><Pencil aria-hidden size={16} /></button>
+          </div>
+          {areUpcomingServicesOpen ? <>
         <article className="general-settings-card settings-provider-card settings-provider-placeholder">
-          <h3>Spotify</h3>
+          <h3>YouTube Music (Artists)</h3>
+          <p>Connection onboarding is in development.</p>
+        </article>
+        <article className="general-settings-card settings-provider-card settings-provider-placeholder">
+          <h3>Gmail</h3>
+          <p>Connection onboarding is in development.</p>
+        </article>
+        <article className="general-settings-card settings-provider-card settings-provider-placeholder">
+          <h3>Spotify (catalogue)</h3>
           <p>Connection onboarding is in development.</p>
         </article>
         <article className="general-settings-card settings-provider-card settings-provider-placeholder">
@@ -10302,6 +10318,7 @@ function GeneralSettingsView({
           </div>
           </> : null}
         </article>
+          </> : null}
         </section>
 
       </div>
@@ -10311,12 +10328,14 @@ function GeneralSettingsView({
 
 function SettingsDisclosure({
   actionLabel,
+  hideTitle = false,
   isOpen,
   onToggle,
   summary,
   title
 }: {
   actionLabel?: string;
+  hideTitle?: boolean;
   isOpen?: boolean;
   onToggle?: () => void;
   summary: string;
@@ -10326,7 +10345,7 @@ function SettingsDisclosure({
   return (
     <div className="settings-disclosure">
       <div>
-        <h2>{title}</h2>
+        {!hideTitle ? <h2>{title}</h2> : null}
         <p title={summary}>{summary}</p>
       </div>
       {isCollapsible ? (
@@ -10450,6 +10469,8 @@ function UserSettingsView({
     message: "",
     state: "idle"
   });
+  const [isAccountIdentityOpen, setIsAccountIdentityOpen] = useState(true);
+  const [isDashboardOpen, setIsDashboardOpen] = useState(false);
 
   useEffect(() => {
     const supabase = createBrowserSupabaseClient();
@@ -10661,14 +10682,12 @@ function UserSettingsView({
           <h1 id="user-settings-title">User settings</h1>
         </div>
       </header>
-      <div className="user-settings-content">
-        <DashboardPersonalizationSettings
-          preferences={dashboardPreferences}
-          saveStatus={dashboardPreferenceStatus}
-          onReset={onDashboardPreferencesReset}
-          onSave={onDashboardPreferencesSave}
-        />
-        <article className="user-profile-settings">
+      <div className="user-settings-content general-settings-content user-settings-parent-content">
+        <section className="settings-parent-card settings-parent-identity">
+          <div className="settings-parent-heading"><p className="eyebrow">Your account</p></div>
+          <div className="user-profile-settings">
+          <SettingsDisclosure hideTitle isOpen={isAccountIdentityOpen} onToggle={() => setIsAccountIdentityOpen((current) => !current)} summary="Name, avatar, email, and workspace role" title="Account identity" />
+          {isAccountIdentityOpen ? <>
           <div className="user-profile-heading">
             <div className="user-profile-avatar-control">
               <span
@@ -10710,7 +10729,6 @@ function UserSettingsView({
             </div>
             <div>
               <p className="eyebrow">Profile</p>
-              <h2>Account identity</h2>
               {avatarStatus.message ? (
                 <p
                   className={avatarStatus.state === "error" ? "settings-error" : "settings-status"}
@@ -10762,18 +10780,35 @@ function UserSettingsView({
               </p>
             ) : null}
           </div>
-        </article>
+          </> : null}
+        </div>
+        </section>
+        <section className="settings-parent-card settings-parent-dashboard">
+          <div className="settings-parent-heading"><p className="eyebrow">Personal layout</p></div>
+          <DashboardPersonalizationSettings
+            isOpen={isDashboardOpen}
+            onToggle={() => setIsDashboardOpen((current) => !current)}
+            preferences={dashboardPreferences}
+            saveStatus={dashboardPreferenceStatus}
+            onReset={onDashboardPreferencesReset}
+            onSave={onDashboardPreferencesSave}
+          />
+        </section>
       </div>
     </section>
   );
 }
 
 function DashboardPersonalizationSettings({
+  isOpen,
+  onToggle,
   onReset,
   onSave,
   preferences,
   saveStatus
 }: {
+  isOpen: boolean;
+  onToggle: () => void;
   onReset: () => Promise<void>;
   onSave: (
     preferences: Pick<ResolvedDashboardPreferences, "cardOrder" | "visibleCards">
@@ -10782,6 +10817,35 @@ function DashboardPersonalizationSettings({
   saveStatus: RefreshStatus;
 }) {
   const isSaving = saveStatus.state === "loading";
+  const [isResetArmed, setIsResetArmed] = useState(false);
+  const resetControlRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isResetArmed) return;
+
+    const cancelReset = (event: PointerEvent) => {
+      if (event.target instanceof Node && resetControlRef.current?.contains(event.target)) return;
+      setIsResetArmed(false);
+    };
+
+    document.addEventListener("pointerdown", cancelReset);
+    return () => document.removeEventListener("pointerdown", cancelReset);
+  }, [isResetArmed]);
+
+  function handleToggle() {
+    if (isOpen) setIsResetArmed(false);
+    onToggle();
+  }
+
+  function handleReset() {
+    if (!isResetArmed) {
+      setIsResetArmed(true);
+      return;
+    }
+
+    setIsResetArmed(false);
+    void onReset();
+  }
 
   function serializeOrder(
     topLevelOrder: DashboardCardId[],
@@ -10831,23 +10895,26 @@ function DashboardPersonalizationSettings({
   }
 
   return (
-    <article className="user-dashboard-settings" aria-labelledby="my-dashboard-title">
+    <div aria-label="Personal layout" className="user-dashboard-settings">
       <div className="user-dashboard-heading">
         <div>
-          <p className="eyebrow">Personal layout</p>
-          <h2 id="my-dashboard-title">My Dashboard</h2>
-          <p>Choose which cards appear on your Dashboard and arrange their order. This does not change app access.</p>
+          <SettingsDisclosure hideTitle isOpen={isOpen} onToggle={handleToggle} summary="Customise your Dashboard view" title="My Dashboard" />
+          {isOpen ? <p>Choose which cards appear on your Dashboard and arrange their order. This does not change app access.</p> : null}
         </div>
+      </div>
+      {isOpen ? <div className="user-dashboard-actions" ref={resetControlRef}>
         <button
-          className="user-dashboard-reset"
+          aria-label={isResetArmed ? "Confirm reset Dashboard layout" : "Reset Dashboard layout to default"}
+          className={`user-dashboard-reset${isResetArmed ? " is-armed" : ""}`}
           disabled={isSaving}
-          onClick={() => void onReset()}
+          onClick={handleReset}
           type="button"
         >
-          Reset to default
+          <RefreshCw aria-hidden size={16} />
+          <span>{isResetArmed ? "Reset?" : "Reset to default"}</span>
         </button>
-      </div>
-      <div className="user-dashboard-list" aria-label="Dashboard sections">
+      </div> : null}
+      {isOpen ? <><div className="user-dashboard-list" aria-label="Dashboard sections">
         {preferences.topLevelOrder.map((cardId, index) => {
           const card = dashboardCardRegistryById(cardId);
           const isVisible = preferences.visibleCards.includes(cardId);
@@ -10908,7 +10975,8 @@ function DashboardPersonalizationSettings({
           {saveStatus.message}
         </p>
       ) : null}
-    </article>
+      </> : null}
+    </div>
   );
 }
 
@@ -20333,7 +20401,7 @@ function RoadmapView({
 function RoadmapPlanCreateForm({ onCancel, onCreate }: { onCancel: () => void; onCreate: (draft: Record<string, unknown>) => Promise<void> }) {
   const start = getViennaDateKey();
   const [title, setTitle] = useState(""); const [planType, setPlanType] = useState<"auto" | "manual">("manual"); const [startDate, setStartDate] = useState(toDisplayDate(start)); const [endDate, setEndDate] = useState(() => toDisplayDate(addCalendarMonth(start))); const [status, setStatus] = useState("");
-  return <section className="roadmap-phase-settings roadmap-plan-create-card module-accent-thin module-accent-roadmap" aria-label="Create Roadmap Plan"><p className="object-settings-label">Create Roadmap Plan</p><label><span>Plan name</span><input autoFocus onChange={(event) => setTitle(event.target.value)} value={title} /></label><div className="roadmap-plan-type-help"><strong>Choose how this plan should behave</strong><p><b>Release &amp; Production Plan (Auto)</b><br />Plan your next singles/album production and release automatically.</p><p><b>Manual Collection Plan</b><br />Organizes songs independently for custom collections (ex. setlists).</p></div><label><span>Plan type</span><select aria-label="Plan type" onChange={(event) => setPlanType(event.target.value as "auto" | "manual")} value={planType}><option value="auto">Release &amp; Production Plan (Auto)</option><option value="manual">Manual Collection Plan</option></select><small>Plan type cannot be changed after creation.</small></label><div className="roadmap-plan-date-row"><label><span>Start date</span><DateInput aria-label="Plan start date" calendarLabel="Choose plan start date" onChange={setStartDate} value={startDate} /></label><label><span>End date</span><DateInput aria-label="Plan end date" calendarLabel="Choose plan end date" onChange={setEndDate} value={endDate} /></label></div><div className="roadmap-phase-settings-actions"><span className="refresh-status refresh-status-error">{status}</span><button disabled={!title.trim() || !toIsoDate(startDate) || !toIsoDate(endDate) || toIsoDate(endDate)! < toIsoDate(startDate)!} onClick={() => void onCreate({ title, planType, startDate: toIsoDate(startDate), endDate: toIsoDate(endDate) }).catch((error) => setStatus(error instanceof Error ? error.message : "Plan creation failed."))} type="button"><Plus size={15} />Create plan</button><button onClick={onCancel} type="button">Cancel</button></div></section>;
+  return <section className="roadmap-phase-settings roadmap-plan-create-card module-accent-thin module-accent-roadmap" aria-label="Create Roadmap Plan"><p className="object-settings-label">Create Roadmap Plan</p><label><span>Plan name</span><input autoFocus onChange={(event) => setTitle(event.target.value)} placeholder={planType === "auto" ? "My Album Name" : undefined} value={title} /></label><div className="roadmap-plan-type-help"><strong>Choose how this plan should behave</strong><p><b>Release &amp; Production Plan (Auto)</b><br />Plan your next singles/album production and release automatically.</p><p><b>Manual Collection Plan</b><br />Organizes songs independently for custom collections (ex. setlists).</p></div><label><span>Plan type</span><select aria-label="Plan type" onChange={(event) => setPlanType(event.target.value as "auto" | "manual")} value={planType}><option value="auto">Release &amp; Production Plan (Auto)</option><option value="manual">Manual Collection Plan</option></select><small>Plan type cannot be changed after creation.</small></label><div className="roadmap-plan-date-row"><label><span>Start date</span><DateInput aria-label="Plan start date" calendarLabel="Choose plan start date" onChange={setStartDate} value={startDate} /></label><label><span>End date</span><DateInput aria-label="Plan end date" calendarLabel="Choose plan end date" onChange={setEndDate} value={endDate} /></label></div><div className="roadmap-phase-settings-actions"><span className="refresh-status refresh-status-error">{status}</span><button disabled={(planType === "manual" && !title.trim()) || !toIsoDate(startDate) || !toIsoDate(endDate) || toIsoDate(endDate)! < toIsoDate(startDate)!} onClick={() => void onCreate({ title, planType, startDate: toIsoDate(startDate), endDate: toIsoDate(endDate) }).catch((error) => setStatus(error instanceof Error ? error.message : "Plan creation failed."))} type="button"><Plus size={15} />Create plan</button><button onClick={onCancel} type="button">Cancel</button></div></section>;
 }
 
 function ManualRoadmapPlanCard({ campaigns, onOpenMarketing, onOpenProduction, onPlanMutation, onSongChange, plan, songs }: { campaigns: MarketingCampaignConfig[]; onOpenMarketing: (song: ProductionSongConfig) => void; onOpenProduction: (songId: string) => void; onPlanMutation: (method: "POST" | "PATCH" | "PUT" | "DELETE", body: Record<string, unknown>) => Promise<void>; onSongChange: (songId: string, updates: Partial<ProductionSongConfig>) => void; plan: RoadmapPlan; songs: ProductionSongConfig[] }) {
