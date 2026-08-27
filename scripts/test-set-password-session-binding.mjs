@@ -8,6 +8,6 @@ assert.match(page, /else \{[\s\S]*getSession\(\)/);
 assert.doesNotMatch(page, /existing \?\? initial\.session/);
 assert.match(page, /callbackNeedsPassword\(callback\)/);
 assert.match(page, /never let User A's existing session consume User B's link/);
-assert.match(page, /This sign-in link could not be verified\. It may already have been used/);
+assert.match(page, /This reset or invitation link could not be verified\. It may be expired or already used/);
 assert.doesNotMatch(page, /provisioning-invitations/);
 console.log("Set-password callback/session binding checks passed.");

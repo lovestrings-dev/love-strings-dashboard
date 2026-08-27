@@ -10,13 +10,17 @@ export function AccountControl({
   onOpenGeneralSettings,
   onOpenPlatformAdministration,
   onOpenUserSettings,
-  onReady
+  onReady,
+  workspaceLogoUrl,
+  workspaceName
 }: {
   onOpenAboutDashboard: () => void;
   onOpenGeneralSettings: () => void;
   onOpenPlatformAdministration: () => void;
   onOpenUserSettings: () => void;
   onReady: () => void;
+  workspaceLogoUrl: string;
+  workspaceName: string;
 }) {
   const router = useRouter();
   const [displayName, setDisplayName] = useState("Account");
@@ -203,15 +207,23 @@ export function AccountControl({
         <button
           aria-expanded={isMenuOpen}
           aria-haspopup="menu"
-          aria-label={`Open settings for ${displayName}`}
-          className={`account-avatar${avatarUrl ? " has-image" : ""}`}
+          aria-label={`Open workspace menu for ${workspaceName}`}
+          className={`account-workspace-logo${workspaceLogoUrl ? " has-image" : ""}`}
           onClick={() => setIsMenuOpen((currentValue) => !currentValue)}
-          style={avatarUrl ? { backgroundImage: `url(${JSON.stringify(avatarUrl)})` } : undefined}
+          style={workspaceLogoUrl ? { backgroundImage: `url(${JSON.stringify(workspaceLogoUrl)})` } : undefined}
           type="button"
         >
-          {avatarUrl ? null : displayName.slice(0, 1).toUpperCase()}
+          {workspaceLogoUrl ? null : workspaceName.slice(0, 2).toUpperCase()}
         </button>
-        <span className="account-name">Hi, {displayName}</span>
+        <span className="account-workspace-name"><strong>{workspaceName}</strong><span>ArtistDeck</span></span>
+        <span
+          aria-label={`${displayName} avatar`}
+          className={`account-avatar${avatarUrl ? " has-image" : ""}`}
+          role="img"
+          style={avatarUrl ? { backgroundImage: `url(${JSON.stringify(avatarUrl)})` } : undefined}
+        >
+          {avatarUrl ? null : displayName.slice(0, 1).toUpperCase()}
+        </span>
       </div>
       {isMenuOpen ? (
         <div className="account-menu" role="menu">

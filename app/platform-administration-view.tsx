@@ -9,7 +9,7 @@ type RefreshStatus = { message: string; state: "error" | "idle" | "loading" | "s
 type PlatformWorkspace = { access_state: "active" | "frozen"; admin: { displayName: string; hasAvatar: boolean; role: string } | null; connectedServices: { googleYoutube: boolean; instagramCreator: boolean }; created_at: string; id: string; name: string; onboarding: { completed: number; total: number; steps: boolean[] }; pendingAdminEmail: string | null; settings: { distributorAnswer: string | null; hasLogo: boolean; releaseFrequency: string | null }; setup_state: "active" | "pending_setup"; slug: string; statistics: "configured" | "unknown" };
 type DefaultTemplate = { card_order: string[]; template_key: string; theme: "dark" | "light"; version: number; visible_cards: string[] };
 
-export function PlatformAdministrationView({ activeSection, onBack, showBack = false }: { activeSection: string; onBack: () => void; showBack?: boolean }) {
+export function PlatformAdministrationView() {
   const router = useRouter();
   const [accessChecked, setAccessChecked] = useState(false);
   const [canCreateWorkspaces, setCanCreateWorkspaces] = useState(false);

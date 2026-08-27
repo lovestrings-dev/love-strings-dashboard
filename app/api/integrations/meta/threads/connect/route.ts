@@ -18,6 +18,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(createCreatorSocialThreadsAuthorizationUrl(attempt.state));
   } catch (error) {
     if (error instanceof WorkspaceAccessError) return NextResponse.json({ error: error.message }, { status: error.status });
-    return NextResponse.json({ error: "Threads authorization could not be started." }, { status: 500 });
+    return NextResponse.redirect(resultUrl(request));
   }
+}
+
+function resultUrl(request: NextRequest) {
+  const url = new URL("/", request.nextUrl.origin);
+  url.searchParams.set("settings", "general");
+  url.searchParams.set("oauth", "creator-social-threads-error");
+  return url;
 }

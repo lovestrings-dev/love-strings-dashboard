@@ -9,7 +9,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUpRight,
   ArrowDown,
-  ArrowLeft,
   ArrowUp,
   BarChart3,
   CalendarDays,
@@ -724,7 +723,7 @@ const platformStats = [
   }
 ];
 
-const appVersionLabel = "Beta 1.26";
+const appVersionLabel = "Beta 1.27";
 const defaultAppLogoUrl = "/artistdeck-logo.png";
 
 const sections = [
@@ -1897,23 +1896,14 @@ function sortCampaignsByReleaseDate(campaigns: MarketingCampaignConfig[]) {
 }
 
 function sortProductionSongsByDeadline(songs: ProductionSongConfig[]) {
-  const todayTime = getTodayUtcDate().getTime();
-
   return [...songs].sort(
     (firstSong, secondSong) =>
-      getProductionSongSortTime(firstSong.deadline, todayTime) -
-      getProductionSongSortTime(secondSong.deadline, todayTime)
+      getProductionDeadlineSortTime(firstSong.releaseDate) -
+        getProductionDeadlineSortTime(secondSong.releaseDate) ||
+      getProductionDeadlineSortTime(firstSong.deadline) -
+        getProductionDeadlineSortTime(secondSong.deadline) ||
+      firstSong.title.localeCompare(secondSong.title)
   );
-}
-
-function getProductionSongSortTime(deadlineInput: string, todayTime: number) {
-  const deadlineTime = getProductionDeadlineSortTime(deadlineInput);
-
-  if (deadlineTime >= todayTime) {
-    return deadlineTime;
-  }
-
-  return Number.MAX_SAFE_INTEGER - deadlineTime;
 }
 
 function sortProductionStepsByDeadline(steps: ProductionStep[]) {
@@ -3658,7 +3648,10 @@ function getProductionBenchmarkDays(song: ProductionSongConfig) {
 
 function getDashboardProductionPreview(songs: ProductionSongConfig[]) {
   const sortedSongs = sortProductionSongsByDeadline(songs);
-  const [current, next] = sortedSongs;
+  const activeSongs = sortedSongs.filter(
+    (song) => getProductionCompletionScore(song) < 100 && !isRoadmapSongReleased(song)
+  );
+  const [current, next] = activeSongs;
   const completedSongs = sortedSongs.filter(
     (song) => getProductionCompletionScore(song) === 100
   );
@@ -8622,25 +8615,9 @@ export default function Home() {
             onOpenGeneralSettings={() => setSettingsView("general")}
             onOpenPlatformAdministration={() => setSettingsView("platform")}
             onOpenUserSettings={() => setSettingsView("user")}
+            workspaceLogoUrl={appLogoUrl}
+            workspaceName={activeWorkspaceName}
           />
-          <div className="brand-mark">
-            <div>
-              <strong>{activeWorkspaceName}</strong>
-              <span>ArtistDeck</span>
-            </div>
-
-            {appLogoUrl ? (
-              <Image
-                alt=""
-                aria-hidden
-                className="brand-logo"
-                height={44}
-                src={appLogoUrl}
-                unoptimized
-                width={44}
-              />
-            ) : null}
-          </div>
         </div>
 
         <div className="nav-scroll-shell">
@@ -8673,28 +8650,21 @@ export default function Home() {
         >
         {settingsView === "user" ? (
           <UserSettingsView
-            activeSection={activeSection}
             dashboardPreferences={dashboardPreferences}
             dashboardPreferenceStatus={dashboardPreferenceStatus}
-            onBack={() => setSettingsView(null)}
             onDashboardPreferencesSave={savePersonalDashboardPreferences}
             onDashboardPreferencesReset={resetPersonalDashboardPreferences}
           />
         ) : null}
         {settingsView === "about" ? (
-          <AboutDashboardView
-            activeSection={activeSection}
-            onBack={() => setSettingsView(null)}
-          />
+          <AboutDashboardView />
         ) : null}
         {settingsView === "general" &&
         workspaceRole === "admin" ? (
           <GeneralSettingsView
-            activeSection={activeSection}
             key={`general-settings-${activeWorkspaceId}`}
             logoPath={appLogoPath}
             logoUrl={appLogoUrl}
-            onBack={() => setSettingsView(null)}
             openProductionWorkflowOnMount={openProductionWorkflowFromRoadmap}
             onProductionWorkflowOpenConsumed={() => setOpenProductionWorkflowFromRoadmap(false)}
             onMarketingTimingDefaultsChange={setMarketingTimingDefaults}
@@ -8712,8 +8682,6 @@ export default function Home() {
         ) : null}
         {settingsView === "platform" ? (
           <PlatformAdministrationView
-            activeSection={activeSection}
-            onBack={() => setSettingsView(null)}
           />
         ) : null}
         {!settingsView && activeSection === "Roadmap" ? (
@@ -8872,15 +8840,10 @@ export default function Home() {
             roadmapPhasesData={roadmapPhaseDrafts}
             spotifyLastUploadedAt={spotifyLastUploadedAt}
             workspaceTimeZone={workspaceTimeZone}
-            workspaceName={activeWorkspaceName}
           />
         ) : null}
         </div>
       </section>
-      <FloatingNavigationBackButton
-        isVisible={!settingsView && activeSection !== "Roadmap" && navigationStack.length > 0}
-        onBack={goBackToPreviousAppState}
-      />
       </> : null}
       {isResolvingInitialWorkspace || (!settingsView && activeSection === "Dashboard" && !isDashboardInitialLoadReady) ? <DashboardInitialLoadingOverlay /> : null}
       {isLayoutDebugEnabled ? <LayoutDebugPanel section={activeSection} /> : null}
@@ -9219,10 +9182,8 @@ function getUtcOffsetMinutes(offset: string) {
 }
 
 function GeneralSettingsView({
-  activeSection,
   logoPath,
   logoUrl,
-  onBack,
   onMarketingTimingDefaultsChange,
   onProductionWorkflowOpenConsumed,
   onLogoChange,
@@ -9234,10 +9195,8 @@ function GeneralSettingsView({
   workspaceTimeZone
   ,openProductionWorkflowOnMount
 }: {
-  activeSection: Section;
   logoPath: string;
   logoUrl: string;
-  onBack: () => void;
   onProductionWorkflowOpenConsumed: () => void;
   onLogoChange: (logoPath: string, logoUrl: string) => void;
   onMarketingTimingDefaultsChange: (defaults: MarketingTimingDefaults) => void;
@@ -9298,12 +9257,15 @@ function GeneralSettingsView({
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
   const [areGoogleServicesOpen, setAreGoogleServicesOpen] = useState(false);
   const [areMetaServicesOpen, setAreMetaServicesOpen] = useState(false);
+  const [metaConnectedServices, setMetaConnectedServices] = useState<string[]>([]);
   const [areUpcomingServicesOpen, setAreUpcomingServicesOpen] = useState(false);
   const [arePlatformLinksOpen, setArePlatformLinksOpen] = useState(false);
   const [isTopicOnboardingOpen, setIsTopicOnboardingOpen] = useState(false);
   const [analyticsProperties, setAnalyticsProperties] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedAnalyticsProperty, setSelectedAnalyticsProperty] = useState("");
   const [armedSettingsAction, setArmedSettingsAction] = useState<string | null>(null);
+  const googleConnectionLoadVersion = useRef(0);
+  const googleServicesRef = useRef<HTMLElement>(null);
 
   type GeneralSettingsPanel = "workspace" | "members" | "production" | "marketing" | "google" | "meta" | "upcoming";
   const setActiveGeneralSettingsPanel = useCallback((panel: GeneralSettingsPanel | null) => {
@@ -9366,13 +9328,18 @@ function GeneralSettingsView({
 
   async function selectAnalyticsProperty() {
     if (!selectedAnalyticsProperty) return;
+    const selectionVersion = ++googleConnectionLoadVersion.current;
     setGoogleStatus({ message: "Connecting Analytics property...", state: "loading" });
     try {
       const response = await fetch("/api/integrations/google/analytics", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ propertyId: selectedAnalyticsProperty }) });
       const payload = await response.json() as { error?: string; property?: { id: string; name: string } };
       const property = payload.property;
       if (!response.ok || !property) throw new Error(payload.error || "Analytics property selection failed.");
-      setGoogleConnection((current) => current ? { ...current, analytics: { enabled: true, propertyId: property.id, propertyName: property.name } } : current);
+      const statusResponse = await fetch("/api/integrations/google/status", { cache: "no-store" });
+      const canonical = await statusResponse.json() as GoogleConnectionStatus & { error?: string };
+      if (!statusResponse.ok) throw new Error(canonical.error || "Google connection status failed.");
+      if (googleConnectionLoadVersion.current !== selectionVersion) return;
+      setGoogleConnection(canonical);
       setAnalyticsProperties([]); window.dispatchEvent(new Event("workspace-google-connection-changed"));
       setGoogleStatus({ message: "Google Analytics property connected.", state: "success" });
     } catch (error) { setGoogleStatus({ message: error instanceof Error ? error.message : "Analytics property selection failed.", state: "error" }); }
@@ -9436,6 +9403,13 @@ function GeneralSettingsView({
     const parameters = new URLSearchParams(window.location.search);
     const result = parameters.get("google");
 
+    if (result) {
+      setActiveGeneralSettingsPanel("google");
+      window.requestAnimationFrame(() => {
+        googleServicesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+
     if (result === "connected" || result === "error") {
       window.setTimeout(
         () =>
@@ -9460,6 +9434,7 @@ function GeneralSettingsView({
     void loadGoogleConnection();
 
     async function loadGoogleConnection() {
+      const loadVersion = googleConnectionLoadVersion.current;
       try {
         const response = await fetch("/api/integrations/google/status");
         const payload = (await response.json()) as GoogleConnectionStatus & {
@@ -9468,6 +9443,7 @@ function GeneralSettingsView({
         if (!response.ok) {
           throw new Error(payload.error || "Google connection status failed.");
         }
+        if (loadVersion !== googleConnectionLoadVersion.current) return;
         setGoogleConnection(payload);
         if (!payload.analytics.enabled && payload.accountEmail) {
           void fetch("/api/integrations/google/analytics", { cache: "no-store" }).then((propertiesResponse) => propertiesResponse.json()).then((propertiesPayload: { properties?: Array<{ id: string; name: string }> }) => {
@@ -9483,7 +9459,7 @@ function GeneralSettingsView({
         });
       }
     }
-  }, []);
+  }, [setActiveGeneralSettingsPanel]);
 
   const refreshWorkspaceInvitations = useCallback(async () => {
     try {
@@ -10135,7 +10111,7 @@ function GeneralSettingsView({
           {isMarketingDefaultsOpen ? <div id="marketing-defaults-settings"><MarketingDefaultsSettings onUpdated={onMarketingTimingDefaultsChange} /></div> : null}
         </section>
 
-        <section className="settings-parent-card settings-parent-connections settings-parent-google">
+        <section className="settings-parent-card settings-parent-connections settings-parent-google" ref={googleServicesRef} tabIndex={-1}>
           <div className="settings-parent-heading workspace-setup-parent-heading">
             <div><p className="eyebrow">Google services</p><p className="settings-parent-summary">{googleConnection?.accountEmail ? `Connected: ${googleConnection.accountEmail}` : "Connect YouTube, Analytics and other services"}</p></div>
             <button aria-expanded={areGoogleServicesOpen} aria-label={areGoogleServicesOpen ? "Collapse Google services" : "Edit Google services"} className="settings-icon-button" onClick={() => toggleGeneralSettingsPanel("google")} type="button"><Pencil aria-hidden size={16} /></button>
@@ -10262,10 +10238,10 @@ function GeneralSettingsView({
 
         <section className="settings-parent-card settings-parent-meta">
           <div className="settings-parent-heading workspace-setup-parent-heading">
-            <div><p className="eyebrow">Meta services</p>{!areMetaServicesOpen ? <p className="settings-parent-summary">Connect Instagram, Threads and other Meta services</p> : null}</div>
+            <div><p className="eyebrow">Meta services</p>{!areMetaServicesOpen ? <p className="settings-parent-summary">{metaConnectedServices.length ? `Connected: ${metaConnectedServices.join(", ")}` : "Connect Instagram, Facebook and Threads"}</p> : null}</div>
             <button aria-expanded={areMetaServicesOpen} aria-label={areMetaServicesOpen ? "Collapse Meta services" : "Edit Meta services"} className="settings-icon-button" onClick={() => toggleGeneralSettingsPanel("meta")} type="button"><Pencil aria-hidden size={16} /></button>
           </div>
-          <MetaPageConnectionSettings isOpen={areMetaServicesOpen} onOpen={() => setActiveGeneralSettingsPanel("meta")} />
+          <MetaPageConnectionSettings isOpen={areMetaServicesOpen} onConnectedServicesChange={setMetaConnectedServices} onOpen={() => setActiveGeneralSettingsPanel("meta")} />
         </section>
 
         <section className="settings-parent-card settings-parent-upcoming">
@@ -10380,13 +10356,7 @@ function formatInvitationDate(value: string) {
   }).format(date);
 }
 
-function AboutDashboardView({
-  activeSection,
-  onBack
-}: {
-  activeSection: Section;
-  onBack: () => void;
-}) {
+function AboutDashboardView() {
   return (
     <section className="user-settings-canvas" aria-labelledby="about-dashboard-title">
       <header className="user-settings-header">
@@ -10394,10 +10364,6 @@ function AboutDashboardView({
           <p className="eyebrow">Love Strings</p>
           <h1 id="about-dashboard-title">About Dashboard</h1>
         </div>
-        <button className="user-settings-back" onClick={onBack} type="button">
-          <ArrowLeft aria-hidden size={18} />
-          <span>Back to {activeSection}</span>
-        </button>
       </header>
 
       <div className="user-settings-content">
@@ -10437,17 +10403,13 @@ function AboutDashboardView({
 }
 
 function UserSettingsView({
-  activeSection,
   dashboardPreferences,
   dashboardPreferenceStatus,
-  onBack,
   onDashboardPreferencesReset,
   onDashboardPreferencesSave
 }: {
-  activeSection: Section;
   dashboardPreferences: ResolvedDashboardPreferences;
   dashboardPreferenceStatus: RefreshStatus;
-  onBack: () => void;
   onDashboardPreferencesReset: () => Promise<void>;
   onDashboardPreferencesSave: (
     preferences: Pick<ResolvedDashboardPreferences, "cardOrder" | "visibleCards">
@@ -10469,7 +10431,7 @@ function UserSettingsView({
     message: "",
     state: "idle"
   });
-  const [isAccountIdentityOpen, setIsAccountIdentityOpen] = useState(true);
+  const [isAccountIdentityOpen, setIsAccountIdentityOpen] = useState(false);
   const [isDashboardOpen, setIsDashboardOpen] = useState(false);
 
   useEffect(() => {
@@ -10977,28 +10939,6 @@ function DashboardPersonalizationSettings({
       ) : null}
       </> : null}
     </div>
-  );
-}
-
-function FloatingNavigationBackButton({
-  isVisible,
-  onBack
-}: {
-  isVisible: boolean;
-  onBack: () => void;
-}) {
-  if (!isVisible) return null;
-
-  return (
-    <button
-      aria-label="Back to previous app state"
-      className="app-navigation-back-button-floating"
-      onClick={onBack}
-      title="Back"
-      type="button"
-    >
-      <ArrowLeft size={20} aria-hidden />
-    </button>
   );
 }
 
@@ -12973,6 +12913,10 @@ function ProductionView({
   restoreContext: { context: ProductionNavigationContext; token: number } | null;
 }) {
   const songElementRefs = useRef<Record<string, HTMLElement | null>>({});
+  const [showReleasedSongs, setShowReleasedSongs] = useState(false);
+  const orderedSongs = sortProductionSongsByDeadline(songs);
+  const activeSongs = orderedSongs.filter((song) => !isRoadmapSongReleased(song));
+  const releasedSongs = orderedSongs.filter(isRoadmapSongReleased);
 
   useEffect(() => {
     if (!focusTarget) {
@@ -13015,7 +12959,7 @@ function ProductionView({
       </header>
 
       <div className="campaign-list">
-        {songs.map((song) => (
+        {activeSongs.map((song) => (
           <ProductionSongBoard
             focusToken={
               focusTarget?.songId === song.id ? focusTarget.token : undefined
@@ -13035,6 +12979,44 @@ function ProductionView({
             }
           />
         ))}
+
+        {releasedSongs.length > 0 ? (
+          <section className="production-released-songs" aria-label="Released songs">
+            <button
+              aria-expanded={showReleasedSongs}
+              className="production-released-songs-toggle"
+              onClick={() => setShowReleasedSongs((current) => !current)}
+              type="button"
+            >
+              <ChevronDown aria-hidden size={16} />
+              Show released songs ({releasedSongs.length})
+            </button>
+            {showReleasedSongs ? (
+              <div className="production-released-songs-list">
+                {releasedSongs.map((song) => (
+                  <ProductionSongBoard
+                    focusToken={
+                      focusTarget?.songId === song.id ? focusTarget.token : undefined
+                    }
+                    key={song.id}
+                    onChange={onSongChange}
+                    onDelete={onDeleteSong}
+                    onFocus={onFocusSong}
+                    onNavigationContextChange={onNavigationContextChange}
+                    phaseOptions={phaseOptions}
+                    refCallback={(element) => {
+                      songElementRefs.current[song.id] = element;
+                    }}
+                    song={song}
+                    restoreContext={
+                      restoreContext?.context.songId === song.id ? restoreContext : null
+                    }
+                  />
+                ))}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
 
         <button className="add-campaign-button" onClick={onAddSong} type="button">
           <Plus size={16} aria-hidden />
@@ -16084,7 +16066,7 @@ function DashboardView({
   productionSongs,
   qrCodeLinks,
   roadmapPhasesData
-  ,spotifyLastUploadedAt, workspaceName,
+  ,spotifyLastUploadedAt,
   workspaceTimeZone
 }: {
   audienceDashboard: AudienceDashboardCalculations;
@@ -16121,7 +16103,6 @@ function DashboardView({
   qrCodeLinks: QrCodeLink[];
   roadmapPhasesData: RoadmapPhase[];
   spotifyLastUploadedAt: string;
-  workspaceName: string;
   workspaceTimeZone: string;
 }) {
   const campaignPreview = getDashboardCampaignPreview(campaigns);
@@ -16327,7 +16308,7 @@ function DashboardView({
       <header className="topbar dashboard-main-topbar">
         <div className="topbar-title-block">
           <p className="eyebrow">Daily command screen</p>
-          <h1 className="dashboard-main-title">{workspaceName} Dashboard</h1>
+          <h1 className="dashboard-main-title">Dashboard</h1>
         </div>
         <ModuleHeaderDate />
       </header>
@@ -16354,31 +16335,21 @@ function DashboardAudienceCard({
       <div className="platform-card-header"><div className="platform-card-title"><Headphones size={20} aria-hidden /><h3>Audience</h3></div></div>
       <div className="audience-dashboard-grid">
         <article className="audience-dashboard-child">
-          <h4>Estimated Total Audience</h4>
           {estimated ? <>
-            <strong>{formatMetricValue(estimated.lower)} – {formatMetricValue(estimated.maximum)}</strong>
-            <span>Estimated / overlap-adjusted</span>
-            {estimated.lowerDelta !== undefined || estimated.maximumDelta !== undefined ? <small>
-              {estimated.lowerDelta !== undefined ? `Lower ${formatAudienceDelta(estimated.lowerDelta)}` : null}
-              {estimated.lowerDelta !== undefined && estimated.maximumDelta !== undefined ? " · " : null}
-              {estimated.maximumDelta !== undefined ? `Max ${formatAudienceDelta(estimated.maximumDelta)}` : null}
-            </small> : null}
+            <strong className="audience-estimated-value"><span>{formatMetricValue(estimated.lower)}</span>{estimated.lowerDelta !== undefined ? <AudienceInlineDelta value={estimated.lowerDelta} /> : null}<span>–</span><span>{formatMetricValue(estimated.maximum)}</span>{estimated.maximumDelta !== undefined ? <AudienceInlineDelta value={estimated.maximumDelta} /> : null}</strong>
+            <h4>Est. Total Audience</h4>
           </> : <AudienceCardEmptyState />}
         </article>
         <article className="audience-dashboard-child">
-          <h4>Current Release Plays</h4>
           {release ? <>
-            <strong>{formatMetricValue(release.value)}</strong>
-            <span>{release.title}</span>
-            {release.delta !== undefined ? <small>{formatAudienceDelta(release.delta)}</small> : null}
+            <strong><span>{formatMetricValue(release.value)}</span>{release.delta !== undefined ? <AudienceInlineDelta value={release.delta} /> : null}</strong>
+            <h4>{release.title} Total Plays</h4>
           </> : <AudienceCardEmptyState />}
         </article>
         <article className="audience-dashboard-child">
-          <h4>Total Catalogue Plays</h4>
           {catalogue ? <>
-            <strong>{formatMetricValue(catalogue.value)}</strong>
-            <span>Music platforms only</span>
-            {catalogue.delta !== undefined ? <small>{formatAudienceDelta(catalogue.delta)}</small> : null}
+            <strong><span>{formatMetricValue(catalogue.value)}</span>{catalogue.delta !== undefined ? <AudienceInlineDelta value={catalogue.delta} /> : null}</strong>
+            <h4>Total Catalogue Plays</h4>
           </> : <AudienceCardEmptyState />}
         </article>
         <article className="audience-dashboard-child audience-dashboard-feedback">
@@ -16405,31 +16376,21 @@ function PlatformsAudienceCard({
       <div className="platform-card-header"><div className="platform-card-title"><Headphones size={20} aria-hidden /><h3>Audience</h3></div></div>
       <div className="audience-platform-grid">
         <article className="audience-platform-child">
-          <h4>Estimated Total Audience</h4>
           {estimated ? <>
-            <strong>{formatMetricValue(estimated.lower)} – {formatMetricValue(estimated.maximum)}</strong>
-            <span>Estimated / overlap-adjusted</span>
-            {estimated.lowerDelta !== undefined || estimated.maximumDelta !== undefined ? <small>
-              {estimated.lowerDelta !== undefined ? `Lower ${formatAudienceDelta(estimated.lowerDelta)}` : null}
-              {estimated.lowerDelta !== undefined && estimated.maximumDelta !== undefined ? " · " : null}
-              {estimated.maximumDelta !== undefined ? `Max ${formatAudienceDelta(estimated.maximumDelta)}` : null}
-            </small> : null}
+            <strong className="audience-estimated-value"><span>{formatMetricValue(estimated.lower)}</span>{estimated.lowerDelta !== undefined ? <AudienceInlineDelta value={estimated.lowerDelta} /> : null}<span>–</span><span>{formatMetricValue(estimated.maximum)}</span>{estimated.maximumDelta !== undefined ? <AudienceInlineDelta value={estimated.maximumDelta} /> : null}</strong>
+            <h4>Est. Total Audience</h4>
           </> : <AudienceCardEmptyState />}
         </article>
         <article className="audience-platform-child">
-          <h4>Current Release Plays</h4>
           {release ? <>
-            <strong>{formatMetricValue(release.value)}</strong>
-            <span>{release.title}</span>
-            {release.delta !== undefined ? <small>{formatAudienceDelta(release.delta)}</small> : null}
+            <strong><span>{formatMetricValue(release.value)}</span>{release.delta !== undefined ? <AudienceInlineDelta value={release.delta} /> : null}</strong>
+            <h4>{release.title} Total Plays</h4>
           </> : <AudienceCardEmptyState />}
         </article>
         <article className="audience-platform-child">
-          <h4>Total Catalogue Plays</h4>
           {catalogue ? <>
-            <strong>{formatMetricValue(catalogue.value)}</strong>
-            <span>Music platforms only</span>
-            {catalogue.delta !== undefined ? <small>{formatAudienceDelta(catalogue.delta)}</small> : null}
+            <strong><span>{formatMetricValue(catalogue.value)}</span>{catalogue.delta !== undefined ? <AudienceInlineDelta value={catalogue.delta} /> : null}</strong>
+            <h4>Total Catalogue Plays</h4>
           </> : <AudienceCardEmptyState />}
         </article>
         <article className="audience-platform-child audience-platform-feedback">
@@ -16537,8 +16498,9 @@ function AudienceCardEmptyState() {
   return <span>Connect a relevant platform to see this metric.</span>;
 }
 
-function formatAudienceDelta(value: number) {
-  return `(${value > 0 ? "+" : ""}${formatMetricValue(value)})`;
+function AudienceInlineDelta({ value }: { value: number }) {
+  const direction = value > 0 ? "up" : value < 0 ? "down" : "flat";
+  return <span className={`platform-metric-delta platform-metric-delta-${direction}`}>({value > 0 ? "+" : ""}{formatMetricValue(value)})</span>;
 }
 
 function DashboardDisconnectedPlatformCard({ label }: { label: string }) {
@@ -19465,6 +19427,9 @@ function getSingle<T>(value: T | T[] | null) {
 }
 
 function formatMetricValue(value: number | string) {
+  if (value === "—" || String(value).trim() === "") {
+    return "-";
+  }
   const numericValue = Number(value);
 
   if (!Number.isFinite(numericValue)) {
@@ -19482,6 +19447,12 @@ function formatMetricValue(value: number | string) {
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0
   }).format(numericValue);
+}
+
+function formatPlatformMetricDisplay(value: number | string | null | undefined) {
+  return value === null || value === undefined || value === "—" || String(value).trim() === ""
+    ? "-"
+    : String(value);
 }
 
 function trimMetricDecimal(value: number) {
@@ -20064,7 +20035,7 @@ function PlatformStatsSection({
                         key={`${platform.platform}-${metric.label}`}
                       >
                         <dd>
-                          {metric.value}
+                          {formatPlatformMetricDisplay(metric.value)}
                           {dailyDelta ? (
                             <span
                               className={`platform-metric-delta platform-metric-delta-${dailyDelta.direction}`}

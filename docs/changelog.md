@@ -2,6 +2,30 @@
 
 This file tracks app versions that are useful to discuss, test, and deploy. It is for product-level changes, not every small database edit.
 
+## Beta 1.27 — ArtistDeck daily-work polish, secure returns, and password recovery
+
+Headline: **ArtistDeck now keeps daily Production and Dashboard work more focused, returns safely from connected services, and gives invited users a secure self-service password recovery path.**
+
+Includes:
+
+- Production orders active songs chronologically by Release Date and keeps past/released songs behind a collapsed **Show released songs** section. The workflow date picker is directly usable, and first-admin finalization now seeds three idempotent starter Other Tasks for user/artist branding, the first Production song, and a customizable next task.
+- Empty Platform metrics render consistently as `-`; Google Analytics property selection reconciles the canonical connection state immediately.
+- Dashboard, Platforms, and Budget cards use a clearer value-first hierarchy. Audience cards are simplified, the Dashboard Production preview ignores complete/released work, and its artwork/deadline helpers are more compact.
+- Back controls were removed; User Settings identity begins collapsed; Dashboard is named simply **Dashboard**. The global header now uses the workspace logo as the account-menu control, keeps workspace branding beside it, displays the user avatar separately, and includes the ArtistDeck favicon.
+- Google and Meta external returns restore the relevant General Settings parent panel and focus context. Meta reports only confirmed connected services in its collapsed summary.
+- Login now has **Forgot password?**. The public reset-request page uses a neutral response, a fixed internal recovery destination, and Supabase password recovery. `/set-password` separates recovery from invitation acceptance, supports PKCE/code, hash, and token-hash variants, validates confirmation, and shows clear success or invalid-link states.
+
+Infrastructure and external configuration:
+
+- Migration `202608270001_seed_virgin_workspace_other_tasks` is applied and synchronized. It affects only future pending-workspace finalization and cannot seed existing active workspaces.
+- Supabase SMTP, branded **Invite User**, **Magic Link**, and **Reset Password** templates, and the production/local recovery redirect allowlist were configured manually outside this repository.
+- Storage/upload architecture was audited with no shared-code or policy regression identified. Live upload/replacement smoke testing was blocked in the local runtime and remains a post-deployment user/runtime check; no storage policy or architecture change was made.
+
+Deferred:
+
+- Live recovery-email delivery confirmation after deployment.
+- Live upload/replacement smoke across the supported upload surfaces after deployment.
+
 ## Beta 1.26 — ArtistDeck first-admin and reliable Production planning
 
 Headline: **ArtistDeck can now seed a complete first-admin workspace and first release plan, while Production saves and Release-Date scheduling are deterministic and ISO-safe.**

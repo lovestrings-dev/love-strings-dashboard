@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { ArtistDeckLoading, ArtistDeckSystemShell } from "@/app/artistdeck-system-shell";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
@@ -61,6 +62,9 @@ export default function LoginPage() {
               value={password}
             />
           </label>
+          <Link className="auth-form-link" href="/forgot-password">
+            Forgot password?
+          </Link>
           {error ? <p className="login-error" role="alert">{error}</p> : null}
           <button disabled={isSubmitting} type="submit">
             {isSubmitting ? "Signing in..." : "Sign in"}

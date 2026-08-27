@@ -3,7 +3,11 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "LS Dashboard",
-  description: "A workspace dashboard for planning, releases, budget, and platform metrics."
+  description: "A workspace dashboard for planning, releases, budget, and platform metrics.",
+  icons: {
+    apple: "/artistdeck-logo.png",
+    icon: "/artistdeck-logo.png"
+  }
 };
 
 export default function RootLayout({

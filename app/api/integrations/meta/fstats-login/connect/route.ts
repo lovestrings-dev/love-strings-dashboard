@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
 
 function resultUrl(request: NextRequest, result: string) {
   const url = new URL("/", request.nextUrl.origin);
+  url.searchParams.set("settings", "general");
   url.searchParams.set("meta", `fstats-login-${result}`);
   return url;
 }

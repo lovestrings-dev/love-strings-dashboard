@@ -129,6 +129,7 @@ async function isPlatformOperator(userId: string) {
 function isPublicPath(pathname: string) {
   return (
     pathname === "/login" ||
+    pathname === "/forgot-password" ||
     pathname === "/no-workspace" ||
     pathname === "/workspace-unavailable" ||
     pathname === "/set-password" ||

@@ -136,7 +136,7 @@ Current integration boundary:
   This preserves step/task/budget IDs and relationships during normal saves and
   Release Date recalculation.
 
-## Current Planning Boundary (Beta 1.26)
+## Current Planning Boundary (Beta 1.27)
 
 - `production_songs.release_date` is the canonical Release Date for Production,
   Roadmap, and linked Song Campaigns. Marketing displays it but no longer
@@ -157,6 +157,24 @@ Current integration boundary:
   intentionally deferred for replacement with one atomic Production/Roadmap
   command. Marketing day/task persistence also still replaces child rows rather
   than preserving their IDs.
+- Production renders unfinished work in Release-Date order and keeps released
+  history collapsed. During first-admin finalization only, the finalization RPC
+  seeds three stable-keyed onboarding Other Tasks before activating the new
+  workspace; existing active workspaces do not enter that path.
+- Supabase Auth remains invitation-only. New users receive Invite User links;
+  existing users invited to another workspace receive the invitation Magic Link
+  fallback. Password recovery uses the public `/forgot-password` request route
+  and fixed `/set-password?recovery=1` destination. A recovery callback has no
+  workspace-invitation token and never invokes membership acceptance.
+- Google and Meta OAuth continuation URLs are constrained to ArtistDeck routes
+  and restore the corresponding General Settings panel after canonical status
+  reconciliation. External-provider tokens remain server-side.
+- Supabase SMTP, Invite User/Magic Link/Reset Password templates, and the
+  recovery redirect allowlist are configured manually in Supabase; no repository
+  code manages provider email templates or SMTP credentials.
+- Managed storage architecture was audited in this release. No policy or
+  shared-code change was needed; live upload/replacement verification remains a
+  post-deployment runtime smoke item.
 
 ## Data Source Direction
 

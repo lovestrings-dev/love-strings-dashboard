@@ -1,7 +1,7 @@
 "use client";
 
 import { Link as LinkIcon, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 import { cleanConsumedFstatsLoginContinuation, hasFstatsLoginContinuation } from "@/lib/meta/fstats-login-continuation";
 import type { FstatsLoginState, InstagramIdentity } from "@/lib/meta/fstats-login-state";
@@ -26,7 +26,15 @@ function instagramHandle(identity: InstagramIdentity) {
   return identity.displayName.startsWith("@") ? identity.displayName : `@${identity.displayName}`;
 }
 
-export function MetaPageConnectionSettings({ isOpen, onOpen }: { isOpen: boolean; onOpen: () => void }) {
+export function MetaPageConnectionSettings({
+  isOpen,
+  onOpen,
+  onConnectedServicesChange,
+}: {
+  isOpen: boolean;
+  onOpen: () => void;
+  onConnectedServicesChange?: (services: string[]) => void;
+}) {
   const [data, setData] = useState<FstatsLoginState | null>(null);
   const [requestState, setRequestState] = useState<RequestState>("loading");
   const [message, setMessage] = useState("");
@@ -224,6 +232,21 @@ export function MetaPageConnectionSettings({ isOpen, onOpen }: { isOpen: boolean
   const currentInstagram = data ? instagramIdentity(data) : null;
   const currentPageName = data && "page" in data && data.page ? data.page.displayName : "Not connected";
   const currentInstagramName = currentInstagram ? instagramHandle(currentInstagram).replace(/ Instagram$/i, "") : "Not connected";
+  const connectedServices = useMemo(() => {
+    const services = new Set<string>();
+    if (creatorInstagram?.state === "connected") services.add("Instagram");
+    if (creatorThreads?.state === "connected") services.add("Threads");
+    if (data?.stage === "connected") {
+      services.add("Facebook");
+      if (data.instagram.status === "connected") services.add("Instagram");
+    }
+    return ["Instagram", "Facebook", "Threads"].filter((service) => services.has(service));
+  }, [creatorInstagram?.state, creatorThreads?.state, data]);
+
+  useEffect(() => {
+    onConnectedServicesChange?.(connectedServices);
+  }, [connectedServices, onConnectedServicesChange]);
+
   if (!isOpen) return null;
   return (
     <>

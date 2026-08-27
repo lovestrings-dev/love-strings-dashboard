@@ -107,16 +107,34 @@ button {
 
 .date-input .date-input-native-picker {
   border: 0;
-  height: 1px;
+  cursor: pointer;
+  height: 32px;
   min-height: 0;
   opacity: 0;
   padding: 0;
-  pointer-events: none;
   position: absolute;
   right: 2px;
   top: 50%;
   transform: translateY(-50%);
-  width: 1px;
+  width: 32px;
+  z-index: 2;
+}
+
+.production-released-songs {
+  display: grid;
+  gap: 10px;
+}
+
+.production-released-songs-toggle {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  justify-self: start;
+}
+
+.production-released-songs-list {
+  display: grid;
+  gap: 14px;
 }
 
 .date-input-error {
@@ -225,20 +243,67 @@ button {
 
 .account-control {
   align-items: center;
-  display: grid;
-  flex: 0 0 auto;
-  gap: 6px;
-  grid-template-areas:
-    "identity"
-    "name";
-  grid-template-columns: minmax(30px, auto);
-  margin-top: 10px;
+  display: flex;
+  flex: 1 1 auto;
   min-width: 0;
   position: relative;
 }
 
 .account-identity {
-  display: contents;
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 44px minmax(0, 1fr) 30px;
+  min-width: 0;
+  width: 100%;
+}
+
+.account-workspace-logo {
+  background: linear-gradient(145deg, rgba(119, 214, 201, 0.18), rgba(219, 84, 255, 0.18));
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  border: 1px solid rgba(119, 214, 201, 0.34);
+  border-radius: 8px;
+  box-shadow: 0 0 14px rgba(219, 84, 255, 0.22);
+  color: #f4f3ee;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  height: 44px;
+  padding: 0;
+  width: 44px;
+}
+
+.account-workspace-logo:hover,
+.account-workspace-logo:focus-visible,
+.account-workspace-logo[aria-expanded="true"] {
+  border-color: #77d6c9;
+  outline: 2px solid rgba(119, 214, 201, 0.24);
+  outline-offset: 2px;
+}
+
+.account-workspace-name {
+  min-width: 0;
+}
+
+.account-workspace-name strong,
+.account-workspace-name span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-workspace-name strong {
+  color: #f4f3ee;
+}
+
+.account-workspace-name span {
+  color: #a8ada8;
+  font-size: 13px;
+  margin-top: 2px;
 }
 
 .account-avatar {
@@ -251,7 +316,6 @@ button {
   flex: 0 0 30px;
   font-size: 13px;
   font-weight: 800;
-  grid-area: identity;
   height: 30px;
   justify-content: center;
   padding: 0;
@@ -265,23 +329,6 @@ button {
   background-size: cover;
 }
 
-.account-avatar:hover,
-.account-avatar[aria-expanded="true"] {
-  background: rgba(119, 214, 201, 0.24);
-  border-color: #77d6c9;
-}
-
-.account-name {
-  color: #f4f3ee;
-  font-size: 13px;
-  font-weight: 700;
-  grid-area: name;
-  overflow: hidden;
-  text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .account-menu {
   background: #202525;
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -293,7 +340,7 @@ button {
   min-width: 210px;
   padding: 6px;
   position: absolute;
-  top: 38px;
+  top: 52px;
   z-index: 80;
 }
 
@@ -405,27 +452,6 @@ button {
 
 .user-settings-header h1 {
   margin: 4px 0 0;
-}
-
-.user-settings-back {
-  align-items: center;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  color: var(--text);
-  cursor: pointer;
-  display: inline-flex;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 800;
-  gap: 8px;
-  min-height: 42px;
-  padding: 9px 14px;
-}
-
-.user-settings-back:hover {
-  border-color: var(--accent);
-  color: var(--accent-strong);
 }
 
 .user-settings-content {
@@ -695,10 +721,17 @@ button {
 }
 
 .audience-dashboard-child strong {
+  align-items: baseline;
   color: var(--text);
+  display: flex;
   font-size: 20px;
+  gap: 4px;
   letter-spacing: -0.04em;
   line-height: 1.1;
+}
+
+.audience-dashboard-child .audience-estimated-value {
+  font-size: clamp(18px, 5vw, 20px);
 }
 
 .audience-dashboard-child > span,
@@ -749,10 +782,17 @@ button {
 }
 
 .audience-platform-child strong {
+  align-items: baseline;
   color: var(--text);
+  display: flex;
   font-size: 24px;
+  gap: 5px;
   letter-spacing: -0.04em;
   line-height: 1.1;
+}
+
+.audience-platform-child .audience-estimated-value {
+  font-size: clamp(18px, 5vw, 21px);
 }
 
 .audience-platform-child > span,
@@ -2788,6 +2828,30 @@ button {
   margin: 0;
 }
 
+.auth-form-link {
+  color: var(--accent-strong);
+  font-size: 14px;
+  font-weight: 800;
+  justify-self: start;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.auth-form-result {
+  display: grid;
+  gap: 14px;
+}
+
+.auth-form-result p {
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.auth-form-result .login-error {
+  color: #c9363e;
+}
+
 .workspace {
   inline-size: 100%;
   max-width: 100%;
@@ -2888,30 +2952,6 @@ h2 {
   height: 42px;
   justify-content: center;
   width: 42px;
-}
-
-.app-navigation-back-button-floating {
-  align-items: center;
-  background: var(--surface-strong);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 999px;
-  bottom: 22px;
-  box-shadow: 0 16px 36px rgba(17, 19, 21, 0.22);
-  color: #ffffff;
-  cursor: pointer;
-  display: inline-flex;
-  height: 48px;
-  justify-content: center;
-  position: fixed;
-  right: 22px;
-  width: 48px;
-  z-index: 20;
-}
-
-.app-navigation-back-button-floating:hover,
-.app-navigation-back-button-floating:focus-visible {
-  background: var(--accent-strong);
-  outline: 3px solid rgba(15, 139, 141, 0.2);
 }
 
 .dashboard-refresh-control {
@@ -4209,7 +4249,7 @@ h2 {
 }
 
 .platform-grid-dashboard .platform-metrics dd {
-  font-size: 19px;
+  font-size: clamp(18px, 5vw, 20px);
 }
 
 .platform-grid-dashboard .platform-metric-row-inline dd {
@@ -5192,7 +5232,7 @@ h2 {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-  font-size: 25px;
+  font-size: clamp(18px, 5vw, 21px);
   font-weight: 800;
   line-height: 1;
   margin: 0;
@@ -5992,12 +6032,25 @@ h2 {
 
 .budget-metric-card {
   align-content: start;
-  grid-template-rows: minmax(32px, auto) auto;
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
   min-height: 132px;
 }
 
 .budget-metric-card > span {
-  align-self: end;
+  align-self: start;
+}
+
+.budget-metric-card > strong {
+  font-size: clamp(18px, 5vw, 21px);
+  line-height: 1.1;
+  order: -1;
+}
+
+.dashboard-budget-grid .budget-metric-card > strong {
+  font-size: clamp(18px, 5vw, 20px);
 }
 
 .amount-positive {
@@ -9240,7 +9293,7 @@ h2 {
   }
 
   .account-control {
-    margin-right: 12px;
+    margin-right: 0;
   }
 
   .nav-list {
@@ -9579,11 +9632,6 @@ h2 {
     align-items: stretch;
     display: grid;
     gap: 14px;
-  }
-
-  .user-settings-back {
-    justify-content: center;
-    width: 100%;
   }
 
   .user-settings-content {
@@ -9940,7 +9988,6 @@ h2 {
   .budget-summary-grid .budget-metric-card,
   .budget-bucket-grid .budget-metric-card {
     gap: 6px;
-    grid-template-rows: minmax(40px, auto) auto;
     min-height: 98px;
     padding: 12px 8px;
   }
@@ -9954,31 +10001,43 @@ h2 {
 
   .budget-summary-grid .budget-metric-card strong,
   .budget-bucket-grid .budget-metric-card strong {
-    font-size: 19px;
+    font-size: clamp(18px, 5vw, 21px);
     line-height: 1.1;
     white-space: nowrap;
   }
 
-  .dashboard-production-card-header {
+  .dashboard-production-card:not(.dashboard-production-card-compact) .dashboard-production-card-header {
     align-items: start;
     display: grid;
     gap: 8px;
-    grid-template-columns: 48px minmax(0, 1fr) 76px;
+    grid-template-columns: 84px minmax(0, 1fr) 112px;
   }
 
-  .dashboard-production-title-row {
+  .dashboard-production-card:not(.dashboard-production-card-compact) .dashboard-production-title-row {
     display: contents;
   }
 
-  .dashboard-production-title-row > div {
+  .dashboard-production-card:not(.dashboard-production-card-compact) .dashboard-production-title-row > div {
     min-width: 0;
   }
 
   .dashboard-production-card .dashboard-campaign-date {
+    box-sizing: border-box;
+    height: 84px;
     justify-self: stretch;
+    min-height: 84px;
     min-width: 0;
     text-align: left;
     width: 100%;
+  }
+
+  .dashboard-production-card .dashboard-campaign-date span {
+    white-space: nowrap;
+  }
+
+  .dashboard-production-card:not(.dashboard-production-card-compact) .dashboard-production-art {
+    height: 84px;
+    width: 84px;
   }
 
   .dashboard-other-tasks-header {

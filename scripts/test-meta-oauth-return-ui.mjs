@@ -29,6 +29,6 @@ assert.match(component, /history\.replaceState\([\s\S]*cleanConsumedFstatsLoginC
 assert.doesNotMatch(component, /location\.(?:assign|replace)\([^)]*cleanConsumedFstatsLoginContinuation/, "continuation cleanup cannot cause a full reload");
 assert.match(component, /metaContinuationConsumed\.current = true[\s\S]*setHasMetaContinuation\(false\)/, "successful handling clears both guard and state");
 assert.match(styles, /@media \(max-width: 640px\)[\s\S]*\.meta-onboarding-panel \.google-service-row > button,[\s\S]*\.meta-row-actions button[\s\S]*min-height: 44px;[\s\S]*width: 100%;/, "mobile workflow buttons are full-width and touch-friendly");
-assert.doesNotMatch(styles, /\.meta-access-actions[^}]*width:\s*100%/s, "access-management service buttons remain compact");
+assert.match(styles, /\.meta-access-actions a,[\s\S]*\.meta-access-actions button \{[\s\S]*min-height:\s*44px;[\s\S]*width:\s*100%;/, "access-management actions remain full-width touch targets");
 
 console.log("Meta OAuth return/focus/mobile UI tests passed.");
