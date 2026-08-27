@@ -62,13 +62,13 @@ export default function LoginPage() {
               value={password}
             />
           </label>
-          <Link className="auth-form-link" href="/forgot-password">
-            Forgot password?
-          </Link>
           {error ? <p className="login-error" role="alert">{error}</p> : null}
           <button disabled={isSubmitting} type="submit">
             {isSubmitting ? "Signing in..." : "Sign in"}
           </button>
+          <Link className="auth-form-link auth-form-link-end" href="/forgot-password">
+            Forgot password?
+          </Link>
         </form>
     </ArtistDeckSystemShell>
   );

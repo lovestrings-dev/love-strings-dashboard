@@ -36,6 +36,7 @@
     "test:set-password-session-binding": "node scripts/test-set-password-session-binding.mjs",
     "test:password-recovery-flow": "node scripts/test-password-recovery-flow.mjs",
     "test:live-recovery-callback-shape": "node --experimental-strip-types scripts/test-live-recovery-callback-shape.mjs",
+    "test:recovery-error-ux": "node scripts/test-recovery-error-ux.mjs",
     "test:meta-connection-foundation": "node --experimental-strip-types scripts/test-meta-connection-foundation.mjs",
     "test:meta-fstats-login-oauth": "node --experimental-strip-types scripts/test-meta-fstats-login-oauth.mjs",
     "test:meta-creator-instagram-oauth": "node --experimental-strip-types scripts/test-meta-creator-instagram-oauth.mjs",

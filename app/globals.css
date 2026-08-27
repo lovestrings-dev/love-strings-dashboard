@@ -2837,6 +2837,8 @@ button {
   text-underline-offset: 3px;
 }
 
+.auth-form-link-end { justify-self: end; }
+
 .auth-form-result {
   display: grid;
   gap: 14px;

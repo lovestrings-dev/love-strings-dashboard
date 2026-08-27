@@ -81,7 +81,12 @@ export default function SetPasswordPage() {
     if (password !== confirmation) return setMessage("Passwords do not match.");
     setIsSubmitting(true); const supabase = createBrowserSupabaseClient();
     const { error } = await supabase.auth.updateUser({ password });
-    if (error) { setMessage("Password could not be saved. Please try again or request a new link."); setIsSubmitting(false); return; }
+    if (error) {
+      const isSamePassword = error.code === "same_password" || /different from (?:the )?(?:old|current) password|same password/i.test(error.message);
+      setMessage(isSamePassword ? "Your new password must be different from your current password." : "Password could not be saved. Please try again or request a new link.");
+      setIsSubmitting(false);
+      return;
+    }
     setIsSubmitting(false);
     if (flow === "recovery") { setIsResetComplete(true); return; }
     router.replace("/"); router.refresh();
