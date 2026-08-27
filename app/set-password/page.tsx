@@ -6,7 +6,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { LoaderCircle } from "lucide-react";
 import { ArtistDeckLoading, ArtistDeckSystemShell } from "@/app/artistdeck-system-shell";
-import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
+import { createBrowserSupabaseCallbackClient, createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { callbackNeedsPassword, currentAuthCallback } from "@/lib/auth-callback";
 
 export default function SetPasswordPage() {
@@ -18,7 +18,7 @@ export default function SetPasswordPage() {
   const complete = useRef(false);
 
   useEffect(() => {
-    const supabase = createBrowserSupabaseClient();
+    const supabase = createBrowserSupabaseCallbackClient();
     void establish();
     async function establish() {
       if (complete.current) return;
