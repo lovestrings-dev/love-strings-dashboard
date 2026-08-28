@@ -1,6 +1,6 @@
 {
   "name": "love-strings-dashboard",
-  "version": "1.27.0-beta.1",
+  "version": "1.28.0-beta.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -14,6 +14,11 @@
     "test:date-input": "node --experimental-strip-types scripts/test-date-input.mjs",
     "test:metric-collector-eligibility": "node --experimental-strip-types scripts/test-metric-collector-eligibility.mjs",
     "test:workspace-resolution": "node --experimental-strip-types scripts/test-workspace-resolution.mjs",
+    "test:guidance-engine-v1-foundation": "node --experimental-strip-types scripts/test-guidance-engine-v1-foundation.mjs",
+    "test:guidance-qa-preview": "node --experimental-strip-types scripts/test-guidance-qa-preview.mjs",
+    "test:guidance-visual-helper": "node scripts/test-guidance-visual-helper.mjs",
+    "test:guidance-engine-v1-live": "node scripts/test-guidance-engine-v1-live.mjs",
+    "test:guidance-skip-persistence-live": "node scripts/test-guidance-skip-persistence-live.mjs",
     "test:provisional-workspace-admin-invitations": "node --experimental-strip-types scripts/test-provisional-workspace-admin-invitations.mjs",
     "cleanup:ad-provisional-fixtures": "node scripts/cleanup-ad-provisional-fixtures.mjs",
     "test:workspace-finalization-and-deletion": "node scripts/test-workspace-finalization-and-deletion.mjs",

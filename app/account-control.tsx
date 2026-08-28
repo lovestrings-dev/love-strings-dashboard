@@ -6,6 +6,9 @@ import { useEffect, useRef, useState } from "react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 export function AccountControl({
+  guidanceContext,
+  onGuidanceAbandon,
+  onGuidanceMenuOpen,
   onOpenAboutDashboard,
   onOpenGeneralSettings,
   onOpenPlatformAdministration,
@@ -14,6 +17,9 @@ export function AccountControl({
   workspaceLogoUrl,
   workspaceName
 }: {
+  guidanceContext: "none" | "add-song" | "song-settings" | "google-logo" | "google-settings" | "invite-member";
+  onGuidanceAbandon: () => void;
+  onGuidanceMenuOpen: () => void;
   onOpenAboutDashboard: () => void;
   onOpenGeneralSettings: () => void;
   onOpenPlatformAdministration: () => void;
@@ -150,12 +156,14 @@ export function AccountControl({
         !accountControlRef.current?.contains(event.target)
       ) {
         setIsMenuOpen(false);
+        onGuidanceAbandon();
       }
     }
 
     function closeMenuWithKeyboard(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setIsMenuOpen(false);
+        onGuidanceAbandon();
       }
     }
 
@@ -168,7 +176,7 @@ export function AccountControl({
       document.removeEventListener("touchstart", closeMenu);
       document.removeEventListener("keydown", closeMenuWithKeyboard);
     };
-  }, [isMenuOpen]);
+  }, [isMenuOpen, onGuidanceAbandon]);
 
   async function signOut() {
     setIsSigningOut(true);
@@ -190,7 +198,9 @@ export function AccountControl({
         const payload = (await response.json().catch(() => null)) as { error?: string } | null;
         throw new Error(payload?.error ?? "Workspace switch failed.");
       }
-      window.location.assign("/");
+      // The active-workspace cookie is server-scoped. A hard reload makes every
+      // workspace-scoped client snapshot re-resolve immediately after the write.
+      window.location.reload();
     } catch (error) {
       console.error("Unable to switch workspace.", error);
       setIsSwitchingWorkspace(false);
@@ -208,8 +218,12 @@ export function AccountControl({
           aria-expanded={isMenuOpen}
           aria-haspopup="menu"
           aria-label={`Open workspace menu for ${workspaceName}`}
-          className={`account-workspace-logo${workspaceLogoUrl ? " has-image" : ""}`}
-          onClick={() => setIsMenuOpen((currentValue) => !currentValue)}
+          className={`account-workspace-logo${workspaceLogoUrl ? " has-image" : ""}${guidanceContext === "google-logo" ? " guidance-target-light" : ""}`}
+          onClick={() => {
+            const next = !isMenuOpen;
+            setIsMenuOpen(next);
+            if (next) onGuidanceMenuOpen();
+          }}
           style={workspaceLogoUrl ? { backgroundImage: `url(${JSON.stringify(workspaceLogoUrl)})` } : undefined}
           type="button"
         >
@@ -250,6 +264,7 @@ export function AccountControl({
           <button
             onClick={() => {
               setIsMenuOpen(false);
+              onGuidanceAbandon();
               onOpenUserSettings();
             }}
             role="menuitem"
@@ -260,6 +275,7 @@ export function AccountControl({
           </button>
           {workspaceRole === "admin" ? (
             <button
+              className={guidanceContext === "google-settings" ? "guidance-target-light guidance-menu-settings" : undefined}
               onClick={() => {
                 setIsMenuOpen(false);
                 onOpenGeneralSettings();
@@ -275,6 +291,7 @@ export function AccountControl({
             <button
               onClick={() => {
                 setIsMenuOpen(false);
+                onGuidanceAbandon();
                 onOpenPlatformAdministration();
               }}
               role="menuitem"
@@ -287,6 +304,7 @@ export function AccountControl({
           <button
             onClick={() => {
               setIsMenuOpen(false);
+              onGuidanceAbandon();
               onOpenAboutDashboard();
             }}
             role="menuitem"

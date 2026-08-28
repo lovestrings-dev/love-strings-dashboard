@@ -2,6 +2,23 @@
 
 This file tracks app versions that are useful to discuss, test, and deploy. It is for product-level changes, not every small database edit.
 
+## Beta 1.28 — First-Admin Guidance and release-readiness
+
+Headline: **ArtistDeck now guides a new Workspace Admin through the first shared setup journey while keeping App Owner oversight and role boundaries explicit.**
+
+- `getting_started_v1` is a four-step first-Admin journey: Essentials, First Song, Google / YouTube, and Invite Member. It includes contextual cues, workspace-scoped skips, canonical completion reconciliation, and an explicit 4/4 **Close** acknowledgement.
+- Guidance renders only for the intended ordinary Workspace Admin role. Members, Viewers, and Platform Operators do not receive this bootstrap program; future role-specific programs can use independent keys and lifecycle state.
+- Guided Google success returns to Platforms and cues the YouTube card; normal/cancel/error Google flows remain in General Settings. Connected YouTube channels with no collected metrics display their connected state honestly.
+- Platform Administration includes a read-only onboarding outcome matrix for eligible workspaces: Guidance, Essentials, Song, Google/Meta services, Spotify/Apple imports, Marketing campaign types, and Focus Queue facts. External OAuth tester reminders remain visible before inviting a first Admin.
+- The Platform Administration canvas is stable and wide from first render, and its Onboarding & Guidance Defaults/matrix remain open for immediate review.
+- Ordinary Workspace Admins can invite only Members or Viewers; owner-controlled first-Admin provisioning remains available.
+- Future first-admin workspaces receive three Focus Queue starters: upload logos, create/modify a task, and upload Spotify/Apple CSV data. First Song Guidance remains separate.
+- Workspace switching reloads the selected scope immediately; User Settings opens at the top. Production collapse and contextual Guidance cues received the final mobile/UI refinement pass.
+
+Migrations synchronized: `202608270002`–`202608270004`, `202608280001`–`202608280004`.
+
+Prepared for user push/deployment. No deployment or user-acceptance claim is implied.
+
 ## Beta 1.27 — ArtistDeck daily-work polish, secure returns, and password recovery
 
 Headline: **ArtistDeck now keeps daily Production and Dashboard work more focused, returns safely from connected services, and gives invited users a secure self-service password recovery path.**

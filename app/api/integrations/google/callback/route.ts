@@ -21,21 +21,36 @@ type AnalyticsAccountSummaries = {
 type AnalyticsDataStreams = { dataStreams?: Array<{ type?: string; webStreamData?: { defaultUri?: string } }> };
 
 export async function GET(request: NextRequest) {
-  const returnUrl = createSettingsReturnUrl(request);
+  const guidanceReturn = request.cookies.get("ls_google_oauth_guidance")?.value === "1";
+  const guidancePreview = request.cookies.get("ls_google_oauth_guidance_preview")?.value;
+  const settingsReturnUrl = createSettingsReturnUrl(request);
 
   try {
     const code = request.nextUrl.searchParams.get("code");
     const state = request.nextUrl.searchParams.get("state");
+    const providerError = request.nextUrl.searchParams.get("error");
+    const providerErrorDescription = request.nextUrl.searchParams.get("error_description");
     const savedState = request.cookies.get("ls_google_oauth_state")?.value;
     const service = request.cookies.get("ls_google_oauth_service")?.value ?? null;
     const savedOrigin = request.cookies.get("ls_google_oauth_origin")?.value;
     const savedWorkspaceId = request.cookies.get("ls_google_oauth_workspace")?.value;
 
-    if (!code || !state || !savedState || state !== savedState || !isGoogleService(service)) {
+    if (!state || !savedState || state !== savedState || !isGoogleService(service)) {
       throw new Error("Google authorization session could not be verified.");
     }
     if (savedOrigin !== request.nextUrl.origin) {
       throw new Error("Google authorization returned to an unexpected app origin.");
+    }
+    if (providerError) {
+      throw new Error(
+        providerErrorDescription ||
+          (providerError === "access_denied"
+            ? "Google authorization was cancelled or permission was denied."
+            : "Google authorization did not complete.")
+      );
+    }
+    if (!code) {
+      throw new Error("Google did not return an authorization code.");
     }
 
     const { serviceClient, user, workspaceId } = await requireWorkspaceAdministrator(request);
@@ -133,12 +148,12 @@ export async function GET(request: NextRequest) {
       await reconcilePlatformAccount(serviceClient, { workspaceId, platformSlug: "google-analytics", externalId: selectedAnalyticsProperty.id, accountName: selectedAnalyticsProperty.name, url: webUris.length === 1 ? webUris[0] : undefined });
     }
 
-    return clearOAuthCookies(NextResponse.redirect(setResult(returnUrl, analyticsNeedsSelection ? "select-analytics" : "connected")));
+    return clearOAuthCookies(NextResponse.redirect(setResult(guidanceReturn ? createGuidanceDashboardReturnUrl(request, guidancePreview) : settingsReturnUrl, analyticsNeedsSelection ? "select-analytics" : "connected")));
   } catch (error) {
     return clearOAuthCookies(
       NextResponse.redirect(
         setResult(
-          returnUrl,
+          settingsReturnUrl,
           "error",
           error instanceof Error ? error.message : "Google connection failed."
         )
@@ -153,6 +168,19 @@ function createSettingsReturnUrl(request: NextRequest) {
   return url;
 }
 
+function createGuidanceDashboardReturnUrl(request: NextRequest, guidancePreview?: string) {
+  const url = new URL("/", request.nextUrl.origin);
+  url.searchParams.set("guidance_return", "google-connected");
+  if (
+    process.env.NODE_ENV === "development" &&
+    (request.nextUrl.hostname === "localhost" || request.nextUrl.hostname === "127.0.0.1") &&
+    guidancePreview === "google"
+  ) {
+    url.searchParams.set("guidancePreview", "invite-member");
+  }
+  return url;
+}
+
 function setResult(url: URL, result: string, message?: string) {
   url.searchParams.set("google", result);
   if (message) url.searchParams.set("google_message", message.slice(0, 240));
@@ -164,7 +192,9 @@ function clearOAuthCookies(response: NextResponse) {
     "ls_google_oauth_state",
     "ls_google_oauth_service",
     "ls_google_oauth_origin",
-    "ls_google_oauth_workspace"
+    "ls_google_oauth_workspace",
+    "ls_google_oauth_guidance",
+    "ls_google_oauth_guidance_preview"
   ]) {
     response.cookies.set(name, "", { maxAge: 0, path: "/api/integrations/google" });
   }

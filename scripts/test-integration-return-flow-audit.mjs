@@ -18,13 +18,21 @@ const [page, googleConnect, googleCallback, googleOauth, metaSettings, fstatsCon
 ]);
 
 assert.match(googleConnect, /url\.searchParams\.set\("settings", "general"\)[\s\S]*url\.searchParams\.set\("google", result\)/, "Google connect failures return through General Settings");
+assert.match(googleConnect, /google_message/, "Google authorization-start failures preserve a visible safe error message");
 assert.match(googleCallback, /url\.searchParams\.set\("settings", "general"\)/, "Google callbacks return to General Settings");
 assert.match(googleCallback, /state !== savedState/, "Google callback keeps CSRF state validation");
 assert.match(googleCallback, /savedOrigin !== request\.nextUrl\.origin/, "Google callback validates its saved app origin");
 assert.match(googleCallback, /savedWorkspaceId !== workspaceId/, "Google callback validates the active workspace");
+assert.match(googleCallback, /providerError === "access_denied"/, "Google cancellation or denial is classified before returning");
+assert.match(googleCallback, /Google authorization was cancelled or permission was denied\./, "Google cancellation returns a meaningful status message");
 assert.match(page, /setActiveGeneralSettingsPanel\("google"\)/, "Google returns open the Google parent panel");
 assert.match(page, /googleServicesRef\.current\?\.scrollIntoView/, "Google returns scroll to the Google panel");
+assert.match(page, /parameters\.get\("google_message"\)/, "Google return errors are shown in the normal Google Services status area");
+assert.match(page, /hasHandledGoogleReturn/, "a handled Google return keeps its status through development Strict Mode");
 assert.match(page, /googleConnectionLoadVersion\.current/, "Google property updates remain guarded against stale status loads");
+assert.match(page, /guidance_return[\s\S]*refreshGoogleConnection\(\)[\s\S]*refreshGuidanceStatus\(\)/, "Guided Google returns refresh both the connection card and canonical Guidance status");
+assert.match(page, /setActiveSection\("Platforms"\)/, "Guided Google returns open the Platforms module");
+assert.match(page, /activeSection !== "Platforms"[\s\S]*platform-card-youtube[\s\S]*scrollIntoView/, "Guided Google returns focus the YouTube Platforms card after it renders");
 assert.match(googleOauth, /analytics\.readonly/, "Analytics authorization remains read-only");
 assert.match(googleOauth, /youtube\.readonly/, "YouTube authorization remains read-only");
 

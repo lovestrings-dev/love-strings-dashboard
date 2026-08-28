@@ -6,6 +6,7 @@ import {
   WorkspaceAccessError
 } from "@/lib/server/workspace-owner";
 import { sendWorkspaceInvitationEmail } from "@/lib/server/workspace-invitation-email";
+import { isWorkspaceAdminInviteRole } from "@/lib/workspace-invitation-roles";
 
 type WorkspaceRole = "admin" | "member" | "viewer";
 
@@ -65,6 +66,7 @@ export async function POST(request: NextRequest) {
 
     if (!isEmail(email)) return NextResponse.json({ error: "Enter a valid email address." }, { status: 400 });
     if (!role) return NextResponse.json({ error: "Choose a valid workspace role." }, { status: 400 });
+    if (!isWorkspaceAdminInviteRole(role)) return NextResponse.json({ error: "Workspace Admins can invite Members or Viewers only." }, { status: 403 });
 
     const token = createInvitationToken();
     const { data: invitation, error: invitationError } = await serviceClient
@@ -128,6 +130,7 @@ export async function PATCH(request: NextRequest) {
     if (payload.action === "role") {
       const role = normalizeRole(payload.role);
       if (!role) return NextResponse.json({ error: "Choose a valid workspace role." }, { status: 400 });
+      if (!isWorkspaceAdminInviteRole(role)) return NextResponse.json({ error: "Workspace Admins can invite Members or Viewers only." }, { status: 403 });
       const { error } = await serviceClient
         .from("app_workspace_invitations")
         .update({ role })

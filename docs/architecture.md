@@ -176,6 +176,76 @@ Current integration boundary:
   shared-code change was needed; live upload/replacement verification remains a
   post-deployment runtime smoke item.
 
+## Guidance Engine V1 Foundation
+
+- `getting_started_v1` is a code-defined, workspace-scoped program with ordered
+  canonical steps: `artistdeck_basics`, `first_song`, `google_youtube`, and
+  `invite_member`.
+- Eligibility is deliberate: only workspaces finalized after the Guidance V1
+  foundation have `guidance_eligible_at`; mature active workspaces are not
+  backfilled into onboarding. Progress is workspace + versioned program key,
+  because all V1 outcomes are shared workspace facts rather than member UI
+  events.
+- `GET /api/guidance/status` makes one authenticated server request and one
+  database RPC. The RPC evaluates active setup state, actual `production_songs`
+  existence, and the usable Google/YouTube connection (`youtube_enabled` plus
+  a channel ID), then recommends the earliest incomplete configured step.
+- Completion writes a program-local `completed_at` marker for cheap later
+  short-circuiting. Deleting a song or changing/removing a Google connection
+  invalidates that marker, so it cannot override mutable canonical state.
+- `202608280001_add_getting_started_guidance_skips.sql` is an applied extension
+  of that same workspace/program row: it records only
+  explicit `first_song`, `google_youtube`, and `invite_member` skip
+  preferences. The status RPC
+  still computes canonical completion first, then recommends the earliest
+  incomplete, non-skipped step. A skip never becomes a completion fact.
+- Local QA can render the visual helper without changing any Guidance or
+  product data by using `guidancePreview=first-song`, `google`,
+  `invite-member`, or `all-complete` on localhost while the active workspace is the persistent
+  `ArtistDeck QA Sandbox`. The status route still evaluates the canonical RPC,
+  then accepts a presentation override only in `NODE_ENV=development`, on a
+  localhost host, for that exact workspace name. Deployed and ordinary mature
+  workspace responses remain canonical.
+- The visual helper is shared across the normal main modules (Dashboard,
+  Production, Marketing, Platforms, Budget, Roadmap, and Events). QR Codes is
+  intentionally not a Guidance surface and contains no embedded helper.
+- The visual journey is transient only: a guided Production entry highlights
+  the existing Add song control, then the created song's existing Song options.
+  The Google journey highlights the workspace menu, General Settings, and the
+  existing YouTube Channel Connect control; it never treats navigation or a
+  Connect click as completion.
+- Guided Google authorization returns to the Dashboard with the YouTube card
+  cued and Guidance refreshed; normal start, cancellation/denial, and callback
+  errors remain in General Settings → Google Services with bounded status
+  messaging. State, origin, and workspace validation remain required before an
+  OAuth result is accepted.
+- Applied `202608280002_make_getting_started_completion_explicit.sql` uses the
+  existing `dismissed_at` marker for final acknowledgement: genuine canonical
+  4/4 remains visible with Close, while skips retain their existing inactive
+  behavior. Applied `202608280003_add_getting_started_invite_member_step.sql`
+  adds the final workspace-level invitation step.
+- Guidance status is presentation-only for ordinary workspace Admins; Members,
+  Viewers, and Platform Operators receive an inactive response. App Owners have
+  a separate read-only outcome matrix built from the same compact server-side
+  read model, so no per-workspace client request fan-out or duplicate progress
+  flags are introduced.
+- Fresh-workspace Focus Queue seeding is separate from Guidance. Applied
+  `202608280004_update_virgin_workspace_focus_queue_starters.sql` creates only
+  the three current starter tasks and does not alter mature workspaces.
+- This foundation intentionally provides no dashboard card, coach marks, or
+  persisted navigation/tooltip state. Later programs can add definitions and
+  eligibility rules without coupling guidance behavior to Dashboard UI.
+- The separate `202608270003` repair migration is confined to the existing
+  first-admin finalization RPC: it qualifies the `app_workspace_settings`
+  predicate that collides with the RPC's `workspace_id` output variable. It is
+  unrelated to Guidance evaluation, which continues to detect `first_song`
+  directly from canonical `production_songs` existence.
+- The effective remote function audit found the remaining collision in its
+  starter-task `ON CONFLICT (workspace_id, stable_key)` target. Applied repair
+  `202608270004` uses the existing named unique constraint instead, preserving
+  the same idempotent insert semantics without an unqualified output-variable
+  collision.
+
 ## Data Source Direction
 
 Build the project database early.

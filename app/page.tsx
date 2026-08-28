@@ -69,6 +69,11 @@ import {
 } from "@/lib/audience-aggregation";
 import { getSpotifyAudienceHistoryStartDate } from "@/lib/spotify-audience-history";
 import { defaultWorkspaceId } from "@/lib/workspace";
+import {
+  guidanceStatusAfterSkip,
+  type GettingStartedV1Step,
+  type GuidanceStatus
+} from "@/lib/guidance";
 import { MetaPageConnectionSettings } from "./meta-page-connection-settings";
 import {
   dashboardCardRegistry,
@@ -112,6 +117,7 @@ type AppNavigationSnapshot = {
   section: Section;
 };
 type WorkspaceRole = "admin" | "member" | "viewer";
+type GuidanceContext = "none" | "add-song" | "song-settings" | "google-logo" | "google-settings" | "invite-member";
 type WorkspaceMember = {
   avatarUrl: string | null;
   displayName: string;
@@ -723,7 +729,7 @@ const platformStats = [
   }
 ];
 
-const appVersionLabel = "Beta 1.27";
+const appVersionLabel = "Beta 1.28";
 const defaultAppLogoUrl = "/artistdeck-logo.png";
 
 const sections = [
@@ -5437,6 +5443,9 @@ export default function Home() {
   const activeWorkspaceIdRef = useRef("");
   const hasRequestedQrCodeSupabaseLoad = useRef(false);
   const [activeSection, setActiveSection] = useState<Section>("Dashboard");
+  const [guidanceStatus, setGuidanceStatus] = useState<GuidanceStatus | null>(null);
+  const [guidanceContext, setGuidanceContext] = useState<GuidanceContext>("none");
+  const [guidanceSongId, setGuidanceSongId] = useState<string | null>(null);
   const [isLayoutDebugEnabled, setIsLayoutDebugEnabled] = useState(false);
   const previousActiveSection = useRef<Section>("Dashboard");
   const [focusQueueNavigationState, setFocusQueueNavigationState] = useState<FocusQueueNavigationState>({
@@ -5562,6 +5571,11 @@ export default function Home() {
   const [roadmapPhaseDrafts, setRoadmapPhaseDrafts] = useState<RoadmapPhase[]>([]);
   const [roadmapPlanDrafts, setRoadmapPlanDrafts] = useState<RoadmapPlan[]>([]);
   const [openProductionWorkflowFromRoadmap, setOpenProductionWorkflowFromRoadmap] = useState(false);
+  const [openGoogleServicesFromGuidance, setOpenGoogleServicesFromGuidance] = useState(false);
+  const [openMemberAccessFromGuidance, setOpenMemberAccessFromGuidance] = useState(false);
+  const [guidanceGoogleConnectHint, setGuidanceGoogleConnectHint] = useState(false);
+  const [guidanceMemberInviteHint, setGuidanceMemberInviteHint] = useState(false);
+  const [guidanceYouTubeCardHint, setGuidanceYouTubeCardHint] = useState(false);
   const [budgetEntryDrafts, setBudgetEntryDrafts] = useState<BudgetEntry[]>([]);
   const [deletedBudgetForecastIds, setDeletedBudgetForecastIds] = useState<string[]>([]);
   const [eventEntryDrafts, setEventEntryDrafts] = useState<EventEntry[]>([]);
@@ -5595,7 +5609,8 @@ export default function Home() {
     platformStatsData,
     platformMetricRows,
     dashboardPreferences,
-    true
+    true,
+    workspaceGoogleConnection
   );
   const audienceDashboard = useMemo(
     () =>
@@ -5659,6 +5674,79 @@ export default function Home() {
   const validDailyFocusProgress = dailyFocusProgress.filter((item) =>
     validDailyFocusProgressTaskKeys.has(item.taskKey)
   );
+
+  const refreshGuidanceStatus = useCallback(async () => {
+    try {
+      const guidancePreview = new URLSearchParams(window.location.search).get("guidancePreview");
+      const guidanceStatusUrl = guidancePreview
+        ? `/api/guidance/status?guidancePreview=${encodeURIComponent(guidancePreview)}`
+        : "/api/guidance/status";
+      const response = await fetch(guidanceStatusUrl, { cache: "no-store" });
+      if (!response.ok) throw new Error("Guidance status failed.");
+      setGuidanceStatus((await response.json()) as GuidanceStatus);
+    } catch (error) {
+      // Guidance is deliberately noncritical: hide it if its compact status
+      // request cannot be resolved, while the rest of ArtistDeck keeps loading.
+      console.warn("Guidance status unavailable.", error);
+      setGuidanceStatus(null);
+    }
+  }, []);
+
+  const refreshGoogleConnection = useCallback(async () => {
+    try {
+      const response = await fetch("/api/integrations/google/status", { cache: "no-store" });
+      if (!response.ok) throw new Error("Google connection status failed.");
+      setWorkspaceGoogleConnection((await response.json()) as GoogleConnectionStatus);
+    } catch {
+      setWorkspaceGoogleConnection(null);
+    }
+  }, []);
+
+  async function skipGuidanceStep(step: Exclude<GettingStartedV1Step, "artistdeck_basics">) {
+    const previewMode = new URLSearchParams(window.location.search).get("guidancePreview");
+    if (previewMode) {
+      setGuidanceStatus((current) => current ? guidanceStatusAfterSkip(current, step) : current);
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/guidance/status", {
+        body: JSON.stringify({ step }),
+        headers: { "content-type": "application/json" },
+        method: "POST"
+      });
+      if (!response.ok) throw new Error("Guidance skip failed.");
+      setGuidanceStatus((await response.json()) as GuidanceStatus);
+    } catch (error) {
+      console.warn("Guidance skip unavailable.", error);
+    }
+  }
+
+  async function closeGuidance() {
+    if (new URLSearchParams(window.location.search).get("guidancePreview")) {
+      setGuidanceStatus({ active: false });
+      setGuidanceYouTubeCardHint(false);
+      return;
+    }
+    try {
+      const response = await fetch("/api/guidance/status", {
+        body: JSON.stringify({ action: "close" }),
+        headers: { "content-type": "application/json" },
+        method: "POST"
+      });
+      if (!response.ok) throw new Error("Guidance close failed.");
+      setGuidanceStatus((await response.json()) as GuidanceStatus);
+      setGuidanceYouTubeCardHint(false);
+    } catch (error) {
+      console.warn("Guidance close unavailable.", error);
+    }
+  }
+
+  useEffect(() => {
+    if (isResolvingInitialWorkspace || activeWorkspaceSetupState !== "active" || !activeWorkspaceId) return;
+    const timer = window.setTimeout(() => void refreshGuidanceStatus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [activeWorkspaceId, activeWorkspaceSetupState, isResolvingInitialWorkspace, refreshGuidanceStatus]);
   const budgetEntriesWithForecast = getBudgetEntriesWithForecast(
     budgetEntryDrafts,
     eventEntryDrafts,
@@ -6629,6 +6717,10 @@ export default function Home() {
   }
 
   async function addProductionSong() {
+    const wasGuidanceAddSong = guidanceContext === "add-song";
+    if (wasGuidanceAddSong) {
+      setGuidanceContext("none");
+    }
     try {
       const createdSong = await createRoadmapAwareProductionSong();
       setProductionSongDrafts((currentSongs) =>
@@ -6640,6 +6732,16 @@ export default function Home() {
         console.warn("Roadmap plans could not be refreshed after Production creation.", error);
       }
       setProductionFocusTarget({ songId: createdSong.id, token: Date.now() });
+      if (wasGuidanceAddSong || (guidanceStatus?.active && guidanceStatus.nextStep === "first_song")) {
+        setGuidanceSongId(createdSong.id);
+        setGuidanceContext("song-settings");
+      }
+      if (new URLSearchParams(window.location.search).get("guidancePreview") === "first-song") {
+        const previewUrl = new URL(window.location.href);
+        previewUrl.searchParams.set("guidancePreview", "google");
+        window.history.replaceState(null, "", previewUrl);
+      }
+      void refreshGuidanceStatus();
       setProductionSaveStatus({ message: "", state: "idle" });
     } catch (error) {
       setProductionSaveStatus({
@@ -7198,6 +7300,10 @@ export default function Home() {
   }
 
   function navigateToSidebarSection(section: Section) {
+    if (guidanceContext !== "none") {
+      setGuidanceContext("none");
+      setGuidanceSongId(null);
+    }
     if (section === activeSection) {
       setSettingsView(null);
       return;
@@ -7326,6 +7432,41 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("guidance_return") !== "google-connected") return;
+    const timer = window.setTimeout(() => {
+      setSettingsView(null);
+      setActiveSection("Platforms");
+      setGuidanceYouTubeCardHint(true);
+      void refreshGoogleConnection();
+      void refreshGuidanceStatus();
+      url.searchParams.delete("guidance_return");
+      url.searchParams.delete("google");
+      window.history.replaceState({}, "", url);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [refreshGoogleConnection, refreshGuidanceStatus]);
+
+  useEffect(() => {
+    if (
+      !guidanceYouTubeCardHint ||
+      settingsView ||
+      activeSection !== "Platforms" ||
+      !platformStatsData.some((platform) => platform.slug === "youtube")
+    ) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById("platform-card-youtube")?.scrollIntoView({
+        behavior: "smooth",
+        block: "center"
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeSection, guidanceYouTubeCardHint, platformStatsData, settingsView]);
+
+  useEffect(() => {
     if (
       !pendingScrollRestore ||
       settingsView ||
@@ -7352,36 +7493,43 @@ export default function Home() {
     let isCancelled = false;
 
     async function loadActiveWorkspace() {
-      const response = await fetch("/api/workspace/active", { cache: "no-store" });
-      const payload = (await response.json()) as { displayName?: string; role?: WorkspaceRole; setupState?: "active" | "pending_setup"; workspaceId?: string };
-      if (!isCancelled && response.ok && payload.workspaceId) {
-        const isPendingSetupAdmin = payload.setupState === "pending_setup" && payload.role === "admin";
-        setPlatformMetricRows([]);
-        setPlatformStatsData([]);
-        setNavigationStack([]);
-        setPendingScrollRestore(null);
-        setActiveWorkspaceSetupState(payload.setupState === "pending_setup" ? "pending_setup" : "active");
-        setProfileDisplayName(payload.displayName ?? "");
-        if (payload.role === "admin" || payload.role === "member" || payload.role === "viewer") setWorkspaceRole(payload.role);
-        if (isPendingSetupAdmin) {
-          setPendingSetupWorkspaceId(payload.workspaceId);
+      try {
+        const response = await fetch("/api/workspace/active", { cache: "no-store" });
+        if (response.redirected) {
+          window.location.replace(response.url);
           return;
         }
-        setActiveWorkspaceId(payload.workspaceId);
-        try {
-          const workspacesResponse = await fetch("/api/workspaces", { cache: "no-store" });
-          const workspacesPayload = (await workspacesResponse.json().catch(() => null)) as {
-            workspaces?: Array<{ id: string; name: string }>;
-          } | null;
-          const workspace = workspacesPayload?.workspaces?.find(
-            (candidate) => candidate.id === payload.workspaceId,
-          );
-          if (!isCancelled && workspace?.name) setActiveWorkspaceName(workspace.name);
-        } finally {
-          if (!isCancelled) setActiveWorkspaceResolvedId(payload.workspaceId);
+        const payload = (await response.json()) as { displayName?: string; role?: WorkspaceRole; setupState?: "active" | "pending_setup"; workspaceId?: string };
+        if (!isCancelled && response.ok && payload.workspaceId) {
+          const isPendingSetupAdmin = payload.setupState === "pending_setup" && payload.role === "admin";
+          setPlatformMetricRows([]);
+          setPlatformStatsData([]);
+          setNavigationStack([]);
+          setPendingScrollRestore(null);
+          setActiveWorkspaceSetupState(payload.setupState === "pending_setup" ? "pending_setup" : "active");
+          setProfileDisplayName(payload.displayName ?? "");
+          if (payload.role === "admin" || payload.role === "member" || payload.role === "viewer") setWorkspaceRole(payload.role);
+          if (isPendingSetupAdmin) {
+            setPendingSetupWorkspaceId(payload.workspaceId);
+            return;
+          }
+          setActiveWorkspaceId(payload.workspaceId);
+          try {
+            const workspacesResponse = await fetch("/api/workspaces", { cache: "no-store" });
+            const workspacesPayload = (await workspacesResponse.json().catch(() => null)) as {
+              workspaces?: Array<{ id: string; name: string }>;
+            } | null;
+            const workspace = workspacesPayload?.workspaces?.find(
+              (candidate) => candidate.id === payload.workspaceId,
+            );
+            if (!isCancelled && workspace?.name) setActiveWorkspaceName(workspace.name);
+          } finally {
+            if (!isCancelled) setActiveWorkspaceResolvedId(payload.workspaceId);
+          }
         }
+      } finally {
+        if (!isCancelled) setIsResolvingInitialWorkspace(false);
       }
-      if (!isCancelled) setIsResolvingInitialWorkspace(false);
     }
 
     void loadActiveWorkspace();
@@ -8610,11 +8758,27 @@ export default function Home() {
       <aside className="sidebar" aria-label="Primary">
         <div className="brand-header">
           <AccountControl
+            guidanceContext={guidanceContext}
+            onGuidanceAbandon={() => {
+              setGuidanceContext("none");
+              setGuidanceSongId(null);
+            }}
+            onGuidanceMenuOpen={() => setGuidanceContext((current) => current === "google-logo" ? "google-settings" : current)}
             onReady={markHeaderAccountReady}
             onOpenAboutDashboard={() => setSettingsView("about")}
-            onOpenGeneralSettings={() => setSettingsView("general")}
+            onOpenGeneralSettings={() => {
+              const guided = guidanceContext === "google-settings";
+              setSettingsView("general");
+              setGuidanceContext("none");
+              setGuidanceSongId(null);
+              setOpenGoogleServicesFromGuidance(guided);
+              setGuidanceGoogleConnectHint(guided);
+            }}
             onOpenPlatformAdministration={() => setSettingsView("platform")}
-            onOpenUserSettings={() => setSettingsView("user")}
+            onOpenUserSettings={() => {
+              setSettingsView("user");
+              window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "instant" }));
+            }}
             workspaceLogoUrl={appLogoUrl}
             workspaceName={activeWorkspaceName}
           />
@@ -8648,6 +8812,25 @@ export default function Home() {
           onClickCapture={preventViewerWriteClick}
           onKeyDownCapture={preventViewerWriteKeydown}
         >
+        {!settingsView && guidanceStatus?.active ? (
+          <GettingStartedCard
+            onFirstSong={() => {
+              setGuidanceContext("add-song");
+              setGuidanceSongId(null);
+              navigateWithHistory(() => setActiveSection("Production"));
+            }}
+            onGoogle={() => setGuidanceContext("google-logo")}
+            onInviteMember={() => {
+              setGuidanceContext("invite-member");
+              setOpenMemberAccessFromGuidance(true);
+              setGuidanceMemberInviteHint(true);
+              setSettingsView("general");
+            }}
+            onClose={closeGuidance}
+            onSkip={skipGuidanceStep}
+            status={guidanceStatus}
+          />
+        ) : null}
         {settingsView === "user" ? (
           <UserSettingsView
             dashboardPreferences={dashboardPreferences}
@@ -8666,6 +8849,36 @@ export default function Home() {
             logoPath={appLogoPath}
             logoUrl={appLogoUrl}
             openProductionWorkflowOnMount={openProductionWorkflowFromRoadmap}
+            openGoogleServicesOnMount={openGoogleServicesFromGuidance}
+            openMemberAccessOnMount={openMemberAccessFromGuidance}
+            onGoogleServicesOpenConsumed={() => setOpenGoogleServicesFromGuidance(false)}
+            onMemberAccessOpenConsumed={() => setOpenMemberAccessFromGuidance(false)}
+            guidanceGoogleConnectHint={guidanceGoogleConnectHint}
+            guidanceMemberInviteHint={guidanceMemberInviteHint}
+            onGuidanceMemberInviteComplete={() => {
+              const url = new URL(window.location.href);
+              if (url.searchParams.get("guidancePreview") === "invite-member") {
+                url.searchParams.set("guidancePreview", "all-complete");
+                window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+                setGuidanceStatus((current) =>
+                  current?.active
+                    ? {
+                        ...current,
+                        completed: 4,
+                        nextStep: null,
+                        steps: { ...current.steps, invite_member: true },
+                        total: 4
+                      }
+                    : current
+                );
+              }
+              setGuidanceContext("none");
+              setGuidanceMemberInviteHint(false);
+              setGuidanceYouTubeCardHint(false);
+              setSettingsView(null);
+              void refreshGuidanceStatus();
+            }}
+            onGuidanceGoogleConnectStart={() => setGuidanceGoogleConnectHint(false)}
             onProductionWorkflowOpenConsumed={() => setOpenProductionWorkflowFromRoadmap(false)}
             onMarketingTimingDefaultsChange={setMarketingTimingDefaults}
             onLogoChange={(logoPath, logoUrl) => {
@@ -8738,6 +8951,7 @@ export default function Home() {
             platformMetricRows={platformMetricRows}
             platformStatsData={platformStatsData}
             platformChildOrder={dashboardPreferences.childOrderByParent.platforms ?? []}
+            highlightedPlatformSlug={guidanceYouTubeCardHint ? "youtube" : undefined}
             qrCodeLinks={qrCodeLinks}
             refreshStatus={refreshStatus}
             spotifyCsvImportStatus={spotifyCsvImportStatus}
@@ -8746,6 +8960,8 @@ export default function Home() {
         ) : null}
         {!settingsView && activeSection === "Production" ? (
           <ProductionView
+            guidanceAddSongHint={guidanceContext === "add-song"}
+            guidanceSongId={guidanceContext === "song-settings" ? guidanceSongId : null}
             focusTarget={productionFocusTarget}
             restoreContext={productionRestoreContext}
             onAddSong={addProductionSong}
@@ -8811,6 +9027,7 @@ export default function Home() {
             dailyFocusProgress={validDailyFocusProgress}
             dashboardPreferences={dashboardPreferences}
             dashboardPlatformStats={dashboardPlatformStats}
+            guidanceYouTubeCardHint={guidanceYouTubeCardHint}
             eventEntries={eventEntryDrafts}
             eventsLoaded={hasLoadedEventSupabaseSnapshot}
             onAddQrCode={addQrCodeLink}
@@ -9192,8 +9409,16 @@ function GeneralSettingsView({
   workspaceName,
   workspaceId,
   workspaceRole,
-  workspaceTimeZone
-  ,openProductionWorkflowOnMount
+  workspaceTimeZone,
+  openProductionWorkflowOnMount,
+  openGoogleServicesOnMount,
+  openMemberAccessOnMount,
+  onGoogleServicesOpenConsumed,
+  onMemberAccessOpenConsumed,
+  guidanceGoogleConnectHint,
+  guidanceMemberInviteHint,
+  onGuidanceMemberInviteComplete,
+  onGuidanceGoogleConnectStart
 }: {
   logoPath: string;
   logoUrl: string;
@@ -9207,6 +9432,14 @@ function GeneralSettingsView({
   workspaceRole: "admin";
   workspaceTimeZone: string;
   openProductionWorkflowOnMount: boolean;
+  openGoogleServicesOnMount: boolean;
+  openMemberAccessOnMount: boolean;
+  onGoogleServicesOpenConsumed: () => void;
+  onMemberAccessOpenConsumed: () => void;
+  guidanceGoogleConnectHint: boolean;
+  guidanceMemberInviteHint: boolean;
+  onGuidanceMemberInviteComplete: () => void;
+  onGuidanceGoogleConnectStart: () => void;
 }) {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const isCurrentWorkspace = useRef(true);
@@ -9215,7 +9448,7 @@ function GeneralSettingsView({
     state: "idle"
   });
   const [invitationEmail, setInvitationEmail] = useState("");
-  const [invitationRole, setInvitationRole] = useState<WorkspaceRole>("viewer");
+  const [invitationRole, setInvitationRole] = useState<WorkspaceRole>("member");
   const [invitationStatus, setInvitationStatus] = useState<RefreshStatus>({
     message: "",
     state: "idle"
@@ -9266,6 +9499,9 @@ function GeneralSettingsView({
   const [armedSettingsAction, setArmedSettingsAction] = useState<string | null>(null);
   const googleConnectionLoadVersion = useRef(0);
   const googleServicesRef = useRef<HTMLElement>(null);
+  const memberInviteRef = useRef<HTMLElement>(null);
+  const hasFocusedGuidanceMemberInvite = useRef(false);
+  const hasHandledGoogleReturn = useRef(false);
 
   type GeneralSettingsPanel = "workspace" | "members" | "production" | "marketing" | "google" | "meta" | "upcoming";
   const setActiveGeneralSettingsPanel = useCallback((panel: GeneralSettingsPanel | null) => {
@@ -9293,6 +9529,46 @@ function GeneralSettingsView({
     setActiveGeneralSettingsPanel("production");
     onProductionWorkflowOpenConsumed();
   }, [onProductionWorkflowOpenConsumed, openProductionWorkflowOnMount, setActiveGeneralSettingsPanel]);
+
+  useEffect(() => {
+    if (!openGoogleServicesOnMount) return;
+    setActiveGeneralSettingsPanel("google");
+    window.requestAnimationFrame(() => googleServicesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    onGoogleServicesOpenConsumed();
+  }, [onGoogleServicesOpenConsumed, openGoogleServicesOnMount, setActiveGeneralSettingsPanel]);
+
+  useEffect(() => {
+    if (!openMemberAccessOnMount) return;
+    setActiveGeneralSettingsPanel("members");
+    onMemberAccessOpenConsumed();
+  }, [onMemberAccessOpenConsumed, openMemberAccessOnMount, setActiveGeneralSettingsPanel]);
+
+  useEffect(() => {
+    if (!guidanceMemberInviteHint) {
+      hasFocusedGuidanceMemberInvite.current = false;
+      return;
+    }
+    if (
+      !isMemberAccessOpen ||
+      invitationLifecycleStatus.state === "loading" ||
+      membershipStatus.state === "loading" ||
+      hasFocusedGuidanceMemberInvite.current
+    ) return;
+
+    hasFocusedGuidanceMemberInvite.current = true;
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        const inviteCard = memberInviteRef.current;
+        inviteCard?.focus({ preventScroll: true });
+        inviteCard?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+    };
+  }, [guidanceMemberInviteHint, invitationLifecycleStatus.state, isMemberAccessOpen, membershipStatus.state]);
 
   useEffect(() => {
     if (!isMemberAccessOpen) setEditingMemberId(null);
@@ -9402,8 +9678,10 @@ function GeneralSettingsView({
   useEffect(() => {
     const parameters = new URLSearchParams(window.location.search);
     const result = parameters.get("google");
+    const isGoogleReturn = Boolean(result) || hasHandledGoogleReturn.current;
 
     if (result) {
+      hasHandledGoogleReturn.current = true;
       setActiveGeneralSettingsPanel("google");
       window.requestAnimationFrame(() => {
         googleServicesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -9450,7 +9728,7 @@ function GeneralSettingsView({
             setAnalyticsProperties(propertiesPayload.properties ?? []);
           }).catch(() => setAnalyticsProperties([]));
         }
-        if (!result) setGoogleStatus({ message: "", state: "idle" });
+        if (!isGoogleReturn) setGoogleStatus({ message: "", state: "idle" });
       } catch (error) {
         setGoogleStatus({
           message:
@@ -9609,6 +9887,7 @@ function GeneralSettingsView({
         state: "success"
       });
       void refreshWorkspaceInvitations();
+      if (guidanceMemberInviteHint) onGuidanceMemberInviteComplete();
     } catch (error) {
       setInvitationStatus({
         message: error instanceof Error ? error.message : "Invitation could not be sent.",
@@ -9814,7 +10093,7 @@ function GeneralSettingsView({
             <button aria-expanded={isMemberAccessOpen} aria-label={isMemberAccessOpen ? "Collapse member access" : "Edit member access"} className="settings-icon-button" onClick={() => toggleGeneralSettingsPanel("members")} type="button"><Pencil aria-hidden size={16} /></button>
           </div>
           {isMemberAccessOpen ? <>
-        <article className="general-settings-card general-settings-invitations settings-member-invite">
+        <article className={`general-settings-card general-settings-invitations settings-member-invite${guidanceMemberInviteHint ? " guidance-target" : ""}`} ref={memberInviteRef} tabIndex={-1}>
           <h2>Invite Member</h2>
 
           <form className="workspace-invitation-form" onSubmit={sendInvitation}>
@@ -9841,7 +10120,6 @@ function GeneralSettingsView({
               >
                 <option value="viewer">Viewer</option>
                 <option value="member">Member</option>
-                <option value="admin">Admin</option>
               </select>
             </label>
             <button disabled={invitationStatus.state === "loading"} type="submit">
@@ -9876,7 +10154,7 @@ function GeneralSettingsView({
                       Invited by {invitation.invitedBy} · {formatInvitationDate(invitation.createdAt)}
                     </span>
                   </div>
-                  <select
+                  {invitation.role === "admin" ? <span className="workspace-invitation-role-readonly">Admin</span> : <select
                     aria-label={`Intended role for ${invitation.email}`}
                     disabled={!isPending || invitationLifecycleStatus.state === "loading"}
                     onChange={(event) =>
@@ -9887,10 +10165,9 @@ function GeneralSettingsView({
                     }
                     value={invitation.role}
                   >
-                    <option value="admin">Admin</option>
                     <option value="member">Member</option>
                     <option value="viewer">Viewer</option>
-                  </select>
+                  </select>}
                   <div className="workspace-invitation-meta">
                     <span className={`workspace-invitation-state workspace-invitation-state-${invitation.status}`}>
                       {invitation.status}
@@ -10148,12 +10425,15 @@ function GeneralSettingsView({
                 </button>
               ) : (
                 <button
+                  className={guidanceGoogleConnectHint ? "guidance-target" : undefined}
                   disabled={googleStatus.state === "loading"}
-                  onClick={() =>
-                    window.location.assign(
-                      "/api/integrations/google/connect?service=youtube"
-                    )
-                  }
+                  onClick={() => {
+                    const guidanceContinuation = guidanceGoogleConnectHint;
+                    const guidancePreview = new URLSearchParams(window.location.search).get("guidancePreview");
+                    const qaGooglePreview = guidanceContinuation && guidancePreview === "google";
+                    onGuidanceGoogleConnectStart();
+                    window.location.assign(`/api/integrations/google/connect?service=youtube${guidanceContinuation ? "&guidance=1" : ""}${qaGooglePreview ? "&guidancePreview=google" : ""}`);
+                  }}
                   type="button"
                 >
                   <LinkIcon aria-hidden size={16} />
@@ -12891,6 +13171,8 @@ function BudgetEntryRow({
 
 function ProductionView({
   focusTarget,
+  guidanceAddSongHint,
+  guidanceSongId,
   onAddSong,
   onDeleteSong,
   onFocusSong,
@@ -12902,6 +13184,8 @@ function ProductionView({
   restoreContext
 }: {
   focusTarget: { elementId?: string; inputId?: string; songId: string; token: number } | null;
+  guidanceAddSongHint: boolean;
+  guidanceSongId: string | null;
   onAddSong: () => void;
   onDeleteSong: (songId: string) => void;
   onFocusSong: (songId: string, elementId?: string) => void;
@@ -12961,6 +13245,7 @@ function ProductionView({
       <div className="campaign-list">
         {activeSongs.map((song) => (
           <ProductionSongBoard
+            guidanceSongSettingsHint={guidanceSongId === song.id}
             focusToken={
               focusTarget?.songId === song.id ? focusTarget.token : undefined
             }
@@ -12995,6 +13280,7 @@ function ProductionView({
               <div className="production-released-songs-list">
                 {releasedSongs.map((song) => (
                   <ProductionSongBoard
+                    guidanceSongSettingsHint={false}
                     focusToken={
                       focusTarget?.songId === song.id ? focusTarget.token : undefined
                     }
@@ -13018,7 +13304,7 @@ function ProductionView({
           </section>
         ) : null}
 
-        <button className="add-campaign-button" onClick={onAddSong} type="button">
+        <button className={`add-campaign-button${guidanceAddSongHint ? " guidance-target" : ""}`} onClick={onAddSong} type="button">
           <Plus size={16} aria-hidden />
           Add song
         </button>
@@ -13029,6 +13315,7 @@ function ProductionView({
 
 function ProductionSongBoard({
   focusToken,
+  guidanceSongSettingsHint,
   onChange,
   onDelete,
   onFocus,
@@ -13039,6 +13326,7 @@ function ProductionSongBoard({
   restoreContext
 }: {
   focusToken?: number;
+  guidanceSongSettingsHint: boolean;
   onChange: (songId: string, updates: Partial<ProductionSongConfig>) => void;
   onDelete: (songId: string) => void;
   onFocus: (songId: string, elementId?: string) => void;
@@ -13107,6 +13395,12 @@ function ProductionSongBoard({
       window.clearTimeout(highlightTimer);
     };
   }, [focusToken]);
+
+  useEffect(() => {
+    if (!guidanceSongSettingsHint) return;
+    const timer = window.setTimeout(() => setIsSongOpen(true), 0);
+    return () => window.clearTimeout(timer);
+  }, [guidanceSongSettingsHint]);
 
   useEffect(() => {
     if (!restoreContext) return;
@@ -13392,12 +13686,12 @@ function ProductionSongBoard({
         </strong>
         <button
           aria-expanded={isSongOpen}
-          aria-label={isSongOpen ? "Hide production details" : "Show production details"}
-          className="campaign-toggle"
+          aria-label={isSongOpen ? "Collapse song" : "Expand song"}
+          className="production-song-toggle settings-icon-button"
           onClick={toggleSongDetails}
           type="button"
         >
-          <ChevronDown size={20} aria-hidden />
+          <Pencil size={16} aria-hidden />
         </button>
       </div>
 
@@ -13410,8 +13704,9 @@ function ProductionSongBoard({
         hidden={!isSongOpen}
         id={`${song.id}-production-details`}
       >
-        <details className="campaign-danger-zone">
+        <details className={`campaign-danger-zone${guidanceSongSettingsHint ? " guidance-target" : ""}`}>
           <summary>Song options</summary>
+          {guidanceSongSettingsHint ? <p className="guidance-bubble">You can continue setting up your song here.</p> : null}
           <div>
             <label className="song-title-options-editor">
               <span className="song-option-field-heading">Song name</span>
@@ -13599,6 +13894,14 @@ function ProductionSongBoard({
             <Plus size={16} aria-hidden />
             Add production step
           </button>
+          <button
+            aria-label="Collapse song"
+                  className="production-collapse-button settings-icon-button"
+                  onClick={toggleSongDetails}
+                  type="button"
+                >
+                  <ChevronUp size={18} aria-hidden />
+                </button>
         </div>
       </div>
     </section>
@@ -15320,7 +15623,7 @@ function MarketingCampaignBoard({
             onClick={toggleCampaignDetails}
             type="button"
           >
-            <ChevronDown size={20} aria-hidden />
+            <Pencil size={16} aria-hidden />
           </button>
         </div>
 
@@ -15535,6 +15838,14 @@ function MarketingCampaignBoard({
             >
               <Plus size={16} aria-hidden />
               Add campaign day
+            </button>
+            <button
+              aria-label="Collapse campaign"
+              className="campaign-collapse-button settings-icon-button"
+              onClick={toggleCampaignDetails}
+              type="button"
+            >
+              <ChevronUp size={18} aria-hidden />
             </button>
           </div>
         </div>
@@ -16041,6 +16352,7 @@ function DashboardView({
   dailyFocusProgress,
   dashboardPreferences,
   dashboardPlatformStats,
+  guidanceYouTubeCardHint,
   eventEntries,
   eventsLoaded,
   focusQueueNavigationState,
@@ -16077,6 +16389,7 @@ function DashboardView({
   dailyFocusProgress: DailyFocusProgressItem[];
   dashboardPreferences: ResolvedDashboardPreferences;
   dashboardPlatformStats: typeof platformStats;
+  guidanceYouTubeCardHint: boolean;
   eventEntries: EventEntry[];
   eventsLoaded: boolean;
   focusQueueNavigationState: FocusQueueNavigationState;
@@ -16264,6 +16577,7 @@ function DashboardView({
         key="platforms"
         hideHeading
         platforms={dashboardPlatformStats}
+        highlightedPlatformSlug={guidanceYouTubeCardHint ? "youtube" : undefined}
         title="Platform Snapshot"
         description="Key audience and consumption signals from the main platforms."
         audienceDashboard={audienceDashboard}
@@ -16322,6 +16636,16 @@ function DashboardView({
   );
 }
 
+function GettingStartedCard({ status, onClose, onFirstSong, onGoogle, onInviteMember, onSkip }: { status: Extract<GuidanceStatus, { active: true }>; onClose: () => void; onFirstSong: () => void; onGoogle: () => void; onInviteMember: () => void; onSkip: (step: Exclude<GettingStartedV1Step, "artistdeck_basics">) => void }) {
+  const rows: Array<{ key: keyof typeof status.steps; label: string }> = [
+    { key: "artistdeck_basics", label: "ArtistDeck basics" },
+    { key: "first_song", label: "Create your first song" },
+    { key: "google_youtube", label: "Connect Google / YouTube" },
+    { key: "invite_member", label: "Invite a member" }
+  ];
+  return <section className="guidance-card" aria-label="Getting started"><div><p className="eyebrow">Getting started · {status.completed} of {status.total}</p><h2>Set up your ArtistDeck workspace</h2></div><div className="guidance-steps">{rows.map((row) => { const complete = status.steps[row.key]; const skipped = status.skipped?.[row.key] ?? false; const recommended = status.nextStep === row.key; return <div className={`guidance-step${complete ? " is-complete" : ""}${skipped ? " is-skipped" : ""}${recommended ? " is-recommended" : ""}`} key={row.key}><span aria-hidden>{complete ? "✓" : skipped ? "–" : recommended ? "→" : "○"}</span><strong>{row.label}</strong>{skipped ? <small>Skipped</small> : null}{recommended && row.key === "first_song" ? <div className="guidance-step-actions"><button onClick={onFirstSong} type="button">Create song</button><button className="guidance-skip-button" onClick={() => onSkip("first_song")} type="button">Skip step</button></div> : null}{recommended && row.key === "google_youtube" ? <div className="guidance-step-actions"><button onClick={onGoogle} type="button">Connect</button><button className="guidance-skip-button" onClick={() => onSkip("google_youtube")} type="button">Skip step</button></div> : null}{recommended && row.key === "invite_member" ? <div className="guidance-step-actions"><button onClick={onInviteMember} type="button">Invite member</button><button className="guidance-skip-button" onClick={() => onSkip("invite_member")} type="button">Skip step</button></div> : null}</div>; })}</div>{status.completed === status.total ? <div className="guidance-step-actions"><button className="guidance-close-button" onClick={onClose} type="button">Close</button></div> : null}</section>;
+}
+
 function DashboardAudienceCard({
   calculations
 }: {
@@ -16338,19 +16662,19 @@ function DashboardAudienceCard({
           {estimated ? <>
             <strong className="audience-estimated-value"><span>{formatMetricValue(estimated.lower)}</span>{estimated.lowerDelta !== undefined ? <AudienceInlineDelta value={estimated.lowerDelta} /> : null}<span>–</span><span>{formatMetricValue(estimated.maximum)}</span>{estimated.maximumDelta !== undefined ? <AudienceInlineDelta value={estimated.maximumDelta} /> : null}</strong>
             <h4>Est. Total Audience</h4>
-          </> : <AudienceCardEmptyState />}
+          </> : <AudienceCardEmptyState label="Est. Total Audience" />}
         </article>
         <article className="audience-dashboard-child">
           {release ? <>
             <strong><span>{formatMetricValue(release.value)}</span>{release.delta !== undefined ? <AudienceInlineDelta value={release.delta} /> : null}</strong>
             <h4>{release.title} Total Plays</h4>
-          </> : <AudienceCardEmptyState />}
+          </> : <AudienceCardEmptyState label="Current Release Total Plays" />}
         </article>
         <article className="audience-dashboard-child">
           {catalogue ? <>
             <strong><span>{formatMetricValue(catalogue.value)}</span>{catalogue.delta !== undefined ? <AudienceInlineDelta value={catalogue.delta} /> : null}</strong>
             <h4>Total Catalogue Plays</h4>
-          </> : <AudienceCardEmptyState />}
+          </> : <AudienceCardEmptyState label="Total Catalogue Plays" />}
         </article>
         <article className="audience-dashboard-child audience-dashboard-feedback">
           <h4>What is the number you want to see here?</h4>
@@ -16379,19 +16703,19 @@ function PlatformsAudienceCard({
           {estimated ? <>
             <strong className="audience-estimated-value"><span>{formatMetricValue(estimated.lower)}</span>{estimated.lowerDelta !== undefined ? <AudienceInlineDelta value={estimated.lowerDelta} /> : null}<span>–</span><span>{formatMetricValue(estimated.maximum)}</span>{estimated.maximumDelta !== undefined ? <AudienceInlineDelta value={estimated.maximumDelta} /> : null}</strong>
             <h4>Est. Total Audience</h4>
-          </> : <AudienceCardEmptyState />}
+          </> : <AudienceCardEmptyState label="Est. Total Audience" />}
         </article>
         <article className="audience-platform-child">
           {release ? <>
             <strong><span>{formatMetricValue(release.value)}</span>{release.delta !== undefined ? <AudienceInlineDelta value={release.delta} /> : null}</strong>
             <h4>{release.title} Total Plays</h4>
-          </> : <AudienceCardEmptyState />}
+          </> : <AudienceCardEmptyState label="Current Release Total Plays" />}
         </article>
         <article className="audience-platform-child">
           {catalogue ? <>
             <strong><span>{formatMetricValue(catalogue.value)}</span>{catalogue.delta !== undefined ? <AudienceInlineDelta value={catalogue.delta} /> : null}</strong>
             <h4>Total Catalogue Plays</h4>
-          </> : <AudienceCardEmptyState />}
+          </> : <AudienceCardEmptyState label="Total Catalogue Plays" />}
         </article>
         <article className="audience-platform-child audience-platform-feedback">
           <h4>What is the number you want to see here?</h4>
@@ -16494,8 +16818,8 @@ function AudienceRangeLineChart({ points }: { points: AudienceEvolutionHistory["
   </svg></div>;
 }
 
-function AudienceCardEmptyState() {
-  return <span>Connect a relevant platform to see this metric.</span>;
+function AudienceCardEmptyState({ label }: { label: string }) {
+  return <><strong>—</strong><h4>{label}</h4><span>Connect or import a relevant platform to see this metric.</span></>;
 }
 
 function AudienceInlineDelta({ value }: { value: number }) {
@@ -17765,6 +18089,7 @@ function DashboardRoadmapPhasePreview({
 function PlatformsView({
   appleMusicImportStatus,
   appleMusicLastUploadedAt,
+  highlightedPlatformSlug,
   audienceDashboard,
   audienceEvolutionHistory,
   onAddQrCode,
@@ -17783,6 +18108,7 @@ function PlatformsView({
 }: {
   appleMusicImportStatus: AppleMusicImportStatus;
   appleMusicLastUploadedAt: string;
+  highlightedPlatformSlug?: string;
   audienceDashboard: AudienceDashboardCalculations;
   audienceEvolutionHistory: AudienceEvolutionHistory;
   onAddQrCode: () => void;
@@ -17931,6 +18257,7 @@ function PlatformsView({
         audienceDashboard={audienceDashboard}
         audienceEvolutionHistory={audienceEvolutionHistory}
         hideHeading
+        highlightedPlatformSlug={highlightedPlatformSlug}
         platforms={getPlatformCardsForPreferences(
           platformStatsData,
           platformMetricRows,
@@ -19276,6 +19603,7 @@ function getMetricSourcePriority(row: MetricRow) {
 
 type PlatformDisplayCard = (typeof platformStats)[number] & {
   isAudiencePlaceholder?: boolean;
+  isConnectedWithoutMetrics?: boolean;
   isDisconnected?: boolean;
 };
 
@@ -19358,7 +19686,8 @@ function getPlatformCardsForPreferences(
   stats: typeof platformStats,
   rows: MetricRow[],
   preferences: ResolvedDashboardPreferences,
-  dashboardOnly: boolean
+  dashboardOnly: boolean,
+  connection: GoogleConnectionStatus | null = null
 ): PlatformDisplayCard[] {
   const childOrder = preferences.childOrderByParent.platforms ?? [];
   return childOrder
@@ -19376,11 +19705,12 @@ function getPlatformCardsForPreferences(
         } as PlatformDisplayCard];
       }
       if (cardId === "platforms.youtube-music") {
+        const canonicalCard = platformStats.find((platform) => platform.slug === "youtube-music");
         return [{
           dashboard: true,
           icon: Headphones,
           isDisconnected: true,
-          metrics: [],
+          metrics: canonicalCard?.metrics ?? [],
           platform: "YouTube Music",
           profileUrl: "",
           slug: "youtube-music-service"
@@ -19397,7 +19727,21 @@ function getPlatformCardsForPreferences(
       const savedCard = stats.find((platform) => platform.slug === slug);
       const canonicalCard = platformStats.find((platform) => platform.slug === slug);
       if (!canonicalCard) return [];
-      return [{ ...(savedCard ?? canonicalCard), isDisconnected: !savedCard } as PlatformDisplayCard];
+      const isGoogleConnected = slug === "youtube"
+        ? Boolean(connection?.youtube.enabled)
+        : slug === "google-analytics"
+          ? Boolean(connection?.analytics.enabled)
+          : true;
+      const isConnectionBacked = slug === "youtube" || slug === "google-analytics";
+      const profileUrl = slug === "youtube" && connection?.youtube.channelId
+        ? `https://www.youtube.com/channel/${connection.youtube.channelId}`
+        : savedCard?.profileUrl ?? canonicalCard.profileUrl;
+      return [{
+        ...(savedCard ?? canonicalCard),
+        profileUrl,
+        isConnectedWithoutMetrics: isConnectionBacked && isGoogleConnected && !savedCard,
+        isDisconnected: isConnectionBacked ? !isGoogleConnected : !savedCard
+      } as PlatformDisplayCard];
     });
 }
 
@@ -19940,6 +20284,7 @@ function PlatformStatsSection({
   audienceEvolutionHistory,
   description,
   hideHeading = false,
+  highlightedPlatformSlug,
   platforms,
   renderCardAddon,
   renderCardHeaderMeta,
@@ -19950,6 +20295,7 @@ function PlatformStatsSection({
   audienceEvolutionHistory?: AudienceEvolutionHistory;
   description: string;
   hideHeading?: boolean;
+  highlightedPlatformSlug?: string;
   platforms: PlatformDisplayCard[];
   renderCardAddon?: (
     platform: PlatformDisplayCard
@@ -19986,7 +20332,7 @@ function PlatformStatsSection({
 
           return (
             <article
-              className={`platform-card platform-card-${platform.slug}${variant === "full" ? " module-accent module-accent-platforms" : ""}`}
+              className={`platform-card platform-card-${platform.slug}${variant === "full" ? " module-accent module-accent-platforms" : ""}${highlightedPlatformSlug === platform.slug ? " guidance-target" : ""}`}
               id={`platform-card-${platform.slug}`}
               key={platform.platform}
             >
@@ -20011,7 +20357,8 @@ function PlatformStatsSection({
               </div>
               {platform.isAudiencePlaceholder ? <p className="platform-card-placeholder"><strong>Audience estimate coming soon</strong><span>Combined audience insights will appear here when aggregation is available.</span></p> : null}
               {platform.isDisconnected ? <p className="platform-card-placeholder"><strong>Not connected</strong><span>Connect this service in Settings to start collecting data.</span></p> : null}
-              {!platform.isAudiencePlaceholder && !platform.isDisconnected ? <>
+              {platform.isConnectedWithoutMetrics ? <p className="platform-card-placeholder"><strong>Connected</strong><span>Channel connected. Metrics will appear after the first collection.</span></p> : null}
+              {!platform.isAudiencePlaceholder ? <>
               <dl className="platform-metrics">
                 {platform.metrics
                   .filter(
