@@ -32,7 +32,7 @@ assert.match(page, /hasHandledGoogleReturn/, "a handled Google return keeps its 
 assert.match(page, /googleConnectionLoadVersion\.current/, "Google property updates remain guarded against stale status loads");
 assert.match(page, /guidance_return[\s\S]*refreshGoogleConnection\(\)[\s\S]*refreshGuidanceStatus\(\)/, "Guided Google returns refresh both the connection card and canonical Guidance status");
 assert.match(page, /setActiveSection\("Platforms"\)/, "Guided Google returns open the Platforms module");
-assert.match(page, /activeSection !== "Platforms"[\s\S]*platform-card-youtube[\s\S]*scrollIntoView/, "Guided Google returns focus the YouTube Platforms card after it renders");
+assert.match(page, /activeSection !== "Platforms"[\s\S]*window\.setTimeout[\s\S]*platform-card-youtube[\s\S]*cardTop[\s\S]*window\.scrollTo/, "Guided Google returns wait for the rendered YouTube card and position it deliberately.");
 assert.match(googleOauth, /analytics\.readonly/, "Analytics authorization remains read-only");
 assert.match(googleOauth, /youtube\.readonly/, "YouTube authorization remains read-only");
 

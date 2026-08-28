@@ -11,7 +11,7 @@ const [page, accountControl, styles] = await Promise.all([
 assert.match(page, /createRoadmapAwareProductionSong\(\)/, "Production creation uses the roadmap-aware server path.");
 assert.match(page, /await refreshRoadmapPlansAfterProductionCreate\(\)/, "the newly-created Auto Plan is refreshed into the client state.");
 assert.match(page, /setRoadmapPlanDrafts\(plans\)/, "the plan state receives the refreshed server result.");
-assert.match(page, /secondFrame = window\.requestAnimationFrame\([\s\S]*platform-card-youtube[\s\S]*scrollIntoView/, "guided Google return waits for rendered cards before focusing YouTube.");
+assert.match(page, /secondFrame = window\.requestAnimationFrame\([\s\S]*platform-card-youtube[\s\S]*cardTop[\s\S]*window\.scrollTo/, "guided Google return waits for rendered cards before centering YouTube.");
 assert.match(page, /setActiveSection\("Dashboard"\)/, "a successful guided invitation returns to Dashboard.");
 assert.match(page, /window\.scrollTo\(\{ behavior: "auto", top: 0 \}\)/, "guided invitation success places the completed checklist at the top.");
 assert.match(page, /otherTasks\.some\(\(otherTask\) => otherTask\.id === taskId\)/, "persisted starter tasks resolve as editable ordinary Other Tasks.");

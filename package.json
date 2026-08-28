@@ -18,6 +18,7 @@
     "test:guidance-qa-preview": "node --experimental-strip-types scripts/test-guidance-qa-preview.mjs",
     "test:guidance-visual-helper": "node scripts/test-guidance-visual-helper.mjs",
     "test:beta128-onboarding-acceptance-regressions": "node scripts/test-beta128-onboarding-acceptance-regressions.mjs",
+    "test:beta128-final-onboarding-roadmap-polish": "node scripts/test-beta128-final-onboarding-roadmap-polish.mjs",
     "test:guidance-engine-v1-live": "node scripts/test-guidance-engine-v1-live.mjs",
     "test:guidance-skip-persistence-live": "node scripts/test-guidance-skip-persistence-live.mjs",
     "test:provisional-workspace-admin-invitations": "node --experimental-strip-types scripts/test-provisional-workspace-admin-invitations.mjs",

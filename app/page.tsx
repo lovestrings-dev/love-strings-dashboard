@@ -7468,19 +7468,30 @@ export default function Home() {
     }
 
     let secondFrame = 0;
+    let settleTimer = 0;
     const firstFrame = window.requestAnimationFrame(() => {
       // The OAuth return changes the section and refreshes connection data at
       // once. Wait for both React commits before measuring/scrolling the card.
       secondFrame = window.requestAnimationFrame(() => {
-        document.getElementById("platform-card-youtube")?.scrollIntoView({
-          behavior: "smooth",
-          block: "center"
-        });
+        settleTimer = window.setTimeout(() => {
+          const card = document.getElementById("platform-card-youtube");
+          if (!card) return;
+          const mobile = window.matchMedia("(max-width: 540px)").matches;
+          const cardTop = card.getBoundingClientRect().top + window.scrollY;
+          const viewportOffset = mobile
+            ? 24
+            : Math.max(24, (window.innerHeight - Math.min(card.clientHeight, window.innerHeight * 0.72)) / 2);
+          window.scrollTo({
+            behavior: "smooth",
+            top: Math.max(0, cardTop - viewportOffset)
+          });
+        }, 80);
       });
     });
     return () => {
       window.cancelAnimationFrame(firstFrame);
       window.cancelAnimationFrame(secondFrame);
+      window.clearTimeout(settleTimer);
     };
   }, [activeSection, guidanceYouTubeCardHint, platformStatsData, settingsView]);
 
@@ -20585,6 +20596,7 @@ function RoadmapView({
           </div>
         </div>
 
+        <p className="roadmap-horizon-summary">{months.length}-month planning horizon · orange marks a scheduled release.</p>
         <RoadmapMonthStrip months={months} />
         <div className="roadmap-overview-toggle-row">
           <button
@@ -20667,6 +20679,8 @@ function RoadmapView({
                   songs={phaseSongs}
                 />
               </div>
+              <p className="roadmap-horizon-summary">{months.filter((month) => month.phase === phase.phaseNumber).length}-month planning horizon</p>
+              <RoadmapMonthStrip months={months.filter((month) => month.phase === phase.phaseNumber)} />
               <p>{phase.summary}</p>
               {outsideTimeframeCount > 0 ? <p className="roadmap-timeframe-warning" role="status">{outsideTimeframeCount} song{outsideTimeframeCount === 1 ? "" : "s"} outside plan timeframe</p> : null}
 
@@ -20839,12 +20853,14 @@ function getRoadmapMonthStatus(month: RoadmapMonth): RoadmapBoxStatus {
     return "done";
   }
 
-  if (month.planned > 0) {
-    return "active";
+  // A plan interval with no release is planned capacity, not a missed release.
+  // Red is reserved for a past scheduled release that remains unresolved.
+  if (month.planned > month.released && month.id < getViennaDateKey().slice(0, 7)) {
+    return "missed";
   }
 
-  if (month.id <= getViennaDateKey().slice(0, 7)) {
-    return "missed";
+  if (month.planned > 0) {
+    return "active";
   }
 
   return "planned";
