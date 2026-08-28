@@ -15,6 +15,7 @@ Headline: **ArtistDeck now guides a new Workspace Admin through the first shared
 - Future first-admin workspaces receive three Focus Queue starters: upload logos, create/modify a task, and upload Spotify/Apple CSV data. First Song Guidance remains separate.
 - Workspace switching reloads the selected scope immediately; User Settings opens at the top. Production collapse and contextual Guidance cues received the final mobile/UI refinement pass.
 - Follow-up repair: first-admin setup now requires explicit cadence and Distributor choices in an ArtistDeck-aligned form. Fresh V1 templates omit the obsolete License €20 consequence, retain the Distributor Yes €10 consequence, and show starter Focus Queue tasks in their intended order.
+- Deployed-rehearsal follow-up: the first-song server bootstrap is confirmed to create and assign the first Auto Plan and 12-month Roadmap; the client now consistently refreshes that result. Guided Google and Member-invite returns wait for the target surface, then focus YouTube or Dashboard 4/4 respectively. Empty-workspace platform cards retain their real metric labels with `—` values, starter Focus Queue tasks are ordinary editable tasks, the header uses the ArtistDeck logo fallback with matched logo/avatar footprints, and empty Campaign/Event copy stays neutral black.
 
 Migrations synchronized: `202608270002`–`202608270004`, `202608280001`–`202608280005`.
 

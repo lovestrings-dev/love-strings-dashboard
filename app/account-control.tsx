@@ -29,6 +29,9 @@ export function AccountControl({
   workspaceName: string;
 }) {
   const router = useRouter();
+  // Branding is optional. The app mark is a visual fallback only; it is never
+  // written as a workspace asset and a real uploaded logo always wins.
+  const resolvedWorkspaceLogoUrl = workspaceLogoUrl || "/artistdeck-logo.png";
   const [displayName, setDisplayName] = useState("Account");
   const [email, setEmail] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
@@ -218,16 +221,15 @@ export function AccountControl({
           aria-expanded={isMenuOpen}
           aria-haspopup="menu"
           aria-label={`Open workspace menu for ${workspaceName}`}
-          className={`account-workspace-logo${workspaceLogoUrl ? " has-image" : ""}${guidanceContext === "google-logo" ? " guidance-target-light" : ""}`}
+          className={`account-workspace-logo has-image${guidanceContext === "google-logo" ? " guidance-target-light" : ""}`}
           onClick={() => {
             const next = !isMenuOpen;
             setIsMenuOpen(next);
             if (next) onGuidanceMenuOpen();
           }}
-          style={workspaceLogoUrl ? { backgroundImage: `url(${JSON.stringify(workspaceLogoUrl)})` } : undefined}
+          style={{ backgroundImage: `url(${JSON.stringify(resolvedWorkspaceLogoUrl)})` }}
           type="button"
         >
-          {workspaceLogoUrl ? null : workspaceName.slice(0, 2).toUpperCase()}
         </button>
         <span className="account-workspace-name"><strong>{workspaceName}</strong><span>ArtistDeck</span></span>
         <span

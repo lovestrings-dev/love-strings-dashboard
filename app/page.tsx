@@ -7467,13 +7467,21 @@ export default function Home() {
       return;
     }
 
-    const frame = window.requestAnimationFrame(() => {
-      document.getElementById("platform-card-youtube")?.scrollIntoView({
-        behavior: "smooth",
-        block: "center"
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      // The OAuth return changes the section and refreshes connection data at
+      // once. Wait for both React commits before measuring/scrolling the card.
+      secondFrame = window.requestAnimationFrame(() => {
+        document.getElementById("platform-card-youtube")?.scrollIntoView({
+          behavior: "smooth",
+          block: "center"
+        });
       });
     });
-    return () => window.cancelAnimationFrame(frame);
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+    };
   }, [activeSection, guidanceYouTubeCardHint, platformStatsData, settingsView]);
 
   useEffect(() => {
@@ -8886,7 +8894,16 @@ export default function Home() {
               setGuidanceMemberInviteHint(false);
               setGuidanceYouTubeCardHint(false);
               setSettingsView(null);
-              void refreshGuidanceStatus();
+              setActiveSection("Dashboard");
+              void refreshGuidanceStatus().finally(() => {
+                // Settings can be tall. Once the Dashboard and its completed
+                // Guidance card have committed, put the success state in view.
+                window.requestAnimationFrame(() => {
+                  window.requestAnimationFrame(() => {
+                    window.scrollTo({ behavior: "auto", top: 0 });
+                  });
+                });
+              });
             }}
             onGuidanceGoogleConnectStart={() => setGuidanceGoogleConnectHint(false)}
             onProductionWorkflowOpenConsumed={() => setOpenProductionWorkflowFromRoadmap(false)}
@@ -17156,10 +17173,11 @@ function DashboardFocusQueueCard({
     };
   }, [openStatusTaskId]);
   const tasks = focusQueue.visibleTasks;
-  const getEditableOtherTaskId = (task: FocusQueueItem) =>
-    task.source === "Other" && task.id.startsWith("other-other-task-")
-      ? task.id.replace(/^other-/, "")
-      : null;
+  const getEditableOtherTaskId = (task: FocusQueueItem) => {
+    if (task.source !== "Other" || !task.id.startsWith("other-")) return null;
+    const taskId = task.id.slice("other-".length);
+    return otherTasks.some((otherTask) => otherTask.id === taskId) ? taskId : null;
+  };
   const closeOtherTaskEdit = () => {
     setEditingOtherTaskId(null);
     setEditingOtherTaskPlacement(null);
@@ -19210,15 +19228,11 @@ function mergePlatformMetricRows(
   }));
 }
 
-function getNeutralPlatformStatsTemplate(rows: MetricRow[]): typeof platformStats {
-  const platformSlugs = new Set(
-    rows
-      .map((row) => getSingle(row.platforms)?.slug)
-      .filter((slug): slug is string => Boolean(slug))
-  );
-
+function getNeutralPlatformStatsTemplate(_rows: MetricRow[]): typeof platformStats {
+  // A workspace with no imported metrics still needs its supported services
+  // and their metric labels. Metric rows enrich this catalog; they do not
+  // determine whether the cards themselves exist.
   return platformStats
-    .filter((platform) => platformSlugs.has(platform.slug))
     .map((platform) => ({
       ...platform,
       metrics: platform.metrics.map((metric) => ({
@@ -19760,8 +19774,6 @@ function getActivePlatformStats(
   connection: GoogleConnectionStatus | null
 ) {
   return stats.filter((platform) => {
-    if (platform.slug === "youtube") return Boolean(connection?.youtube.enabled);
-    if (platform.slug === "google-analytics") return Boolean(connection?.analytics.enabled);
     // Topic metrics require their own workspace configuration. Historical rows
     // remain intact, but cannot make an unconfigured source appear active.
     if (platform.slug === "youtube-music") return Boolean(connection?.youtubeTopic.enabled);
@@ -19805,7 +19817,7 @@ function formatMetricValue(value: number | string) {
 
 function formatPlatformMetricDisplay(value: number | string | null | undefined) {
   return value === null || value === undefined || value === "—" || String(value).trim() === ""
-    ? "-"
+    ? "—"
     : String(value);
 }
 
