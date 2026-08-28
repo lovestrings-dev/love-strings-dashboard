@@ -3849,6 +3849,16 @@ function getSortedActiveOtherTasks(
           firstTask.title.localeCompare(secondTask.title)
         );
       }
+      const onboardingOrder = new Map([
+        ["starter-upload-user-artist-logos", 0],
+        ["starter-create-custom-task", 1],
+        ["starter-upload-streaming-csv", 2]
+      ]);
+      const firstOnboardingOrder = onboardingOrder.get(firstTask.id);
+      const secondOnboardingOrder = onboardingOrder.get(secondTask.id);
+      if (firstOnboardingOrder !== undefined || secondOnboardingOrder !== undefined) {
+        return (firstOnboardingOrder ?? Number.MAX_SAFE_INTEGER) - (secondOnboardingOrder ?? Number.MAX_SAFE_INTEGER);
+      }
       return firstTask.title.localeCompare(secondTask.title);
     });
 }

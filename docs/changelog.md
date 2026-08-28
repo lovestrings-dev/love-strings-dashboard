@@ -14,10 +14,11 @@ Headline: **ArtistDeck now guides a new Workspace Admin through the first shared
 - Ordinary Workspace Admins can invite only Members or Viewers; owner-controlled first-Admin provisioning remains available.
 - Future first-admin workspaces receive three Focus Queue starters: upload logos, create/modify a task, and upload Spotify/Apple CSV data. First Song Guidance remains separate.
 - Workspace switching reloads the selected scope immediately; User Settings opens at the top. Production collapse and contextual Guidance cues received the final mobile/UI refinement pass.
+- Follow-up repair: first-admin setup now requires explicit cadence and Distributor choices in an ArtistDeck-aligned form. Fresh V1 templates omit the obsolete License €20 consequence, retain the Distributor Yes €10 consequence, and show starter Focus Queue tasks in their intended order.
 
-Migrations synchronized: `202608270002`–`202608270004`, `202608280001`–`202608280004`.
+Migrations synchronized: `202608270002`–`202608270004`, `202608280001`–`202608280005`.
 
-Prepared for user push/deployment. No deployment or user-acceptance claim is implied.
+The failed `sounderentertainment` rehearsal workspace was reset while preserving its Auth identity; it is ready for a new deployed acceptance test. No user-acceptance claim is implied.
 
 ## Beta 1.27 — ArtistDeck daily-work polish, secure returns, and password recovery
 

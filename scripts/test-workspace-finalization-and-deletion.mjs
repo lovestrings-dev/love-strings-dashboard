@@ -35,11 +35,13 @@ async function finalize(workspaceId, recipient, userName, artistBandName, releas
   if (error) throw error; return data?.[0];
 }
 async function assertSeededWorkspace(workspaceId, expected) {
-  const [{ data: settings, error: settingsError }, { data: template, error: templateError }] = await Promise.all([
+  const [{ data: settings, error: settingsError }, { data: template, error: templateError }, { data: songs, error: songsError }, { data: focusTasks, error: focusTasksError }] = await Promise.all([
     service.from("app_workspace_settings").select("onboarding_release_frequency, onboarding_distributor_answer, roadmap_standard_release_cadence_days, marketing_song_campaign_length_days, marketing_song_campaign_advance_days").eq("workspace_id", workspaceId).single(),
-    service.from("production_templates").select("id, production_template_steps(stable_key, semantic_kind, is_enabled, lead_time_days, standard_cost_amount)").eq("workspace_id", workspaceId).eq("is_active", true).single()
+    service.from("production_templates").select("id, production_template_steps(stable_key, semantic_kind, is_enabled, lead_time_days, standard_cost_amount)").eq("workspace_id", workspaceId).eq("is_active", true).single(),
+    service.from("production_songs").select("id").eq("workspace_id", workspaceId),
+    service.from("focus_other_tasks").select("stable_key, title").eq("workspace_id", workspaceId).eq("source", "onboarding")
   ]);
-  if (settingsError || templateError || !settings || !template) throw settingsError ?? templateError ?? new Error("Seeded workspace data was not found.");
+  if (settingsError || templateError || songsError || focusTasksError || !settings || !template) throw settingsError ?? templateError ?? songsError ?? focusTasksError ?? new Error("Seeded workspace data was not found.");
   assert.deepEqual(settings, {
     onboarding_release_frequency: expected.releaseFrequency,
     onboarding_distributor_answer: expected.distributorAnswer,
@@ -49,10 +51,16 @@ async function assertSeededWorkspace(workspaceId, expected) {
   });
   const steps = template.production_template_steps;
   const expectedSteps = expected.productionWindow === 14
-    ? { "drums-v1": 1, "guitars-v1": 1, "bass-v1": 1, "vocals-v1": 2, "mix-v1": 4, "master-v1": 2, "license-v1": 2, "cover-art-v1": 1 }
-    : { "drums-v1": 2, "guitars-v1": 2, "bass-v1": 2, "vocals-v1": 4, "mix-v1": 8, "master-v1": 4, "license-v1": 3, "cover-art-v1": 3 };
+    ? { "drums-v1": 1, "guitars-v1": 1, "bass-v1": 1, "vocals-v1": 2, "mix-v1": 4, "master-v1": 2, "license-v1": 0, "cover-art-v1": 3 }
+    : { "drums-v1": 2, "guitars-v1": 2, "bass-v1": 2, "vocals-v1": 4, "mix-v1": 8, "master-v1": 4, "license-v1": 0, "cover-art-v1": 6 };
   const byKey = new Map(steps.map((step) => [step.stable_key, step]));
   for (const [stableKey, leadTimeDays] of Object.entries(expectedSteps)) assert.equal(byKey.get(stableKey)?.lead_time_days, leadTimeDays, stableKey);
+  const license = byKey.get("license-v1");
+  assert.equal(license?.is_enabled, false, "fresh-workspace License is disabled");
+  assert.equal(Number(license?.standard_cost_amount), 0, "fresh-workspace License has no Budget consequence");
+  assert.equal(songs?.length, 0, "finalization prepares a workspace but never creates a canonical song");
+  const starterKeys = new Set((focusTasks ?? []).map((task) => task.stable_key));
+  assert.deepEqual(starterKeys, new Set(["starter-upload-user-artist-logos", "starter-create-custom-task", "starter-upload-streaming-csv"]), "fresh workspaces receive only the current Focus Queue starters");
   const productionWindow = steps.filter((step) => step.semantic_kind !== "distribution" && step.is_enabled).reduce((sum, step) => sum + step.lead_time_days, 0);
   assert.equal(productionWindow, expected.productionWindow);
   const distributor = byKey.get("distributor-v1");

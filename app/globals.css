@@ -2796,6 +2796,57 @@ button {
 
 .artistdeck-system-card .login-form button:disabled { cursor: wait; opacity: 0.65; }
 
+.initial-workspace-setup-form { gap: 18px; }
+
+.initial-workspace-setup-choice {
+  background: #f8fbfa;
+  border: 1px solid #cfe4df;
+  border-left: 4px solid var(--accent);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+  padding: 14px;
+}
+
+.initial-workspace-setup-choice legend {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 800;
+  padding: 0 4px;
+}
+
+.initial-workspace-setup-choice p,
+.initial-workspace-setup-choice small,
+.initial-workspace-setup-required {
+  color: var(--muted);
+  line-height: 1.4;
+  margin: 0;
+}
+
+.initial-workspace-setup-choice p { font-size: 14px; }
+.initial-workspace-setup-choice small,
+.initial-workspace-setup-required { font-size: 12px; }
+
+.initial-workspace-setup-choice select {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  min-height: 48px;
+  padding: 10px 12px;
+}
+
+.initial-workspace-setup-choice select:focus-visible {
+  outline: 3px solid rgba(15, 139, 141, 0.24);
+  outline-offset: 1px;
+}
+
+.initial-workspace-setup-form button:disabled { cursor: not-allowed; }
+
 .login-panel {
   background: var(--surface);
   border: 1px solid var(--line);
