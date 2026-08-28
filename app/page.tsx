@@ -5713,6 +5713,7 @@ export default function Home() {
   }, []);
 
   async function skipGuidanceStep(step: Exclude<GettingStartedV1Step, "artistdeck_basics">) {
+    if (step === "invite_member") setGuidanceYouTubeCardHint(false);
     const previewMode = new URLSearchParams(window.location.search).get("guidancePreview");
     if (previewMode) {
       setGuidanceStatus((current) => current ? guidanceStatusAfterSkip(current, step) : current);
@@ -7444,17 +7445,26 @@ export default function Home() {
   useEffect(() => {
     const url = new URL(window.location.href);
     if (url.searchParams.get("guidance_return") !== "google-connected") return;
-    const timer = window.setTimeout(() => {
-      setSettingsView(null);
-      setActiveSection("Platforms");
-      setGuidanceYouTubeCardHint(true);
-      void refreshGoogleConnection();
-      void refreshGuidanceStatus();
-      url.searchParams.delete("guidance_return");
-      url.searchParams.delete("google");
-      window.history.replaceState({}, "", url);
-    }, 0);
-    return () => window.clearTimeout(timer);
+    let cancelled = false;
+    queueMicrotask(() => {
+      void Promise.all([
+        refreshGoogleConnection(),
+        refreshGuidanceStatus(),
+        loadPlatformStats()
+      ]).finally(() => {
+        if (cancelled) return;
+        setSettingsView(null);
+        setActiveSection("Platforms");
+        setGuidanceYouTubeCardHint(true);
+        url.searchParams.delete("guidance_return");
+        url.searchParams.delete("google");
+        window.history.replaceState({}, "", url);
+      });
+    });
+    return () => { cancelled = true; };
+    // The callback URL is consumed once. `loadPlatformStats` is intentionally
+    // read at that point rather than turning this into a repeated return flow.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshGoogleConnection, refreshGuidanceStatus]);
 
   useEffect(() => {
@@ -7468,32 +7478,34 @@ export default function Home() {
     }
 
     let secondFrame = 0;
-    let settleTimer = 0;
+    let expiryTimer = 0;
     const firstFrame = window.requestAnimationFrame(() => {
-      // The OAuth return changes the section and refreshes connection data at
-      // once. Wait for both React commits before measuring/scrolling the card.
+      // The post-connection collector has settled before this continuation is
+      // created. Two committed frames make the card's position deterministic.
       secondFrame = window.requestAnimationFrame(() => {
-        settleTimer = window.setTimeout(() => {
-          const card = document.getElementById("platform-card-youtube");
-          if (!card) return;
-          const mobile = window.matchMedia("(max-width: 540px)").matches;
-          const cardTop = card.getBoundingClientRect().top + window.scrollY;
-          const viewportOffset = mobile
-            ? 24
-            : Math.max(24, (window.innerHeight - Math.min(card.clientHeight, window.innerHeight * 0.72)) / 2);
-          window.scrollTo({
-            behavior: "smooth",
-            top: Math.max(0, cardTop - viewportOffset)
-          });
-        }, 80);
+        const card = document.getElementById("platform-card-youtube");
+        if (!card) return;
+        const mobile = window.matchMedia("(max-width: 540px)").matches;
+        const cardTop = card.getBoundingClientRect().top + window.scrollY;
+        const viewportOffset = mobile
+          ? 24
+          : Math.max(24, (window.innerHeight - Math.min(card.clientHeight, window.innerHeight * 0.72)) / 2);
+        window.scrollTo({ behavior: "smooth", top: Math.max(0, cardTop - viewportOffset) });
+        expiryTimer = window.setTimeout(() => setGuidanceYouTubeCardHint(false), 1400);
       });
     });
     return () => {
       window.cancelAnimationFrame(firstFrame);
       window.cancelAnimationFrame(secondFrame);
-      window.clearTimeout(settleTimer);
+      window.clearTimeout(expiryTimer);
     };
   }, [activeSection, guidanceYouTubeCardHint, platformStatsData, settingsView]);
+
+  useEffect(() => {
+    if (guidanceYouTubeCardHint && (settingsView || activeSection !== "Platforms")) {
+      queueMicrotask(() => setGuidanceYouTubeCardHint(false));
+    }
+  }, [activeSection, guidanceYouTubeCardHint, settingsView]);
 
   useEffect(() => {
     if (
@@ -8851,6 +8863,7 @@ export default function Home() {
             onGoogle={() => setGuidanceContext("google-logo")}
             onInviteMember={() => {
               setGuidanceContext("invite-member");
+              setGuidanceYouTubeCardHint(false);
               setOpenMemberAccessFromGuidance(true);
               setGuidanceMemberInviteHint(true);
               setSettingsView("general");
@@ -9537,6 +9550,8 @@ function GeneralSettingsView({
   const [armedSettingsAction, setArmedSettingsAction] = useState<string | null>(null);
   const googleConnectionLoadVersion = useRef(0);
   const googleServicesRef = useRef<HTMLElement>(null);
+  const googleServiceListRef = useRef<HTMLDivElement>(null);
+  const pendingGuidanceGoogleFocus = useRef(false);
   const memberInviteRef = useRef<HTMLElement>(null);
   const hasFocusedGuidanceMemberInvite = useRef(false);
   const hasHandledGoogleReturn = useRef(false);
@@ -9571,9 +9586,27 @@ function GeneralSettingsView({
   useEffect(() => {
     if (!openGoogleServicesOnMount) return;
     setActiveGeneralSettingsPanel("google");
-    window.requestAnimationFrame(() => googleServicesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    pendingGuidanceGoogleFocus.current = true;
     onGoogleServicesOpenConsumed();
   }, [onGoogleServicesOpenConsumed, openGoogleServicesOnMount, setActiveGeneralSettingsPanel]);
+
+  useEffect(() => {
+    if (!pendingGuidanceGoogleFocus.current || !areGoogleServicesOpen || googleStatus.state === "loading" || !googleServiceListRef.current) return;
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        const target = googleServicesRef.current;
+        if (!target || !googleServiceListRef.current) return;
+        pendingGuidanceGoogleFocus.current = false;
+        target.focus({ preventScroll: true });
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+    };
+  }, [areGoogleServicesOpen, googleStatus.state]);
 
   useEffect(() => {
     if (!openMemberAccessOnMount) return;
@@ -10433,7 +10466,7 @@ function GeneralSettingsView({
           </div>
           {areGoogleServicesOpen ? <>
 
-          <div className="google-service-list">
+          <div className="google-service-list" ref={googleServiceListRef}>
             <div className="google-service-row">
               <div>
                 <strong>YouTube Channel</strong>
@@ -10750,7 +10783,7 @@ function UserSettingsView({
     state: "idle"
   });
   const [isAccountIdentityOpen, setIsAccountIdentityOpen] = useState(false);
-  const [isDashboardOpen, setIsDashboardOpen] = useState(false);
+  const [isDashboardOpen, setIsDashboardOpen] = useState(true);
 
   useEffect(() => {
     const supabase = createBrowserSupabaseClient();
@@ -13307,7 +13340,7 @@ function ProductionView({
           <section className="production-released-songs" aria-label="Released songs">
             <button
               aria-expanded={showReleasedSongs}
-              className="production-released-songs-toggle"
+              className="roadmap-settings-link production-released-songs-toggle"
               onClick={() => setShowReleasedSongs((current) => !current)}
               type="button"
             >
@@ -18078,6 +18111,7 @@ function DashboardRoadmapPhasePreview({
         </div>
 
         <div className="roadmap-phase-progress-row">
+          <span>Plan progress</span>
           <RoadmapReleaseStrip
             leadingCount={`${releasedCount} / ${phaseSongs.length}`}
             songs={phaseSongs}
@@ -20674,12 +20708,13 @@ function RoadmapView({
               </div>
 
               <div className="roadmap-phase-progress-row">
+                <span>Plan progress</span>
                 <RoadmapReleaseStrip
                   leadingCount={`${phaseReleasedCount} / ${phaseSongs.length}`}
                   songs={phaseSongs}
                 />
               </div>
-              <p className="roadmap-horizon-summary">{months.filter((month) => month.phase === phase.phaseNumber).length}-month planning horizon</p>
+              <p className="roadmap-horizon-summary"><strong>12-month Roadmap</strong> · {months.filter((month) => month.phase === phase.phaseNumber).length}-month planning horizon</p>
               <RoadmapMonthStrip months={months.filter((month) => month.phase === phase.phaseNumber)} />
               <p>{phase.summary}</p>
               {outsideTimeframeCount > 0 ? <p className="roadmap-timeframe-warning" role="status">{outsideTimeframeCount} song{outsideTimeframeCount === 1 ? "" : "s"} outside plan timeframe</p> : null}

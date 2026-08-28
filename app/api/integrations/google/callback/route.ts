@@ -8,6 +8,7 @@ import {
 } from "@/lib/google/oauth";
 import { requireWorkspaceAdministrator } from "@/lib/server/workspace-owner";
 import { reconcilePlatformAccount } from "@/lib/server/platform-accounts";
+import { collectAfterConnection } from "@/lib/metrics/post-connection-collection";
 
 type GoogleUserInfo = { email?: string; sub?: string };
 type YouTubeChannelsResponse = {
@@ -141,11 +142,13 @@ export async function GET(request: NextRequest) {
         accountName: String(updates.youtube_channel_title),
         url: `https://www.youtube.com/channel/${updates.youtube_channel_id}`
       });
+      await collectAfterConnection(workspaceId, ["youtube"]);
     }
     if (selectedAnalyticsProperty) {
       const streams = await fetchGoogleJson<AnalyticsDataStreams>(tokens.access_token!, `https://analyticsadmin.googleapis.com/v1beta/properties/${selectedAnalyticsProperty.id}/dataStreams`);
       const webUris = (streams.dataStreams ?? []).filter((stream) => stream.type === "WEB_DATA_STREAM" && stream.webStreamData?.defaultUri).map((stream) => stream.webStreamData!.defaultUri!);
       await reconcilePlatformAccount(serviceClient, { workspaceId, platformSlug: "google-analytics", externalId: selectedAnalyticsProperty.id, accountName: selectedAnalyticsProperty.name, url: webUris.length === 1 ? webUris[0] : undefined });
+      await collectAfterConnection(workspaceId, ["google-analytics"]);
     }
 
     return clearOAuthCookies(NextResponse.redirect(setResult(guidanceReturn ? createGuidanceDashboardReturnUrl(request, guidancePreview) : settingsReturnUrl, analyticsNeedsSelection ? "select-analytics" : "connected")));

@@ -8,7 +8,7 @@ const [page, setup, styles] = await Promise.all([
   read("app/globals.css")
 ]);
 
-assert.match(page, /window\.setTimeout[\s\S]*platform-card-youtube[\s\S]*cardTop[\s\S]*window\.scrollTo/, "guided Google waits for the mounted card then calculates a viewport position.");
+assert.match(page, /Promise\.all\(\[[\s\S]*loadPlatformStats\(\)[\s\S]*platform-card-youtube[\s\S]*cardTop[\s\S]*window\.scrollTo/, "guided Google refreshes collected cards before calculating a viewport position.");
 assert.match(page, /window\.matchMedia\("\(max-width: 540px\)"\)/, "mobile uses a practical near-top focus position.");
 assert.match(page, /Math\.min\(card\.clientHeight, window\.innerHeight \* 0\.72\)/, "desktop centering accounts for a card taller than the usable viewport.");
 assert.match(setup, /cardClassName="initial-workspace-setup-card"/, "mandatory setup has a purpose-fit ArtistDeck card.");

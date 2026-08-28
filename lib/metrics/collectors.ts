@@ -13,6 +13,7 @@ import {
   getWorkspaceEnabledCollectors,
   type MetricCollectorName
 } from "@/lib/metrics/collector-eligibility";
+export type { MetricCollectorName } from "@/lib/metrics/collector-eligibility";
 import {
   hasEligibleMetaFstatsInstagramBinding,
   refreshMetaFstatsInstagramMetrics
@@ -87,10 +88,47 @@ type GoogleAnalyticsReport = {
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const workspaceCollectionRuns = new Map<string, Promise<MetricCollectorResult[]>>();
 
 export async function refreshAllMetricCollectors(workspaceId = defaultWorkspaceId) {
   const startedAt = new Date().toISOString();
+  const results = await refreshMetricCollectors(workspaceId);
+  return {
+    finishedAt: new Date().toISOString(),
+    results,
+    startedAt
+  };
+}
+
+/**
+ * Runs the selected configured collectors once for a workspace. Connection
+ * callbacks use this after writing their canonical binding, so the first card
+ * presentation can use collected data without treating collection failure as a
+ * failed connection.
+ */
+export async function refreshMetricCollectors(
+  workspaceId: string,
+  requestedCollectors?: readonly MetricCollectorName[]
+) {
+  const key = workspaceId;
+  const prior = workspaceCollectionRuns.get(key) ?? Promise.resolve([]);
+  const run = prior
+    .catch(() => [])
+    .then(() => runMetricCollectors(workspaceId, requestedCollectors));
+  workspaceCollectionRuns.set(key, run);
+  try {
+    return await run;
+  } finally {
+    if (workspaceCollectionRuns.get(key) === run) workspaceCollectionRuns.delete(key);
+  }
+}
+
+async function runMetricCollectors(
+  workspaceId: string,
+  requestedCollectors?: readonly MetricCollectorName[]
+) {
   const enabledCollectors = await getEnabledCollectorsForWorkspace(workspaceId);
+  const requested = requestedCollectors ? new Set(requestedCollectors) : null;
   const collectors: Array<{
     name: MetricCollectorName;
     refresh: () => Promise<MetricCollectorResult>;
@@ -112,7 +150,7 @@ export async function refreshAllMetricCollectors(workspaceId = defaultWorkspaceI
   ];
   const results = await Promise.allSettled(
     collectors.map((collector) =>
-      enabledCollectors.has(collector.name)
+      enabledCollectors.has(collector.name) && (!requested || requested.has(collector.name))
         ? collector.refresh()
         : Promise.resolve({
             name: collector.name,
@@ -122,9 +160,7 @@ export async function refreshAllMetricCollectors(workspaceId = defaultWorkspaceI
     )
   );
 
-  return {
-    finishedAt: new Date().toISOString(),
-    results: results.map((result, index): MetricCollectorResult => {
+  return results.map((result, index): MetricCollectorResult => {
       if (result.status === "fulfilled") {
         return result.value;
       }
@@ -134,9 +170,7 @@ export async function refreshAllMetricCollectors(workspaceId = defaultWorkspaceI
         reason: result.reason instanceof Error ? result.reason.message : String(result.reason),
         status: "rejected"
       };
-    }),
-    startedAt
-  };
+    });
 }
 
 async function getEnabledCollectorsForWorkspace(workspaceId: string) {

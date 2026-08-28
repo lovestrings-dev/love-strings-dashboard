@@ -5,6 +5,7 @@ import { creatorSocialThreadsIntegrationKind, exchangeCreatorSocialThreadsCode, 
 import { encryptMetaTokenPayload } from "@/lib/meta/tokens";
 import { bindCreatorSocialThreads } from "@/lib/server/meta-connections";
 import { consumeFixedCallbackOAuthAttempt, OAuthAttemptError } from "@/lib/server/oauth-attempts";
+import { collectAfterConnection } from "@/lib/metrics/post-connection-collection";
 
 export async function GET(request: NextRequest) {
   let attempt: Awaited<ReturnType<typeof consumeFixedCallbackOAuthAttempt>> | null = null;
@@ -32,6 +33,7 @@ export async function GET(request: NextRequest) {
       grantedScopes: token.grantedScopes,
       identity
     });
+    await collectAfterConnection(attempt.workspaceId, ["threads"]);
     stage = "binding-complete";
     reportStage(stage);
     return NextResponse.redirect(createOAuthResultReturnUrl({ origin: attempt.returnOrigin, returnPath: attempt.returnPath, result: "creator-social-threads-connected" }));

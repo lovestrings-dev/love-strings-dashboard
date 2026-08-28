@@ -4,6 +4,7 @@ import { creatorSocialInstagramConnectionKind, creatorSocialInstagramIntegration
 import { encryptMetaTokenPayload } from "@/lib/meta/tokens";
 import { bindCreatorSocialInstagram, CreatorSocialInstagramDuplicateError } from "@/lib/server/meta-connections";
 import { consumeFixedCallbackOAuthAttempt, OAuthAttemptError } from "@/lib/server/oauth-attempts";
+import { collectAfterConnection } from "@/lib/metrics/post-connection-collection";
 
 export async function GET(request: NextRequest) {
   let attempt: Awaited<ReturnType<typeof consumeFixedCallbackOAuthAttempt>> | null = null;
@@ -22,6 +23,7 @@ export async function GET(request: NextRequest) {
     stage = "binding-start";
     reportStage(stage);
     await bindCreatorSocialInstagram({ workspaceId: attempt.workspaceId, connectedBy: attempt.userId, authorizationUserExternalId: token.userId, encryptedTokenPayload: encryptMetaTokenPayload({ accessToken: token.accessToken }), tokenExpiresAt: token.expiresInSeconds ? new Date(Date.now() + token.expiresInSeconds * 1000).toISOString() : null, tokenType: token.tokenType, grantedScopes: token.grantedScopes, identity });
+    await collectAfterConnection(attempt.workspaceId, ["standalone-instagram"]);
     stage = "binding-complete";
     reportStage(stage);
     return NextResponse.redirect(createOAuthResultReturnUrl({ origin: attempt.returnOrigin, returnPath: attempt.returnPath, result: "creator-social-instagram-connected" }));

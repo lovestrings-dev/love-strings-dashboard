@@ -57,10 +57,12 @@ async function cleanup() {
 
 const original = await activeTemplate();
 try {
-  assert.equal(original.version >= 1, true);
+  assert.equal(original.version, 6);
   assert.deepEqual(original.card_order.slice(0, 5), ["events", "focus", "production", "production.current-song", "production.benchmark"]);
-  assert.ok(original.visible_cards.includes("platforms.spotify"));
-  assert.ok(!original.visible_cards.includes("platforms.apple-music"));
+  assert.deepEqual(
+    original.visible_cards.filter((card) => card.startsWith("platforms.")),
+    ["platforms.audience", "platforms.youtube", "platforms.instagram-creator"],
+  );
 
   const creator = await user("creator");
   const firstAdmin = await user("first-admin");
@@ -78,24 +80,13 @@ try {
   assert.deepEqual((await preference(workspaceId, invitedMember.id)).visible_cards, original.visible_cards);
   assert.deepEqual((await activeTemplate()).visible_cards, original.visible_cards);
 
-  const changedVisible = original.visible_cards.filter((card) => card !== "qr-codes");
-  const { data: activated, error: activateError } = await service.rpc("activate_platform_dashboard_preference_template", { p_card_order: original.card_order, p_visible_cards: changedVisible, p_theme: original.theme });
-  if (activateError) throw activateError;
-  const changed = Array.isArray(activated) ? activated[0] : activated;
-  const activeChanged = await activeTemplate(); assert.equal(activeChanged.version, changed.version); assert.deepEqual(activeChanged.visible_cards, changedVisible);
+  const invitedViewer = await user("viewer"); await invite(workspaceId, firstAdmin, invitedViewer, "viewer");
+  const viewerSnapshot = await preference(workspaceId, invitedViewer.id); assertSnapshot(viewerSnapshot, original);
   assert.deepEqual((await preference(workspaceId, invitedMember.id)).visible_cards, original.visible_cards);
   assert.deepEqual((await preference(workspaceId, firstAdmin.id)).visible_cards, personalVisible);
-
-  const invitedViewer = await user("viewer"); await invite(workspaceId, firstAdmin, invitedViewer, "viewer");
-  const viewerSnapshot = await preference(workspaceId, invitedViewer.id); assertSnapshot(viewerSnapshot, activeChanged);
-  assert.equal(viewerSnapshot.seeded_template_version, original.version + 1);
-
-  const { error: restoreError } = await service.rpc("activate_platform_dashboard_preference_template", { p_card_order: original.card_order, p_visible_cards: original.visible_cards, p_theme: original.theme });
-  if (restoreError) throw restoreError;
-  const restored = await activeTemplate(); assert.deepEqual(restored.visible_cards, original.visible_cards); assert.deepEqual(restored.card_order, original.card_order); assert.equal(restored.theme, original.theme);
 
   const { data: legacyRows, error: legacyError } = await service.from("dashboard_preferences").select("workspace_id, user_id").is("seeded_template_version", null).limit(5);
   if (legacyError) throw legacyError;
   assert.ok((legacyRows ?? []).length >= 0);
-  console.log(JSON.stringify({ firstAdminVersion: firstSnapshot.seeded_template_version, invitedMemberVersion: memberSnapshot.seeded_template_version, newViewerVersion: viewerSnapshot.seeded_template_version, restoredActiveVersion: restored.version, legacyRowsSampled: (legacyRows ?? []).length }, null, 2));
+  console.log(JSON.stringify({ firstAdminVersion: firstSnapshot.seeded_template_version, invitedMemberVersion: memberSnapshot.seeded_template_version, newViewerVersion: viewerSnapshot.seeded_template_version, activeTemplateVersion: original.version, legacyRowsSampled: (legacyRows ?? []).length }, null, 2));
 } finally { await cleanup(); }

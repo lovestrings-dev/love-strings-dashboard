@@ -12,7 +12,7 @@ assert.equal(cleanCreatorSocialContinuation("http://localhost:3000/?campaign=flo
 assert.equal(cleanCreatorSocialContinuation("http://localhost:3000/?campaign=flowers"), "/?campaign=flowers");
 
 assert.match(component, /readCreatorSocialContinuation\(window\.location\.href\)/);
-assert.match(component, /setIsOpen\(true\)/);
+assert.match(component, /onOpen\(\)/);
 assert.match(component, /creatorSocialContinuation\.target === "standalone-instagram"[\s\S]*await loadCreatorInstagram\(\)/);
 assert.match(component, /creatorSocialContinuation\.target === "standalone-instagram"[\s\S]*await loadCreatorThreads\(\)/);
 assert.match(component, /creatorSocialReturnReady/);

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireWorkspaceAdministrator, WorkspaceAccessError } from "@/lib/server/workspace-owner";
 import { reconcilePlatformAccount } from "@/lib/server/platform-accounts";
+import { collectAfterConnection } from "@/lib/metrics/post-connection-collection";
 
 type Candidate = { channelId: string; channelTitle: string; caution: boolean; sameAsMain: boolean };
 
@@ -23,6 +24,7 @@ export async function POST(request: NextRequest) {
       const { error: updateError } = await serviceClient.from("app_google_connections").update({ youtube_topic_channel_id: candidate.channelId, youtube_topic_channel_title: candidate.channelTitle }).eq("workspace_id", workspaceId);
       if (updateError) throw updateError;
       await reconcilePlatformAccount(serviceClient, { workspaceId, platformSlug: "youtube-music", externalId: candidate.channelId, accountName: candidate.channelTitle, url: `https://www.youtube.com/channel/${candidate.channelId}` });
+      await collectAfterConnection(workspaceId, ["youtube-music"]);
       return json({ ...candidate, status: "configured" });
     }
     const channelId = resolveChannelId(payload.topicChannel ?? "");

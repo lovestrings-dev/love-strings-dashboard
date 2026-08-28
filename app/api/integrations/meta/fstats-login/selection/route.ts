@@ -6,6 +6,7 @@ import { disconnectMetaFacebookPage, disconnectMetaLinkedInstagram, MetaPageSele
 import { runFacebookPageDiscovery, runLinkedInstagramDiscovery } from "@/lib/server/meta-fstats-discovery";
 import { authoritativeStateHttpStatus, readAuthoritativeFstatsLoginState } from "@/lib/server/meta-fstats-state";
 import { requireWorkspaceAdministrator, WorkspaceAccessError } from "@/lib/server/workspace-owner";
+import { collectAfterConnection } from "@/lib/metrics/post-connection-collection";
 
 type SelectionAction = "select_page" | "refresh_pages" | "connect_instagram" | "skip_instagram" | "retry_instagram_discovery" | "disconnect_instagram" | "disconnect_page";
 type SelectionBody = { action?: unknown; expectedConnectionId?: unknown; pageExternalId?: unknown; instagramExternalId?: unknown };
@@ -67,6 +68,7 @@ export async function POST(request: NextRequest) {
       const candidate = "pageCandidates" in before ? before.pageCandidates?.find((item) => item.page.externalId === body.pageExternalId) : null;
       if (!candidate?.selectable) throw new ActionError(409, "PAGE_UNAVAILABLE", "That Facebook Page is not selectable in the current state.");
       const selection = await selectMetaFacebookPage(serviceClient, { workspaceId, connectionId, externalId: body.pageExternalId });
+      await collectAfterConnection(workspaceId, ["facebook"]);
       const discovery = await runLinkedInstagramDiscovery(serviceClient, { workspaceId, connectionId, pageExternalId: body.pageExternalId });
       operation = { action, pageBinding: "succeeded", pageChanged: selection.page_changed, instagramDiscovery: discovery.outcome, ...(discovery.outcome === "failed" ? { discoveryCode: discovery.code, retryable: discovery.retryable } : {}) };
     } else {
@@ -86,6 +88,7 @@ export async function POST(request: NextRequest) {
         if (!instagramIdentity || typeof body.instagramExternalId !== "string" || body.instagramExternalId !== instagramIdentity.externalId) throw new ActionError(409, "INSTAGRAM_STATE_CHANGED", "Linked Instagram candidate changed. Refresh and try again.");
         if (action === "connect_instagram") {
           await selectMetaLinkedInstagram(serviceClient, { workspaceId, connectionId, pageExternalId, instagramExternalId: instagramIdentity.externalId });
+          await collectAfterConnection(workspaceId, ["instagram"]);
           operation = { action, instagramBinding: "succeeded" };
         } else if (action === "disconnect_instagram") {
           if (before.stage !== "connected" || before.instagram.status !== "connected") throw new ActionError(409, "INSTAGRAM_NOT_CONNECTED", "Instagram is not connected in the current state.");

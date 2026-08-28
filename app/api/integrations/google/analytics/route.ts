@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { decryptGoogleRefreshToken, fetchGoogleJson, refreshGoogleAccessToken } from "@/lib/google/oauth";
 import { reconcilePlatformAccount } from "@/lib/server/platform-accounts";
 import { requireWorkspaceAdministrator, WorkspaceAccessError } from "@/lib/server/workspace-owner";
+import { collectAfterConnection } from "@/lib/metrics/post-connection-collection";
 
 type Summary = { accountSummaries?: Array<{ propertySummaries?: Array<{ property?: string; displayName?: string }> }> };
 export async function GET(request: NextRequest) {
@@ -19,6 +20,7 @@ export async function PATCH(request: NextRequest) {
     const name = property.displayName ?? "Google Analytics";
     const { error } = await serviceClient.from("app_google_connections").update({ analytics_enabled: true, analytics_property_id: payload.propertyId, analytics_property_name: name }).eq("workspace_id", workspaceId); if (error) throw error;
     await reconcilePlatformAccount(serviceClient, { workspaceId, platformSlug: "google-analytics", externalId: payload.propertyId, accountName: name });
+    await collectAfterConnection(workspaceId, ["google-analytics"]);
     return NextResponse.json({ status: "connected", property: { id: payload.propertyId, name } });
   } catch (error) { return failure(error); }
 }
