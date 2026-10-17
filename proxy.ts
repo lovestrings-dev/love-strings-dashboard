@@ -89,6 +89,9 @@ export async function proxy(request: NextRequest) {
   if (
     membership.role === "viewer" &&
     request.nextUrl.pathname.startsWith("/api/") &&
+    // The sharing route permits only recipient link removal for Viewers;
+    // it independently rejects their source-sharing and default mutations.
+    !(request.nextUrl.pathname === "/api/production/sharing" && request.method === "PATCH") &&
     !["GET", "HEAD", "OPTIONS"].includes(request.method)
   ) {
     return NextResponse.json(

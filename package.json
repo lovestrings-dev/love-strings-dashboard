@@ -1,6 +1,6 @@
 {
   "name": "love-strings-dashboard",
-  "version": "1.28.0-beta.1",
+  "version": "1.29.0-beta.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -72,7 +72,10 @@
     "test:audience-aggregation": "node --experimental-strip-types scripts/test-audience-aggregation.mjs",
     "test:meta-creator-instagram-collector:live": "node --experimental-strip-types scripts/run-meta-creator-instagram-collector.mjs --apply",
     "test:oauth-attempts": "node --experimental-strip-types scripts/test-oauth-attempts.mjs",
-    "import:youtube": "node scripts/import-youtube-metrics.mjs --apply"
+    "import:youtube": "node scripts/import-youtube-metrics.mjs --apply",
+    "test:google-refresh-errors": "node scripts/test-google-refresh-errors.mjs",
+    "test:production-past-release": "node scripts/test-production-past-release.mjs",
+    "test:production-sharing": "node scripts/test-production-sharing.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.4",

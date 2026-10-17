@@ -2,6 +2,19 @@
 
 This file tracks app versions that are useful to discuss, test, and deploy. It is for product-level changes, not every small database edit.
 
+## Beta 1.29 — Production organization and linked song sharing
+
+- Production song cards now expose equal-width **Song options** and **Production steps** controls. Both start collapsed; new songs open settings with steps collapsed and scroll beneath the mobile navigation.
+- Equal-width **Show produced songs** and **Add song** controls sit above the list. Completed production joins the collapsed Produced section before release; Produced sorts by release date newest first, while in-production songs retain ascending date order.
+- Saving a release date before today in the workspace timezone marks every Production step and extra task Done through the existing save flow. Today's and future dates retain their statuses. Corrected the hidden native calendar input leaking text into a disabled date field.
+- **Share song** links one source song to an eligible workspace with a member in common. Source Admins and Members can share/unshare individually. Every recipient member sees current source data in Production, with editing disabled and **Not shared** available to remove only the link. Re-sharing requires an explicit source action. Automatic/default sharing is retired.
+- Received cards show **Shared by [workspace name]** directly beneath the title. Shared data stays outside the destination's owned drafts, Budget, Marketing, Dashboard totals, and Roadmap. It refreshes on Production entry, window focus, and every 30 seconds while Production is open.
+- Collect stats now identifies failed collectors and their reasons. Invalid Google refresh authorization provides an actionable reconnect message, and General Settings exposes an Analytics **Reconnect** button.
+
+Supabase migrations `202610170001`–`202610170003` are already applied. Existing song/step RLS remains unchanged. Disposable authenticated HTTP/database and browser tests verified sharing, Member permissions, read-only recipients, removal, re-share, isolation, and cleanup. Dmitrii also confirmed cross-account behavior locally.
+
+No new environment variables are required. Cloudinary production configuration and Love Strings' renewed Analytics authorization were restored separately from this release. See [Beta 1.29 release checks](releases/beta-1.29.md) for the deployment smoke checklist.
+
 ## Beta 1.28 — First-Admin Guidance and release-readiness
 
 Headline: **ArtistDeck now guides a new Workspace Admin through the first shared setup journey while keeping App Owner oversight and role boundaries explicit.**

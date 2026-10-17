@@ -55,6 +55,7 @@ import {
 } from "@/lib/production-template-v1";
 import { DateInput } from "./date-input";
 import { toDisplayDate, toIsoDate } from "@/lib/date-input";
+import { completeStepsForPastRelease } from "@/lib/production-completion";
 import {
   addBudgetRecurrenceCadence,
   type BudgetRecurringCadence
@@ -238,6 +239,7 @@ type ProductionStep = {
   templateStepStandardCostAmount?: number;
 };
 type ProductionSongConfig = {
+  receivedShare?: { id: string; sourceWorkspaceName: string };
   id: string;
   dbId?: string;
   title: string;
@@ -251,6 +253,27 @@ type ProductionSongConfig = {
   productionTemplateId?: string;
   productionTemplateVersion?: number;
   productionTemplateSnapshot?: unknown;
+};
+type ProductionSharingAction =
+  | { action: "share"; songId: string; destinationId: string | null }
+  | { action: "remove-received"; shareId: string };
+type ProductionSharingState = {
+  workspaceId: string | null;
+  canManage: boolean;
+  destinations: Array<{ id: string; name: string }>;
+  outgoing: Array<{ production_song_id: string; destination_workspace_id: string }>;
+  sharedSongs: ProductionSongConfig[];
+};
+type ProductionSongSharingControl = {
+  destinations: Array<{ id: string; name: string }>;
+  destinationId: string | null;
+  canManage: boolean;
+  isSaving: boolean;
+  onChange: (destinationId: string | null) => void;
+};
+const emptyProductionSharing: ProductionSharingState = {
+  workspaceId: null, canManage: false, destinations: [],
+  outgoing: [], sharedSongs: []
 };
 type ProductionWorkbookSeed = {
   bpm?: number;
@@ -729,7 +752,7 @@ const platformStats = [
   }
 ];
 
-const appVersionLabel = "Beta 1.28";
+const appVersionLabel = "Beta 1.29";
 const defaultAppLogoUrl = "/artistdeck-logo.png";
 
 const sections = [
@@ -5551,7 +5574,76 @@ export default function Home() {
     message: "",
     state: "idle"
   });
+  const [productionSharing, setProductionSharing] = useState<ProductionSharingState>(emptyProductionSharing);
+  const [productionSharingStatus, setProductionSharingStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
+  const productionSharingSequence = useRef(0);
+  const productionSharingMutation = useRef(false);
+  const loadProductionSharing = useCallback(async () => {
+    const workspaceId = activeWorkspaceId;
+    if (!workspaceId) return;
+    const sequence = ++productionSharingSequence.current;
+    try {
+      const response = await fetch("/api/production/sharing", { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Song sharing unavailable.");
+      if (activeWorkspaceIdRef.current !== workspaceId || sequence !== productionSharingSequence.current) return;
+      const sharedSongs = (payload.incoming as Array<{
+        shareId: string; sourceWorkspaceName: string;
+        song: ProductionSongDbRow & { production_steps: Array<ProductionStepDbRow & {
+          production_step_tasks: Array<ProductionStepTaskDbRow & { production_budget_lines?: ProductionBudgetLineDbRow[] }>;
+          production_budget_lines: ProductionBudgetLineDbRow[];
+        }> };
+      }>).map((incoming) => {
+        const steps = incoming.song.production_steps;
+        const [song] = mapProductionRows({
+          songs: [{ ...incoming.song, slug: `shared-${incoming.shareId}`, roadmap_phase_id: null }],
+          steps, tasks: steps.flatMap((step) => step.production_step_tasks),
+          budgetLines: steps.flatMap((step) => [...step.production_budget_lines, ...step.production_step_tasks.flatMap((task) => task.production_budget_lines ?? [])])
+        });
+        return { ...song, receivedShare: { id: incoming.shareId, sourceWorkspaceName: incoming.sourceWorkspaceName } };
+      });
+      setProductionSharing({ ...payload, workspaceId, sharedSongs });
+      setProductionSharingStatus({ message: "", state: "idle" });
+    } catch (error) {
+      if (activeWorkspaceIdRef.current === workspaceId && sequence === productionSharingSequence.current) {
+        // Never retain received data if its current authorization cannot be checked.
+        setProductionSharing(emptyProductionSharing);
+        setProductionSharingStatus({ message: error instanceof Error ? error.message : "Song sharing unavailable.", state: "error" });
+      }
+    }
+  }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    if (activeSection !== "Production" || !activeWorkspaceId) return;
+    const refresh = () => { if (!productionSharingMutation.current) void loadProductionSharing(); };
+    refresh();
+    const timer = window.setInterval(refresh, 30000);
+    window.addEventListener("focus", refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", refresh); };
+  }, [activeSection, activeWorkspaceId, loadProductionSharing]);
+
+  async function updateProductionSharing(action: ProductionSharingAction) {
+    if (productionSharingMutation.current) return;
+    productionSharingMutation.current = true;
+    ++productionSharingSequence.current;
+    const workspaceId = activeWorkspaceId;
+    setProductionSharingStatus({ message: "Saving song sharing...", state: "loading" });
+    try {
+      const response = await fetch("/api/production/sharing", {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action)
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Song sharing update failed.");
+      if (activeWorkspaceIdRef.current === workspaceId) await loadProductionSharing();
+    } catch (error) {
+      if (activeWorkspaceIdRef.current === workspaceId) setProductionSharingStatus({ message: error instanceof Error ? error.message : "Song sharing update failed.", state: "error" });
+    } finally {
+      productionSharingMutation.current = false;
+    }
+  }
+
   const [productionFocusTarget, setProductionFocusTarget] = useState<{
+    openSongOptions?: boolean;
     elementId?: string;
     inputId?: string;
     songId: string;
@@ -6520,9 +6612,12 @@ export default function Home() {
         ).length ?? 0;
 
       if (failedCount > 0) {
-        throw new Error(
-          `${failedCount} collector${failedCount === 1 ? "" : "s"} failed.`
-        );
+        const failures = result.results
+          .filter((item: { status: string }) => item.status === "rejected")
+          .map((item: { name: string; reason?: string }) =>
+            `${item.name}: ${item.reason || "Collection failed."}`
+          );
+        throw new Error(failures.join(" "));
       }
 
       setRefreshStatus({
@@ -6742,7 +6837,8 @@ export default function Home() {
       } catch (error) {
         console.warn("Roadmap plans could not be refreshed after Production creation.", error);
       }
-      setProductionFocusTarget({ songId: createdSong.id, token: Date.now() });
+      setProductionFocusTarget({ openSongOptions: true, songId: createdSong.id, token: Date.now() });
+      void loadProductionSharing();
       if (wasGuidanceAddSong || (guidanceStatus?.active && guidanceStatus.nextStep === "first_song")) {
         setGuidanceSongId(createdSong.id);
         setGuidanceContext("song-settings");
@@ -6773,9 +6869,19 @@ export default function Home() {
             : currentSong.steps
         } satisfies ProductionSongConfig)
       : null;
-    const nextSong = mergedSong && updates.releaseDate
+    const scheduledSong = mergedSong && updates.releaseDate
       ? (mergedSong.schedulingModel === "template-v1" ? applyProductionV1ReleaseSchedule(mergedSong, updates.releaseDate) : applyProductionReleaseSchedule(mergedSong, updates.releaseDate))
       : mergedSong;
+    const nextSong = scheduledSong && updates.releaseDate
+      ? {
+          ...scheduledSong,
+          steps: completeStepsForPastRelease(
+            scheduledSong.steps,
+            toIsoDate(updates.releaseDate),
+            getWorkspaceDateKey(workspaceTimeZone)
+          )
+        }
+      : scheduledSong;
 
     if (currentSong && nextSong && updates.steps) {
       getChangedDailyProgressItems(
@@ -7720,6 +7826,8 @@ export default function Home() {
       return;
     }
 
+    if (control.matches("select[data-received-song-sharing]")) return;
+
     if (control instanceof HTMLButtonElement) {
       const label = (control.getAttribute("aria-label") || control.textContent || "")
         .trim()
@@ -7738,6 +7846,7 @@ export default function Home() {
   }
 
   function preventViewerWriteKeydown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.target instanceof Element && event.target.matches("select[data-received-song-sharing]")) return;
     if (workspaceRole !== "viewer" || settingsView) {
       return;
     }
@@ -9013,6 +9122,9 @@ export default function Home() {
           <ProductionView
             guidanceAddSongHint={guidanceContext === "add-song"}
             guidanceSongId={guidanceContext === "song-settings" ? guidanceSongId : null}
+            sharing={productionSharing.workspaceId === activeWorkspaceId ? productionSharing : emptyProductionSharing}
+            sharingStatus={productionSharingStatus}
+            onSharingChange={updateProductionSharing}
             focusTarget={productionFocusTarget}
             restoreContext={productionRestoreContext}
             onAddSong={addProductionSong}
@@ -10539,6 +10651,16 @@ function GeneralSettingsView({
                     : "Not connected"}
                 </span>
               </div>
+              {googleConnection?.analytics.enabled ? (
+                <button
+                  disabled={googleStatus.state === "loading"}
+                  onClick={() => window.location.assign("/api/integrations/google/connect?service=analytics")}
+                  type="button"
+                >
+                  <LinkIcon aria-hidden size={16} />
+                  Reconnect
+                </button>
+              ) : null}
               {googleConnection?.analytics.enabled ? (
                 <button
                   className={`settings-destructive-button${
@@ -13244,6 +13366,9 @@ function ProductionView({
   focusTarget,
   guidanceAddSongHint,
   guidanceSongId,
+  sharing,
+  sharingStatus,
+  onSharingChange,
   onAddSong,
   onDeleteSong,
   onFocusSong,
@@ -13254,9 +13379,12 @@ function ProductionView({
   songs,
   restoreContext
 }: {
-  focusTarget: { elementId?: string; inputId?: string; songId: string; token: number } | null;
+  focusTarget: { openSongOptions?: boolean; elementId?: string; inputId?: string; songId: string; token: number } | null;
   guidanceAddSongHint: boolean;
   guidanceSongId: string | null;
+  sharing: ProductionSharingState;
+  sharingStatus: RefreshStatus;
+  onSharingChange: (action: ProductionSharingAction) => Promise<void>;
   onAddSong: () => void;
   onDeleteSong: (songId: string) => void;
   onFocusSong: (songId: string, elementId?: string) => void;
@@ -13268,10 +13396,22 @@ function ProductionView({
   restoreContext: { context: ProductionNavigationContext; token: number } | null;
 }) {
   const songElementRefs = useRef<Record<string, HTMLElement | null>>({});
-  const [showReleasedSongs, setShowReleasedSongs] = useState(false);
-  const orderedSongs = sortProductionSongsByDeadline(songs);
-  const activeSongs = orderedSongs.filter((song) => !isRoadmapSongReleased(song));
-  const releasedSongs = orderedSongs.filter(isRoadmapSongReleased);
+  const [showProducedSongs, setShowProducedSongs] = useState(false);
+  const orderedSongs = sortProductionSongsByDeadline([...songs, ...sharing.sharedSongs]);
+  const songSharingControl = (song: ProductionSongConfig): ProductionSongSharingControl => ({
+    destinations: sharing.destinations,
+    destinationId: sharing.outgoing.find((share) => share.production_song_id === song.dbId)?.destination_workspace_id ?? null,
+    canManage: Boolean(song.receivedShare) || (sharing.canManage && Boolean(song.dbId)),
+    isSaving: sharingStatus.state === "loading",
+    onChange: (destinationId) => {
+      if (song.receivedShare) void onSharingChange({ action: "remove-received", shareId: song.receivedShare.id });
+      else if (song.dbId) void onSharingChange({ action: "share", songId: song.dbId, destinationId });
+    }
+  });
+  const activeSongs = orderedSongs.filter((song) => getRoadmapProductionStatus(song) !== "done");
+  const producedSongs = orderedSongs
+    .filter((song) => getRoadmapProductionStatus(song) === "done")
+    .sort((first, second) => getCampaignSortTime(second.releaseDate) - getCampaignSortTime(first.releaseDate));
 
   useEffect(() => {
     if (!focusTarget) {
@@ -13283,10 +13423,19 @@ function ProductionView({
         ? document.getElementById(focusTarget.elementId)
         : null;
 
-      (focusedElement ?? songElementRefs.current[focusTarget.songId])?.scrollIntoView({
-        behavior: "smooth",
-        block: "start"
-      });
+      const target = focusedElement ?? songElementRefs.current[focusTarget.songId];
+      if (target && focusTarget.openSongOptions) {
+        const sidebar = document.querySelector<HTMLElement>(".sidebar");
+        const topOffset = sidebar && window.matchMedia("(max-width: 980px)").matches
+          ? sidebar.getBoundingClientRect().bottom
+          : 0;
+        window.scrollTo({
+          behavior: "smooth",
+          top: Math.max(0, window.scrollY + target.getBoundingClientRect().top - topOffset)
+        });
+      } else {
+        target?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
       if (focusTarget.inputId) {
         const inputId = focusTarget.inputId;
         window.setTimeout(() => {
@@ -13314,49 +13463,41 @@ function ProductionView({
       </header>
 
       <div className="campaign-list">
-        {activeSongs.map((song) => (
-          <ProductionSongBoard
-            guidanceSongSettingsHint={guidanceSongId === song.id}
-            focusToken={
-              focusTarget?.songId === song.id ? focusTarget.token : undefined
-            }
-            key={song.id}
-            onChange={onSongChange}
-            onDelete={onDeleteSong}
-            onFocus={onFocusSong}
-            onNavigationContextChange={onNavigationContextChange}
-            phaseOptions={phaseOptions}
-            refCallback={(element) => {
-              songElementRefs.current[song.id] = element;
-            }}
-            song={song}
-            restoreContext={
-              restoreContext?.context.songId === song.id ? restoreContext : null
-            }
-          />
-        ))}
+        <div className="production-list-controls">
+          <button
+            aria-controls="production-produced-songs"
+            aria-expanded={showProducedSongs}
+            className="production-section-toggle"
+            onClick={() => setShowProducedSongs((current) => !current)}
+            type="button"
+          >
+            <ChevronDown aria-hidden size={14} />
+            {showProducedSongs ? "Hide" : "Show"} produced songs ({producedSongs.length})
+          </button>
+          <button
+            className={`production-section-toggle${guidanceAddSongHint ? " guidance-target" : ""}`}
+            onClick={onAddSong}
+            type="button"
+          >
+            <Plus aria-hidden size={14} />
+            Add song
+          </button>
+        </div>
 
-        {releasedSongs.length > 0 ? (
-          <section className="production-released-songs" aria-label="Released songs">
-            <button
-              aria-expanded={showReleasedSongs}
-              className="roadmap-settings-link production-released-songs-toggle"
-              onClick={() => setShowReleasedSongs((current) => !current)}
-              type="button"
-            >
-              <ChevronDown aria-hidden size={16} />
-              Show released songs ({releasedSongs.length})
-            </button>
-            {showReleasedSongs ? (
+        {sharingStatus.message ? <p className={sharingStatus.state === "error" ? "settings-error" : "settings-status"} role={sharingStatus.state === "error" ? "alert" : "status"}>{sharingStatus.message}</p> : null}
+        <section className="production-released-songs" aria-label="Produced songs" hidden={!showProducedSongs} id="production-produced-songs">
+            {showProducedSongs ? (
               <div className="production-released-songs-list">
-                {releasedSongs.map((song) => (
+                {producedSongs.map((song) => (
                   <ProductionSongBoard
                     guidanceSongSettingsHint={false}
+                    openSongOptionsOnFocus={focusTarget?.songId === song.id && focusTarget.openSongOptions}
                     focusToken={
                       focusTarget?.songId === song.id ? focusTarget.token : undefined
                     }
                     key={song.id}
-                    onChange={onSongChange}
+                    sharingControl={songSharingControl(song)}
+                    onChange={song.receivedShare ? () => undefined : onSongChange}
                     onDelete={onDeleteSong}
                     onFocus={onFocusSong}
                     onNavigationContextChange={onNavigationContextChange}
@@ -13372,13 +13513,32 @@ function ProductionView({
                 ))}
               </div>
             ) : null}
-          </section>
-        ) : null}
+        </section>
 
-        <button className={`add-campaign-button${guidanceAddSongHint ? " guidance-target" : ""}`} onClick={onAddSong} type="button">
-          <Plus size={16} aria-hidden />
-          Add song
-        </button>
+        {activeSongs.map((song) => (
+          <ProductionSongBoard
+            guidanceSongSettingsHint={guidanceSongId === song.id}
+            openSongOptionsOnFocus={focusTarget?.songId === song.id && focusTarget.openSongOptions}
+            focusToken={
+              focusTarget?.songId === song.id ? focusTarget.token : undefined
+            }
+            key={song.id}
+            sharingControl={songSharingControl(song)}
+            onChange={song.receivedShare ? () => undefined : onSongChange}
+            onDelete={onDeleteSong}
+            onFocus={onFocusSong}
+            onNavigationContextChange={onNavigationContextChange}
+            phaseOptions={phaseOptions}
+            refCallback={(element) => {
+              songElementRefs.current[song.id] = element;
+            }}
+            song={song}
+            restoreContext={
+              restoreContext?.context.songId === song.id ? restoreContext : null
+            }
+          />
+        ))}
+
       </div>
     </>
   );
@@ -13386,7 +13546,9 @@ function ProductionView({
 
 function ProductionSongBoard({
   focusToken,
+  sharingControl,
   guidanceSongSettingsHint,
+  openSongOptionsOnFocus,
   onChange,
   onDelete,
   onFocus,
@@ -13397,7 +13559,9 @@ function ProductionSongBoard({
   restoreContext
 }: {
   focusToken?: number;
+  sharingControl: ProductionSongSharingControl;
   guidanceSongSettingsHint: boolean;
+  openSongOptionsOnFocus?: boolean;
   onChange: (songId: string, updates: Partial<ProductionSongConfig>) => void;
   onDelete: (songId: string) => void;
   onFocus: (songId: string, elementId?: string) => void;
@@ -13416,6 +13580,7 @@ function ProductionSongBoard({
   const [isAlbumArtEditorOpen, setIsAlbumArtEditorOpen] = useState(false);
   const [isFocusHighlighted, setIsFocusHighlighted] = useState(false);
   const [isSongOpen, setIsSongOpen] = useState(false);
+  const [isSongOptionsOpen, setIsSongOptionsOpen] = useState(false);
   const [isReleaseDateEditing, setIsReleaseDateEditing] = useState(false);
   const [isSongTitleEditorOpen, setIsSongTitleEditorOpen] = useState(false);
   const [isSongDeleteArmed, setIsSongDeleteArmed] = useState(false);
@@ -13453,7 +13618,8 @@ function ProductionSongBoard({
     }
 
     const focusTimer = window.setTimeout(() => {
-      setIsSongOpen(true);
+      setIsSongOpen(!openSongOptionsOnFocus);
+      if (openSongOptionsOnFocus) setIsSongOptionsOpen(true);
       setIsFocusHighlighted(true);
     }, 0);
 
@@ -13465,11 +13631,11 @@ function ProductionSongBoard({
       window.clearTimeout(focusTimer);
       window.clearTimeout(highlightTimer);
     };
-  }, [focusToken]);
+  }, [focusToken, openSongOptionsOnFocus]);
 
   useEffect(() => {
     if (!guidanceSongSettingsHint) return;
-    const timer = window.setTimeout(() => setIsSongOpen(true), 0);
+    const timer = window.setTimeout(() => setIsSongOptionsOpen(true), 0);
     return () => window.clearTimeout(timer);
   }, [guidanceSongSettingsHint]);
 
@@ -13745,6 +13911,7 @@ function ProductionSongBoard({
         <div className="campaign-title-block">
           <div className="campaign-title-row">
             <h2>{songTitle}</h2>
+            {song.receivedShare ? <p className="production-shared-source">Shared by {song.receivedShare.sourceWorkspaceName}</p> : null}
           </div>
           <HeaderTaskList tasks={nextTasks} />
         </div>
@@ -13755,28 +13922,40 @@ function ProductionSongBoard({
           {releaseDateDisplay ? <span>{releaseDateDisplay}</span> : null}
           <span>{formatProductionDeadlineCountdown(daysToProductionDeadline)}</span>
         </strong>
-        <button
-          aria-expanded={isSongOpen}
-          aria-label={isSongOpen ? "Collapse song" : "Expand song"}
-          className="production-song-toggle settings-icon-button"
-          onClick={toggleSongDetails}
-          type="button"
-        >
-          <Pencil size={16} aria-hidden />
-        </button>
       </div>
 
       <div className="production-desktop-progress">
         <ProductionProgressStrip steps={song.steps} />
       </div>
 
-      <div
-        className="campaign-details"
-        hidden={!isSongOpen}
-        id={`${song.id}-production-details`}
-      >
-        <details className={`campaign-danger-zone${guidanceSongSettingsHint ? " guidance-target" : ""}`}>
-          <summary>Song options</summary>
+      <div className="production-song-controls">
+        <button
+          aria-controls={`${song.id}-production-options`}
+          aria-expanded={isSongOptionsOpen}
+          className={`production-section-toggle${guidanceSongSettingsHint ? " guidance-target" : ""}`}
+          onClick={() => {
+            setIsSongDeleteArmed(false);
+            setIsSongOptionsOpen((current) => !current);
+          }}
+          type="button"
+        >
+          <ChevronDown aria-hidden size={14} />
+          Song options
+        </button>
+        <button
+          aria-controls={`${song.id}-production-details`}
+          aria-expanded={isSongOpen}
+          className="production-section-toggle"
+          onClick={toggleSongDetails}
+          type="button"
+        >
+          <ChevronDown aria-hidden size={14} />
+          Production steps
+        </button>
+      </div>
+      <div className="campaign-details production-song-options" hidden={!isSongOptionsOpen} id={`${song.id}-production-options`}>
+        <div className="campaign-danger-zone">
+          <fieldset className="production-shared-readonly" disabled={Boolean(song.receivedShare)}>
           {guidanceSongSettingsHint ? <p className="guidance-bubble">You can continue setting up your song here.</p> : null}
           <div>
             <label className="song-title-options-editor">
@@ -13936,7 +14115,28 @@ function ProductionSongBoard({
               {isSongDeleteArmed ? "Confirm delete" : "Delete song"}
             </button>
           </div>
-        </details>
+          </fieldset>
+          <label className="roadmap-phase-select production-share-song">
+            <span className="song-option-field-heading">Share song</span>
+            <select
+              aria-label={`${songTitle} share song`}
+              data-received-song-sharing={song.receivedShare ? "true" : undefined}
+              disabled={!sharingControl.canManage || sharingControl.isSaving}
+              value={song.receivedShare ? "received" : sharingControl.destinationId ?? ""}
+              onChange={(event) => sharingControl.onChange(event.target.value || null)}
+            >
+              <option value="">Not shared</option>
+              {song.receivedShare ? <option value="received">Shared with this workspace</option> : sharingControl.destinations.map((destination) => <option key={destination.id} value={destination.id}>{destination.name}</option>)}
+            </select>
+          </label>
+        </div>
+      </div>
+      <div
+        className="campaign-details"
+        hidden={!isSongOpen}
+        id={`${song.id}-production-details`}
+      >
+        <fieldset className="production-shared-readonly" disabled={Boolean(song.receivedShare)}>
         <div className="campaign-table-wrap">
           <table className="campaign-table production-table">
             <tbody>
@@ -13966,7 +14166,7 @@ function ProductionSongBoard({
             Add production step
           </button>
           <button
-            aria-label="Collapse song"
+            aria-label="Collapse production steps"
                   className="production-collapse-button settings-icon-button"
                   onClick={toggleSongDetails}
                   type="button"
@@ -13974,6 +14174,7 @@ function ProductionSongBoard({
                   <ChevronUp size={18} aria-hidden />
                 </button>
         </div>
+        </fieldset>
       </div>
     </section>
   );

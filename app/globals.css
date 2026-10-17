@@ -105,7 +105,7 @@ button {
   opacity: 0.55;
 }
 
-.date-input .date-input-native-picker {
+.date-input.date-input > input.date-input-native-picker {
   border: 0;
   cursor: pointer;
   height: 32px;
@@ -123,6 +123,10 @@ button {
 .production-released-songs {
   display: grid;
   gap: 10px;
+}
+
+.production-released-songs[hidden] {
+  display: none;
 }
 
 .production-released-songs-toggle {
@@ -9093,6 +9097,49 @@ h2 {
   min-height: 172px;
 }
 
+.production-list-controls,
+.production-song-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px 14px;
+}
+
+.production-list-controls {
+  --production-child-card-background: color-mix(
+    in srgb,
+    white 96%,
+    var(--module-production) 4%
+  );
+  padding: 0;
+}
+
+.production-section-toggle {
+  align-items: center;
+  background: var(--production-child-card-background);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 6px;
+  justify-content: center;
+  min-width: 0;
+  min-height: 36px;
+  padding: 8px 10px;
+}
+
+.production-section-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.production-song-options[hidden] {
+  display: none;
+}
+
 .production-board-header {
   border-bottom: 1px solid var(--line);
 }
@@ -10930,4 +10977,56 @@ h2 {
   textarea {
     font-size: 16px !important;
   }
+}
+
+.production-share-song select {
+  background: var(--production-step-control-background, var(--surface));
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  min-height: 36px;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.production-shared-readonly {
+  border: 0;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.production-shared-readonly:disabled {
+  opacity: 0.85;
+}
+
+.production-song-board .campaign-danger-zone > .production-share-song {
+  margin-top: 14px;
+}
+
+.viewer-read-only select[data-received-song-sharing] {
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.production-song-board .campaign-danger-zone > .production-shared-readonly > div {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.production-shared-source {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+
+.production-song-board .campaign-title-row {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }

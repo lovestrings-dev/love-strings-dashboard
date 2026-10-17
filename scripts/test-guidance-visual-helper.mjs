@@ -40,7 +40,7 @@ assert.match(page, /metrics: canonicalCard\?\.metrics \?\? \[\]/, "YouTube Topic
 assert.match(page, /Skip step/, "the recommended actionable step has a visible skip action");
 assert.match(page, /skipGuidanceStep/, "skip uses the shared Guidance status boundary");
 assert.match(page, /production-collapse-button/, "Production has a bottom-row Collapse control");
-assert.match(page, /aria-label=\{isSongOpen \? "Collapse song" : "Expand song"\}/, "Production collapse state remains accessible");
+assert.match(page, /aria-controls=\{`\$\{song.id\}-production-details`\}[\s\S]*?aria-expanded=\{isSongOpen\}/, "Production steps collapse state remains accessible");
 assert.match(accountControl, /guidanceContext === "google-logo"/, "the existing workspace logo is the Google journey cue");
 assert.match(accountControl, /guidance-target-light/, "the dark-header Guidance targets use a light treatment");
 assert.match(accountControl, /guidance-menu-settings/, "the existing General Settings item is highlighted from the account menu");

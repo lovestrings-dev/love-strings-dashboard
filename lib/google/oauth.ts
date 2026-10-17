@@ -100,6 +100,11 @@ export async function refreshGoogleAccessToken(refreshToken: string) {
   const payload = (await response.json()) as GoogleTokenResponse;
 
   if (!response.ok || !payload.access_token) {
+    if (payload.error === "invalid_grant") {
+      throw new Error(
+        "Google authorization is no longer valid (invalid_grant). Reconnect the affected Google service in General Settings → Google services."
+      );
+    }
     throw new Error(
       payload.error_description || payload.error || "Google access refresh failed."
     );

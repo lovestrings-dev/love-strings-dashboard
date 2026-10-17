@@ -15,8 +15,8 @@ const [page, collectors, postConnection, googleCallback, analyticsRoute, topicRo
   read("supabase/migrations/202608280006_update_fresh_dashboard_statistics_defaults.sql")
 ]);
 
-assert.match(page, /className="roadmap-settings-link production-released-songs-toggle"/, "Released-song visibility uses the lightweight link interaction.");
-assert.match(page, /aria-expanded=\{showReleasedSongs\}/, "Released songs retains accessible expand/collapse state.");
+assert.match(page, /className="production-list-controls"/, "Produced-song visibility shares the top control row with Add song.");
+assert.match(page, /aria-expanded=\{showProducedSongs\}/, "Produced songs retain accessible expand/collapse state.");
 assert.match(page, /const \[isDashboardOpen, setIsDashboardOpen\] = useState\(true\)/, "Personal View opens on normal User Settings entry.");
 assert.match(page, /<span>Plan progress<\/span>[\s\S]*?<RoadmapReleaseStrip/, "Auto Plan progress remains song-based.");
 assert.match(page, /12-month Roadmap/, "The separate Auto Plan time horizon remains labelled.");

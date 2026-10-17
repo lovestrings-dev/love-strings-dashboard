@@ -385,3 +385,45 @@ Possible future agents:
 
 - `?layoutDebug=1` enables a local, authenticated-only layout inspector for real-device mobile debugging. It measures root/body/viewport widths, lists horizontal-overflow candidates with ancestors, and can copy the report. It is inactive in normal URLs.
 - The mobile module navigation deliberately scrolls horizontally inside `.nav-list`. Its `.nav-scroll-shell` owns paint clipping so that this internal scroll area cannot expand the document width on iPhone Safari.
+
+
+## Linked Production Song Sharing (local app, schema applied 2026-10-17)
+
+`production_song_shares` links a canonical source song to one destination workspace.
+Sharing is individual: a source workspace Admin or Member chooses a destination from Song
+options → Share song. New songs are unshared. Migration `202610170002` retires the
+automatic insert trigger and rejects legacy default-setting RPC requests. The old
+defaults table remains inert historical data; existing individual links are preserved.
+Recipient removal deletes only the link; explicit source sharing is required to
+restore it. Restored links have fresh IDs so stale removal requests cannot delete them.
+
+Eligible destinations are active workspaces containing at least one accepted source
+workspace member. Received reads recheck that relationship and active workspace state.
+Migration `202610170003` permits source Members to share and unshare songs,
+matching their existing source-song editing access. Viewers cannot create or change
+source shares. Existing source Member editing stays unchanged. Every destination member, including
+Viewers, may remove a received link through the protected sharing API. Only the
+received-sharing selector is exempt from the Viewer UI write guard. The proxy allows
+PATCH to that endpoint for Viewers, while the route rejects their source-sharing
+mutations and all retired default actions. Other Viewer write endpoints stay blocked.
+
+Canonical Production RLS is unchanged. `/api/production/sharing` authenticates the
+active workspace and loads current canonical Production fields for authorized incoming
+links via the service client. Sharing tables have RLS and no anonymous/authenticated
+grants; service-only mutation functions recheck the actor. The ownership FK prevents
+a link from claiming a different source. Sharing does not grant cross-workspace writes
+or direct canonical-table reads.
+
+Received songs live in a separate in-memory collection used only by Production, not
+owned drafts, browser persistence, save queues, Marketing, Budget, Dashboard totals,
+or Roadmap. Their cards disable source editing and expose only Not shared as a mutation.
+The source label is directly below the title: Shared by [workspace name]. Links and
+canonical fields refresh on Production entry, window focus, and every 30 seconds while
+Production is open. Failed loads clear received data; workspace/request fencing keeps
+stale results from appearing after a workspace switch.
+
+API isolation tests: `scripts/test-production-sharing.mjs`. Disposable authenticated
+localhost/database tests: `scripts/test-production-sharing-live.mjs --apply`. The
+browser read-only/unshare flow was verified with a disposable source; cleanup and
+pre/post hashes confirmed existing Production and membership data stayed unchanged.
+The UI/API changes remain local and have not been deployed.
