@@ -11,6 +11,15 @@ Initial target stack:
 - Data imports first: Excel/CSV/Google Sheets exports
 - API integrations later: YouTube, Instagram, Spotify or platform exports, website analytics, distributor reports
 
+## Current chart and campaign boundary (Beta 1.30)
+
+- New song campaign creation converts the API's ISO release date to the display-date input expected by the day builder before saving days. New task statuses start Not started; existing task progress is not reset automatically.
+- Platforms and Dashboard use the same canonical Google connection state for service-backed cards.
+- `app/components/evolution-panel.tsx` and `lib/platform-evolution.ts` provide the shared Platforms chart UI and interval/growth calculations. Period and display mode live in parent app state, with 90D/Absolute defaults; they persist during same-page navigation.
+- Platforms graph history has an independent read-only, workspace-scoped paginated snapshot read. The existing general metric/KPI load and provider collectors remain unchanged. Spotify retains its source-specific Audience CSV history read and provenance explanation.
+- Audience graph derivation reuses the existing calculation utility and retains the overlap-adjusted and maximum series. Chart baseline selection and tooltips never synthesize missing observations or coerce missing values to zero. Historical demo arrays are no longer chart inputs.
+- This release introduces no schema or environment changes. The approved Love Strings campaign repairs were completed separately and are not a release migration.
+
 ## Hosting Direction
 
 Use Vercel free tier for the first deployed prototype.

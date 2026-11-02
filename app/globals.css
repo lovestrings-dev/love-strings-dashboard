@@ -11030,3 +11030,38 @@ h2 {
   flex-direction: column;
   gap: 0;
 }
+
+/* Shared Platforms Evolution charts use the existing card palette. */
+.platform-evolution { min-width: 0; }
+.platform-evolution-controls { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin-top: 14px; }
+.platform-evolution-controls [role="group"] { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--border, #ebe8df); border-radius: 8px; background: #fbfaf7; }
+.platform-evolution-controls button { border: 0; border-radius: 5px; background: transparent; color: var(--muted); padding: 7px 10px; min-height: 36px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.platform-evolution-controls button[aria-pressed="true"] { background: var(--text); color: #fff; }
+.platform-evolution button:focus-visible, .platform-evolution svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.platform-evolution-caption { font-size: 11px; color: var(--muted); line-height: 1.6; margin: 10px 0; }
+.platform-evolution-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.platform-evolution-chart { min-width: 0; border: 1px solid #ebe8df; border-radius: 8px; padding: 14px 10px 8px; background: #fdfcf9; }
+.platform-evolution-chart header { display: flex; justify-content: space-between; flex-wrap: wrap; align-items: start; gap: 8px; padding: 0 4px; }
+.platform-evolution-chart h3 { font-size: 12px; font-weight: 700; display: flex; align-items: center; gap: 6px; margin: 3px 0 0; }
+.platform-evolution-chart h3 i { width: 7px; height: 7px; border-radius: 50%; background: var(--evolution-color); flex-shrink: 0; }
+.platform-evolution-chart header div { display: grid; gap: 3px; text-align: right; margin-left: auto; }
+.platform-evolution-chart header strong { font-size: 22px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.platform-evolution-chart header span { font-size: 11px; color: var(--muted); }
+.platform-evolution-observation { font-size: 10px; color: var(--muted); margin: 10px 4px 4px; min-height: 28px; line-height: 1.5; }
+.platform-evolution-plot { width: 100%; min-width: 0; }
+.platform-evolution-plot svg { width: 100%; height: auto; display: block; touch-action: pan-y; overflow: visible; }
+.platform-evolution-plot text { font-family: inherit; font-size: 10px; fill: var(--muted); pointer-events: none; }
+.platform-evolution-gridline { stroke: #e8e4da; stroke-width: 0.7; }
+.platform-evolution-tooltip { min-height: 64px; padding: 7px 4px 0; border-top: 1px solid #ebe8df; font-size: 11px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; }
+.platform-evolution-tooltip strong { display: block; color: var(--text); font-size: 11px; }
+.platform-evolution-empty { min-height: 180px; display: grid; align-content: center; text-align: center; color: var(--muted); font-size: 12px; padding: 16px; }
+@media (max-width: 700px) {
+  .platform-evolution-grid { grid-template-columns: minmax(0, 1fr); }
+  .platform-evolution-chart { padding: 12px 8px 8px; }
+}
+
+.platform-evolution-grid > :only-child { grid-column: 1 / -1; }
+
+.platform-evolution-comparison { font-size: 11px; margin: 8px 4px 0; display: flex; align-items: center; gap: 6px; }
+.platform-evolution-comparison i { width: 16px; border-top: 2px dashed currentColor; }
+.platform-evolution-comparison-detail { display: block; }

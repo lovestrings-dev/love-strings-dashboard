@@ -2,6 +2,21 @@
 
 This file tracks app versions that are useful to discuss, test, and deploy. It is for product-level changes, not every small database edit.
 
+## Beta 1.30 — Campaign reliability and Platforms Evolution
+
+Prepared 2 November 2026; pending deployment.
+
+- New song Marketing campaigns retain their linked Production release dates after the server responds, instead of rebuilding and saving day dates against the July 2026 prototype fallback.
+- Every newly created campaign task starts **Not started**, including standard, release-day, and extra tasks. Existing user task progress is not automatically reset.
+- Platforms now receives the canonical workspace Google connection state, fixing false **Not connected** labels on connected YouTube Channel and Website Analytics cards.
+- All existing Platforms Evolution graph groups share responsive SVG charts, clearer axes and latest values, **30D / 90D / 1Y / All**, **Absolute / Growth**, and exact observation inspection by pointer/touch or keyboard. Period/mode selection stays synchronized across cards and survives same-page navigation; defaults are 90D and Absolute.
+- Full workspace-scoped paginated chart-history reads avoid older observations disappearing behind the general metrics row cap. Missing values stay unavailable rather than becoming zero; hardcoded Instagram/YouTube demo points no longer appear in workspace charts.
+- Audience retains its distinct overlap-adjusted and maximum audience lines. KPI calculations, provider integrations, stored history, and collection behavior remain unchanged. Spotify explains why monthly history points can differ from newer Audience or Songs CSV KPI values.
+
+The separately authorized Love Strings data repairs are already saved in Supabase: Just The Two Of Us campaign dates are 25 October–7 November 2026, Pesenka Mamontenka dates are 17–30 November 2026, and all 47 Pesenka tasks were reset to Not started. Those one-time repairs are not deployment steps and must not be replayed.
+
+No new dependencies, migrations, or environment variables are required. See [Beta 1.30 release checkpoint](releases/beta-1.30.md).
+
 ## Beta 1.29 — Production organization and linked song sharing
 
 - Production song cards now expose equal-width **Song options** and **Production steps** controls. Both start collapsed; new songs open settings with steps collapsed and scroll beneath the mobile navigation.

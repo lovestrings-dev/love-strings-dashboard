@@ -35,6 +35,9 @@ import {
   Video
 } from "lucide-react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
+import { EvolutionContext, PlatformEvolutionPanel } from "./components/evolution-panel";
+import { SpotifyEvolution } from "./components/spotify-evolution";
+import type { EvolutionRange, EvolutionMode } from "@/lib/platform-evolution";
 import { AccountControl } from "./account-control";
 import { PlatformAdministrationView } from "./platform-administration-view";
 import { InitialWorkspaceSetup } from "./initial-workspace-setup";
@@ -68,7 +71,7 @@ import {
   type AudienceDashboardCalculations,
   type AudienceMetricRow
 } from "@/lib/audience-aggregation";
-import { getSpotifyAudienceHistoryStartDate } from "@/lib/spotify-audience-history";
+
 import { defaultWorkspaceId } from "@/lib/workspace";
 import {
   guidanceStatusAfterSkip,
@@ -752,7 +755,7 @@ const platformStats = [
   }
 ];
 
-const appVersionLabel = "Beta 1.29";
+const appVersionLabel = "Beta 1.30";
 const defaultAppLogoUrl = "/artistdeck-logo.png";
 
 const sections = [
@@ -4768,9 +4771,9 @@ function buildCampaignDay(
       facebookPost: releaseOffset === 0 ? "not-started" : "irrelevant",
       websiteUpdate: releaseOffset === 0 ? "not-started" : "irrelevant",
       youtubePost: releaseOffset === 0 ? "not-started" : "irrelevant",
-      production: getPlaceholderStatus(index, 0),
-      instagramUpload: getPlaceholderStatus(index, 1),
-      youtubeUpload: getPlaceholderStatus(index, 2)
+      production: "not-started",
+      instagramUpload: "not-started",
+      youtubeUpload: "not-started"
     }
   };
 }
@@ -5555,6 +5558,8 @@ export default function Home() {
   const [dashboardProductionWorkspaceId, setDashboardProductionWorkspaceId] = useState("");
   const [dashboardRoadmapWorkspaceId, setDashboardRoadmapWorkspaceId] = useState("");
   const [configuredPlatformUrls, setConfiguredPlatformUrls] = useState<Record<string, string>>({});
+  const [platformEvolutionRange, setPlatformEvolutionRange] = useState<EvolutionRange>("90D");
+  const [platformEvolutionMode, setPlatformEvolutionMode] = useState<EvolutionMode>("absolute");
   const [workspaceGoogleConnection, setWorkspaceGoogleConnection] =
     useState<GoogleConnectionStatus | null>(null);
   const [refreshStatus, setRefreshStatus] = useState<RefreshStatus>({
@@ -6438,7 +6443,13 @@ export default function Home() {
         dbId: result.campaign.id,
         releaseDate: result.campaign.releaseDate ? formatDateKeyForInput(result.campaign.releaseDate) : localCampaign.releaseDate,
         campaignDays: input.campaignKind === "song"
-          ? buildCampaignDays(result.campaign.releaseDate ?? releaseDate.toISOString().slice(0, 10), [], result.campaign.timing ?? marketingTimingDefaults)
+          ? buildCampaignDays(
+              result.campaign.releaseDate
+                ? formatDateKeyForInput(result.campaign.releaseDate)
+                : localCampaign.releaseDate,
+              [],
+              result.campaign.timing ?? marketingTimingDefaults
+            )
           : localCampaign.campaignDays
       };
 
@@ -9101,7 +9112,6 @@ export default function Home() {
             appleMusicImportStatus={appleMusicImportStatus}
             appleMusicLastUploadedAt={appleMusicLastUploadedAt}
             audienceDashboard={audienceDashboard}
-            audienceEvolutionHistory={audienceEvolutionHistory}
             onAddQrCode={addQrCodeLink}
             onAppleMusicCsvImport={importAppleMusicCsv}
             onSpotifyCsvImport={importSpotifyCsv}
@@ -9115,6 +9125,12 @@ export default function Home() {
             qrCodeLinks={qrCodeLinks}
             refreshStatus={refreshStatus}
             spotifyCsvImportStatus={spotifyCsvImportStatus}
+            platformEvolutionRange={platformEvolutionRange}
+            platformEvolutionMode={platformEvolutionMode}
+            onPlatformEvolutionRangeChange={setPlatformEvolutionRange}
+            onPlatformEvolutionModeChange={setPlatformEvolutionMode}
+            workspaceId={activeWorkspaceId}
+            googleConnection={workspaceGoogleConnection}
             workspaceTimeZone={workspaceTimeZone}
           />
         ) : null}
@@ -17007,87 +17023,15 @@ const emptyAudienceEvolutionHistory: AudienceEvolutionHistory = {
 };
 
 function AudienceEvolutionPanel({ history }: { history: AudienceEvolutionHistory }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const currentReleasePoints: MetricTrendPoint[] = history.currentRelease.map((point) => ({ ...point, source: "supabase" }));
-  const cataloguePoints: MetricTrendPoint[] = history.catalogue.map((point) => ({ ...point, source: "supabase" }));
-
-  return (
-    <div className="platform-trend-panel">
-      <button
-        aria-expanded={isOpen}
-        className="platform-trend-toggle"
-        onClick={() => setIsOpen((current) => !current)}
-        type="button"
-      >
-        <span>Evolution graphs</span>
-        <ChevronDown className={isOpen ? "platform-trend-toggle-icon-open" : undefined} size={16} aria-hidden />
-      </button>
-      {isOpen ? (
-        <div className="platform-trend-body audience-evolution-body">
-          <AudienceEstimatedTrendChart points={history.estimatedAudience} />
-          <PlatformTrendChartBlock
-            color="#7c54a8"
-            label={`Current Release Plays${history.currentReleaseTitle ? ` — ${history.currentReleaseTitle}` : ""}`}
-            points={currentReleasePoints}
-          />
-          <PlatformTrendChartBlock color="#2f75a8" label="Total Catalogue Plays" points={cataloguePoints} />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function AudienceEstimatedTrendChart({ points }: { points: AudienceEvolutionHistory["estimatedAudience"] }) {
-  const firstPoint = points[0];
-  const lastPoint = points.at(-1);
-  return (
-    <div className="platform-trend-chart-block audience-estimated-trend-chart-block">
-      <div className="platform-trend-summary audience-estimated-trend-summary">
-        <span className="platform-trend-title-with-legend"><i aria-hidden className="platform-trend-legend-square" style={{ backgroundColor: "#1f7a58" }} />Estimated / overlap-adjusted</span>
-        <strong>{firstPoint && lastPoint ? `${formatMetricValue(firstPoint.lower)} → ${formatMetricValue(lastPoint.lower)}` : "No data yet"}</strong>
-        <em>Lower</em>
-        <span className="platform-trend-title-with-legend"><i aria-hidden className="platform-trend-legend-square" style={{ backgroundColor: "#2f75a8" }} />Maximum connected audience</span>
-        <strong>{firstPoint && lastPoint ? `${formatMetricValue(firstPoint.maximum)} → ${formatMetricValue(lastPoint.maximum)}` : "No data yet"}</strong>
-        <em>Maximum</em>
-      </div>
-      <AudienceRangeLineChart points={points} />
-    </div>
-  );
-}
-
-function AudienceRangeLineChart({ points }: { points: AudienceEvolutionHistory["estimatedAudience"] }) {
-  if (points.length < 2) return <p className="platform-trend-empty">Not enough history yet.</p>;
-  const width = 320;
-  const height = 132;
-  const padding = 14;
-  const labelBandHeight = 20;
-  const gridBottom = height - padding - labelBandHeight;
-  const values = points.flatMap((point) => [point.lower, point.maximum]);
-  const minValue = Math.min(...values);
-  const maxValue = Math.max(...values);
-  const firstTime = Date.parse(points[0].date);
-  const lastTime = Date.parse(points.at(-1)?.date ?? points[0].date);
-  const valueRange = Math.max(maxValue - minValue, 1);
-  const timeRange = Math.max(lastTime - firstTime, 1);
-  const chartWidth = width - padding * 2;
-  const chartHeight = gridBottom - padding;
-  const coordinates = points.map((point) => ({
-    ...point,
-    x: padding + ((Date.parse(point.date) - firstTime) / timeRange) * chartWidth,
-    lowerY: padding + chartHeight - ((point.lower - minValue) / valueRange) * chartHeight + 8,
-    maximumY: padding + chartHeight - ((point.maximum - minValue) / valueRange) * chartHeight + 8
-  }));
-  const path = (field: "lowerY" | "maximumY") => coordinates.map((point) => `${point.x.toFixed(1)},${point[field].toFixed(1)}`).join(" ");
-  const middleIndex = Math.floor((coordinates.length - 1) / 2);
-  const labels = new Set([0, middleIndex, coordinates.length - 1]);
-  return <div className="platform-line-chart audience-range-line-chart"><svg aria-label="Estimated and maximum audience over time" role="img" viewBox={`0 0 ${width} ${height}`}>
-    <title>Estimated / overlap-adjusted and maximum connected audience</title>
-    <rect className="platform-line-chart-grid-frame" height={chartHeight} width={chartWidth} x={padding} y={padding} />
-    {Array.from({ length: 4 }, (_, index) => <line className="platform-line-chart-grid-line" key={index} x1={padding} x2={width - padding} y1={padding + (index / 3) * chartHeight} y2={padding + (index / 3) * chartHeight} />)}
-    <polyline className="audience-range-line audience-range-line-lower" points={path("lowerY")} />
-    <polyline className="audience-range-line audience-range-line-maximum" points={path("maximumY")} />
-    {coordinates.map((point, index) => labels.has(index) ? <text className="platform-line-chart-month" key={point.date} textAnchor={index === 0 ? "start" : index === coordinates.length - 1 ? "end" : "middle"} x={point.x} y={height - 2}>{formatTrendDate(point.date)}</text> : null)}
-  </svg></div>;
+  return <PlatformEvolutionPanel label="Audience Evolution graphs"
+    description="Derived audience history from recorded provider observations."
+    footer="Estimated audience is overlap-adjusted; maximum audience is the unadjusted sum of connected sources."
+    charts={[
+      { label: "Estimated / overlap-adjusted audience", color: "#1f7a58", points: history.estimatedAudience.map((point) => ({ date: point.date, value: point.lower })),
+        comparison: { label: "Maximum connected audience", color: "#2f75a8", points: history.estimatedAudience.map((point) => ({ date: point.date, value: point.maximum })) } },
+      { label: `Current Release Plays${history.currentReleaseTitle ? ` — ${history.currentReleaseTitle}` : ""}`, color: "#7c54a8", points: history.currentRelease },
+      { label: "Total Catalogue Plays", color: "#2f75a8", points: history.catalogue }
+    ]} />;
 }
 
 function AudienceCardEmptyState({ label }: { label: string }) {
@@ -18364,8 +18308,13 @@ function PlatformsView({
   appleMusicImportStatus,
   appleMusicLastUploadedAt,
   highlightedPlatformSlug,
+  googleConnection,
+  workspaceId,
+  platformEvolutionRange,
+  platformEvolutionMode,
+  onPlatformEvolutionRangeChange,
+  onPlatformEvolutionModeChange,
   audienceDashboard,
-  audienceEvolutionHistory,
   onAddQrCode,
   onAppleMusicCsvImport,
   onSpotifyCsvImport,
@@ -18383,8 +18332,13 @@ function PlatformsView({
   appleMusicImportStatus: AppleMusicImportStatus;
   appleMusicLastUploadedAt: string;
   highlightedPlatformSlug?: string;
+  googleConnection: GoogleConnectionStatus | null;
+  workspaceId: string;
+  platformEvolutionRange: EvolutionRange;
+  platformEvolutionMode: EvolutionMode;
+  onPlatformEvolutionRangeChange: (range: EvolutionRange) => void;
+  onPlatformEvolutionModeChange: (mode: EvolutionMode) => void;
   audienceDashboard: AudienceDashboardCalculations;
-  audienceEvolutionHistory: AudienceEvolutionHistory;
   onAddQrCode: () => void;
   onAppleMusicCsvImport: (file: File) => void;
   onSpotifyCsvImport: (file: File) => void;
@@ -18399,22 +18353,55 @@ function PlatformsView({
   spotifyCsvImportStatus: SpotifyCsvImportStatus;
   workspaceTimeZone: string;
 }) {
+  const [chartHistory, setChartHistory] = useState<{ workspaceId: string; rows: MetricRow[]; state: "ready" | "loading" | "error" }>({ workspaceId, rows: [], state: "loading" });
+  useEffect(() => {
+    let cancelled = false;
+    async function loadHistory() {
+      try {
+        const client = createBrowserSupabaseClient();
+        const rows: MetricRow[] = [];
+        const pageSize = 500;
+        for (let offset = 0; ; offset += pageSize) {
+          const { data, error } = await client.from("platform_metric_snapshots")
+            .select("id, metric_name, metric_value, notes, source, snapshot_date, imported_at, platforms!inner(slug), content_posts(title), releases(title)")
+            .eq("workspace_id", workspaceId)
+            .order("snapshot_date", { ascending: true }).order("imported_at", { ascending: true }).order("id", { ascending: true })
+            .range(offset, offset + pageSize - 1);
+          if (error) throw error;
+          if (cancelled) return;
+          rows.push(...(data ?? []) as MetricRow[]);
+          if (!data || data.length < pageSize) break;
+        }
+        if (!cancelled) setChartHistory({ workspaceId, rows, state: "ready" });
+      } catch {
+        if (!cancelled) setChartHistory({ workspaceId, rows: [], state: "error" });
+      }
+    }
+    void loadHistory();
+    return () => { cancelled = true; };
+  }, [workspaceId, platformMetricRows]);
+  const currentChartHistory = chartHistory.workspaceId === workspaceId ? chartHistory : { rows: [], state: "loading" as const };
+  const chartMetricRows = currentChartHistory.rows;
+  const fullAudienceHistory = useMemo(() => calculateAudienceEvolutionHistory(chartMetricRows.map((row): AudienceMetricRow => ({
+    importedAt: row.imported_at, metricName: row.metric_name, metricValue: row.metric_value,
+    notes: row.notes, platformSlug: getSingle(row.platforms)?.slug ?? "", snapshotDate: row.snapshot_date, source: row.source
+  }))), [chartMetricRows]);
   const instagramFollowerTrend = getPlatformMetricTrend(
-    platformMetricRows,
+    chartMetricRows,
     "instagram",
     "followers",
-    instagramFollowerHistory,
+    [],
     "instagram-api"
   );
   const instagramReachTrend = getPlatformMetricTrend(
-    platformMetricRows,
+    chartMetricRows,
     "instagram",
     "accounts_reached_30d",
     [],
     "instagram-api"
   );
   const instagramViewsTrend = getPlatformMetricTrend(
-    platformMetricRows,
+    chartMetricRows,
     "instagram",
     "views_30d",
     [],
@@ -18424,32 +18411,32 @@ function PlatformsView({
     platformMetricRows,
     "instagram"
   );
-  const facebookFollowerTrend = getPlatformMetricTrend(platformMetricRows, "facebook", "followers", []);
-  const facebookEngagementTrend = getPlatformMetricTrend(platformMetricRows, "facebook", "post_engagements_daily", []);
-  const facebookReactionTrend = getPlatformMetricTrend(platformMetricRows, "facebook", "post_reactions_daily", []);
+  const facebookFollowerTrend = getPlatformMetricTrend(chartMetricRows, "facebook", "followers", []);
+  const facebookEngagementTrend = getPlatformMetricTrend(chartMetricRows, "facebook", "post_engagements_daily", []);
+  const facebookReactionTrend = getPlatformMetricTrend(chartMetricRows, "facebook", "post_reactions_daily", []);
   const facebookLastUpdate = getPlatformLastSnapshotDate(platformMetricRows, "facebook");
-  const youtubeSubscriberTrend = getYouTubeSubscriberTrend(platformMetricRows);
+  const youtubeSubscriberTrend = getPlatformMetricTrend(chartMetricRows, "youtube", "subscribers", []);
   const youtubeTotalViewsTrend = getPlatformMetricTrend(
-    platformMetricRows,
+    chartMetricRows,
     "youtube",
     "total_channel_views",
     []
   );
   const youtubeLastUpdate = getPlatformLastSnapshotDate(platformMetricRows, "youtube");
   const analyticsActiveUsersTrend = getPlatformMetricTrend(
-    platformMetricRows,
+    chartMetricRows,
     "google-analytics",
     "active_users_30d",
     []
   );
   const analyticsSessionsTrend = getPlatformMetricTrend(
-    platformMetricRows,
+    chartMetricRows,
     "google-analytics",
     "sessions_30d",
     []
   );
   const analyticsPageViewsTrend = getPlatformMetricTrend(
-    platformMetricRows,
+    chartMetricRows,
     "google-analytics",
     "page_views_30d",
     []
@@ -18459,13 +18446,13 @@ function PlatformsView({
     "google-analytics"
   );
   const youtubeMusicSubscriberTrend = getPlatformMetricTrend(
-    platformMetricRows,
+    chartMetricRows,
     "youtube-music",
     "subscribers",
     []
   );
   const youtubeMusicTotalPlaysTrend = getPlatformMetricTrend(
-    platformMetricRows,
+    chartMetricRows,
     "youtube-music",
     "total_plays",
     []
@@ -18475,24 +18462,11 @@ function PlatformsView({
     "youtube-music"
   );
   const appleMusicTotalPlaysTrend = getPlatformMetricTrend(
-    platformMetricRows,
+    chartMetricRows,
     "apple-music",
     "total_plays",
     []
   );
-  const spotifyAudienceHistoryStartDate = getSpotifyAudienceHistoryStartDate(
-    platformMetricRows
-      .filter(
-        (row) =>
-          getSingle(row.platforms)?.slug === "spotify" &&
-          row.source === "spotify-audience-csv"
-      )
-      .map((row) => ({ date: row.snapshot_date, [row.metric_name]: row.metric_value }))
-  );
-  const spotifyFollowersTrend = getPlatformMetricTrend(platformMetricRows, "spotify", "followers", [], "spotify-audience-csv", spotifyAudienceHistoryStartDate);
-  const spotifyMonthlyActiveTrend = getPlatformMetricTrend(platformMetricRows, "spotify", "monthly_active_listeners", [], "spotify-audience-csv", spotifyAudienceHistoryStartDate);
-  const spotifyListenersTrend = getPlatformMetricTrend(platformMetricRows, "spotify", "listeners", [], "spotify-audience-csv", spotifyAudienceHistoryStartDate);
-  const spotifyStreamsTrend = getPlatformMetricTrend(platformMetricRows, "spotify", "streams", [], "spotify-audience-csv", spotifyAudienceHistoryStartDate);
   const spotifyLastUpdate = getSpotifyLastUpdateDate(platformMetricRows);
   const appleMusicLastUpdate = getAppleMusicLastUpdateDate(
     platformStatsData,
@@ -18500,7 +18474,11 @@ function PlatformsView({
   );
 
   return (
-    <>
+    <EvolutionContext.Provider value={{
+      today: getWorkspaceDateKey(workspaceTimeZone), range: platformEvolutionRange, mode: platformEvolutionMode,
+      onRangeChange: onPlatformEvolutionRangeChange, onModeChange: onPlatformEvolutionModeChange,
+      state: currentChartHistory.state
+    }}>
       <header className="topbar">
         <div className="topbar-title-block">
           <p className="eyebrow">Detailed platform statistics</p>
@@ -18529,7 +18507,7 @@ function PlatformsView({
 
       <PlatformStatsSection
         audienceDashboard={audienceDashboard}
-        audienceEvolutionHistory={audienceEvolutionHistory}
+        audienceEvolutionHistory={fullAudienceHistory}
         hideHeading
         highlightedPlatformSlug={highlightedPlatformSlug}
         platforms={getPlatformCardsForPreferences(
@@ -18542,7 +18520,8 @@ function PlatformsView({
             isPersonalized: true,
             topLevelOrder: []
           },
-          false
+          false,
+          googleConnection
         )}
         title="All Platform Metrics"
         description="Daily platform snapshots collected into the shared Supabase history."
@@ -18574,9 +18553,9 @@ function PlatformsView({
             {platform.slug === "instagram-standalone" ? (
               <PlatformTrendPanelGroup
                 charts={[
-                  { color: "#1f7a58", label: "Followers", points: getPlatformMetricTrend(platformMetricRows, "instagram", "followers", [], "instagram-login-api") },
-                  { color: "#c79522", label: "Accounts reached, last 30 days", points: getPlatformMetricTrend(platformMetricRows, "instagram", "accounts_reached_30d", [], "instagram-login-api") },
-                  { color: "#2f75a8", label: "Views, last 30 days", points: getPlatformMetricTrend(platformMetricRows, "instagram", "views_30d", [], "instagram-login-api") }
+                  { color: "#1f7a58", label: "Followers", points: getPlatformMetricTrend(chartMetricRows, "instagram", "followers", [], "instagram-login-api") },
+                  { color: "#c79522", label: "Accounts reached, last 30 days", points: getPlatformMetricTrend(chartMetricRows, "instagram", "accounts_reached_30d", [], "instagram-login-api") },
+                  { color: "#2f75a8", label: "Views, last 30 days", points: getPlatformMetricTrend(chartMetricRows, "instagram", "views_30d", [], "instagram-login-api") }
                 ]}
                 title="Evolution graphs"
               />
@@ -18584,8 +18563,8 @@ function PlatformsView({
             {platform.slug === "threads" ? (
               <PlatformTrendPanelGroup
                 charts={[
-                  { color: "#2f75a8", label: "Profile views", points: getPlatformMetricTrend(platformMetricRows, "threads", "views_daily", [], "threads-api") },
-                  { color: "#1f7a58", label: "Followers", points: getPlatformMetricTrend(platformMetricRows, "threads", "followers", [], "threads-api") }
+                  { color: "#2f75a8", label: "Profile views", points: getPlatformMetricTrend(chartMetricRows, "threads", "views_daily", [], "threads-api") },
+                  { color: "#1f7a58", label: "Followers", points: getPlatformMetricTrend(chartMetricRows, "threads", "followers", [], "threads-api") }
                 ]}
                 title="Evolution graphs"
               />
@@ -18665,14 +18644,14 @@ function PlatformsView({
               />
             ) : null}
             {platform.slug === "spotify" ? (
-              <PlatformTrendPanelGroup
-                charts={[
-                  { color: "#1f7a58", label: "Followers", points: spotifyFollowersTrend },
-                  { color: "#c79522", label: "Monthly active listeners", points: spotifyMonthlyActiveTrend },
-                  { color: "#7c54a8", label: "Listeners", points: spotifyListenersTrend },
-                  { color: "#2f75a8", label: "Streams", points: spotifyStreamsTrend }
-                ]}
-                title="Evolution graphs"
+              <SpotifyEvolution
+                workspaceId={workspaceId}
+                refreshKey={platformMetricRows}
+                range={platformEvolutionRange}
+                mode={platformEvolutionMode}
+                onRangeChange={onPlatformEvolutionRangeChange}
+                onModeChange={onPlatformEvolutionModeChange}
+                today={new Intl.DateTimeFormat("en-CA", { timeZone: workspaceTimeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())}
               />
             ) : null}
           </>
@@ -18764,7 +18743,7 @@ function PlatformsView({
         onDeleteLink={onDeleteQrCode}
         onLinkChange={onQrCodeChange}
       />
-    </>
+    </EvolutionContext.Provider>
   );
 }
 
@@ -18989,29 +18968,6 @@ function getQrLinkIcon(name: string) {
   return LinkIcon;
 }
 
-const instagramFollowerHistory: MetricTrendPoint[] = [
-  { date: "2026-05-22", source: "manual", value: 148 },
-  { date: "2026-06-04", source: "manual", value: 158 },
-  { date: "2026-06-11", source: "manual", value: 174 },
-  { date: "2026-06-14", source: "manual", value: 177 }
-];
-
-const youtubeSubscriberHistory: MetricTrendPoint[] = [
-  { date: "2026-05-22", source: "manual", value: 18 },
-  { date: "2026-06-04", source: "manual", value: 22 },
-  { date: "2026-06-11", source: "manual", value: 28 },
-  { date: "2026-06-14", source: "manual", value: 38 }
-];
-
-function getYouTubeSubscriberTrend(rows: MetricRow[]) {
-  return getPlatformMetricTrend(
-    rows,
-    "youtube",
-    "subscribers",
-    youtubeSubscriberHistory
-  );
-}
-
 function getPlatformMetricTrend(
   rows: MetricRow[],
   platformSlug: string,
@@ -19035,7 +18991,9 @@ function getPlatformMetricTrend(
         (!startDate || row.snapshot_date >= startDate) &&
         (manualHistory.length === 0 || row.snapshot_date > "2026-06-14")
     )
+    .sort((a, b) => a.imported_at.localeCompare(b.imported_at))
     .forEach((row) => {
+      if (row.metric_value === null || String(row.metric_value).trim() === "") return;
       const value = Number(row.metric_value);
 
       if (!Number.isFinite(value)) {
@@ -19215,223 +19173,11 @@ function PlatformTrendPanel({
   );
 }
 
-function PlatformTrendPanelGroup({
-  charts,
-  title
-}: {
-  charts: Array<{
-    color?: string;
-    label: string;
-    points: MetricTrendPoint[];
-  }>;
+function PlatformTrendPanelGroup({ charts }: {
+  charts: Array<{ color?: string; label: string; points: MetricTrendPoint[] }>;
   title: string;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
-
-  return (
-    <div
-      className="platform-trend-panel"
-    >
-      <button
-        aria-expanded={isOpen}
-        className="platform-trend-toggle"
-        onClick={() => setIsOpen((current) => !current)}
-        type="button"
-      >
-        <span>{title}</span>
-        <ChevronDown
-          className={isOpen ? "platform-trend-toggle-icon-open" : undefined}
-          size={16}
-          aria-hidden
-        />
-      </button>
-
-      {isOpen ? (
-        <div className="platform-trend-body">
-          {charts.map((chart) => (
-            <PlatformTrendChartBlock
-              color={chart.color}
-              key={chart.label}
-              label={chart.label}
-              points={chart.points}
-            />
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function PlatformTrendChartBlock({
-  color = "#1f7a58",
-  label,
-  points
-}: {
-  color?: string;
-  label: string;
-  points: MetricTrendPoint[];
-}) {
-  const firstPoint = points[0];
-  const lastPoint = points.at(-1);
-  const change =
-    firstPoint && lastPoint ? lastPoint.value - firstPoint.value : 0;
-
-  return (
-    <div className="platform-trend-chart-block">
-      <div className="platform-trend-summary">
-        <span className="platform-trend-title-with-legend">
-          <i
-            aria-hidden
-            className="platform-trend-legend-square"
-            style={{ backgroundColor: color }}
-          />
-          {label}
-        </span>
-        <strong>
-          {firstPoint && lastPoint
-            ? `${formatMetricValue(firstPoint.value)} -> ${formatMetricValue(lastPoint.value)}`
-            : "No data yet"}
-        </strong>
-        <em>{change >= 0 ? `+${formatMetricValue(change)}` : formatMetricValue(change)}</em>
-      </div>
-      <PlatformLineChart color={color} label={label} points={points} />
-    </div>
-  );
-}
-
-function PlatformLineChart({
-  color = "#1f7a58",
-  label,
-  points
-}: {
-  color?: string;
-  label: string;
-  points: MetricTrendPoint[];
-}) {
-  if (points.length < 2) {
-    return <p className="platform-trend-empty">Not enough history yet.</p>;
-  }
-
-  const width = 320;
-  const height = 132;
-  const padding = 14;
-  const labelBandHeight = 20;
-  const gridBottom = height - padding - labelBandHeight;
-  const minValue = Math.min(...points.map((point) => point.value));
-  const maxValue = Math.max(...points.map((point) => point.value));
-  const firstTime = Date.parse(points[0].date);
-  const lastTime = Date.parse(points.at(-1)?.date ?? points[0].date);
-  const valueRange = Math.max(maxValue - minValue, 1);
-  const timeRange = Math.max(lastTime - firstTime, 1);
-  const chartWidth = width - padding * 2;
-  const chartHeight = gridBottom - padding;
-
-  const coordinates = points.map((point) => {
-    const time = Date.parse(point.date);
-    const x = padding + ((time - firstTime) / timeRange) * chartWidth;
-    const labelY =
-      padding +
-      chartHeight -
-      ((point.value - minValue) / valueRange) * chartHeight;
-
-    return {
-      ...point,
-      x,
-      labelY,
-      y: labelY + 8
-    };
-  });
-  const linePoints = coordinates
-    .map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`)
-    .join(" ");
-  const middleIndex = Math.floor((coordinates.length - 1) / 2);
-  const labeledPointIndexes = new Set([0, middleIndex, coordinates.length - 1]);
-  const verticalGridLines = Array.from({ length: 6 }, (_, index) => {
-    return padding + (index / 5) * chartWidth;
-  });
-  const horizontalGridLines = Array.from({ length: 4 }, (_, index) => {
-    return padding + (index / 3) * chartHeight;
-  });
-
-  return (
-    <div
-      className="platform-line-chart"
-      style={{ "--platform-chart-color": color } as React.CSSProperties}
-    >
-      <svg
-        aria-label={`${label} over time`}
-        role="img"
-        viewBox={`0 0 ${width} ${height}`}
-      >
-        <rect
-          className="platform-line-chart-grid-frame"
-          height={chartHeight}
-          width={chartWidth}
-          x={padding}
-          y={padding}
-        />
-        {verticalGridLines.map((x) => (
-          <line
-            className="platform-line-chart-grid-line"
-            key={`vertical-${x.toFixed(1)}`}
-            x1={x}
-            x2={x}
-            y1={padding}
-            y2={gridBottom}
-          />
-        ))}
-        {horizontalGridLines.map((y) => (
-          <line
-            className="platform-line-chart-grid-line"
-            key={`horizontal-${y.toFixed(1)}`}
-            x1={padding}
-            x2={width - padding}
-            y1={y}
-            y2={y}
-          />
-        ))}
-        <polyline className="platform-line-chart-line" points={linePoints} />
-        {coordinates.map((point, index) => (
-          <g key={`${point.date}-${point.value}`}>
-            <circle className="platform-line-chart-dot" cx={point.x} cy={point.y} r="4" />
-            {labeledPointIndexes.has(index) ? (
-              <text
-                className="platform-line-chart-value"
-                textAnchor={
-                  index === 0 ? "start" : index === coordinates.length - 1 ? "end" : "middle"
-                }
-                x={point.x}
-                y={Math.max(12, point.labelY - 8)}
-              >
-                {formatMetricValue(point.value)}
-              </text>
-            ) : null}
-            {labeledPointIndexes.has(index) ? (
-              <text
-                className="platform-line-chart-month"
-                textAnchor={
-                  index === 0 ? "start" : index === coordinates.length - 1 ? "end" : "middle"
-                }
-                x={point.x}
-                y={height - 2}
-              >
-                {formatTrendDate(points[index].date)}
-              </text>
-            ) : null}
-          </g>
-        ))}
-      </svg>
-    </div>
-  );
-}
-
-function formatTrendDate(date: string) {
-  const parsedDate = new Date(`${date}T00:00:00Z`);
-
-  return parsedDate.toLocaleDateString("en-US", {
-    month: "short",
-    year: "numeric"
-  });
+  return <PlatformEvolutionPanel charts={charts.map((chart) => ({ ...chart, color: chart.color ?? "#1f7a58" }))} />;
 }
 
 function mergePlatformMetricRows(
@@ -20071,18 +19817,13 @@ function trimMetricDecimal(value: number) {
   return value.toFixed(1).replace(/\.0$/, "");
 }
 
-function getPlaceholderStatus(index: number, offset: number): MarketingStatus {
-  const statusCycle: MarketingStatus[] = ["done", "in-progress", "not-started"];
-  return statusCycle[Math.min(Math.floor((index + offset) / 3), 2)];
-}
-
 function getPlaceholderExtraTasks(dayNumber: number): ExtraCampaignTask[] {
   if (dayNumber === 3) {
     return [
       {
         id: "day-3-extra-1",
         title: "Prepare alternate hook",
-        status: "in-progress"
+        status: "not-started"
       }
     ];
   }
