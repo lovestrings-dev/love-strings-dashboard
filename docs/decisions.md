@@ -1078,3 +1078,19 @@ Reason:
   deterministic V1. They preserve the distinction between authoritative
   provider data and a transparent product estimate while leaving room for a
   detailed Audience view and graphs later.
+
+
+## 2026-11-04 - ArtistDeck custom domain with fixed provider callbacks
+
+Use `https://www.artistdeck.app` as the primary app, with the apex redirected to
+www. Keep all provider callback URLs on `love-strings-dashboard.vercel.app` to
+avoid provider-console callback changes. Separate the fixed callback host from
+`APP_CANONICAL_ORIGIN` (primary app/return origin). Google/Facebook now use the
+existing server-bound single-use callback mechanism; the proxy allows only
+exact callback paths to reach their state-validation handlers without login.
+A forward migration adds the www return origin and server-owned Google context
+to the fixed-callback RPC. Applied and verified on 2026-11-04 with explicit user
+authorization; Auth/environment/deployment remain pending. Invitation defaults and
+the manual refresh workflow use www. See [cutover steps](custom-domain-setup.md)
+for pending database/Auth/environment/deployment work. Historical scheduler URL
+entries above do not verify current external scheduler configuration.

@@ -1,7 +1,5 @@
 export const fstatsLoginConnectionKind = "fstats_login_facebook_page";
 export const fstatsLoginIntegrationKind = "meta:fstats-login-facebook-page";
-const productionOrigin = "https://love-strings-dashboard.vercel.app";
-const localhostOrigin = "http://localhost:3000";
 const fstatsLoginCallbackPath = "/api/integrations/meta/fstats-login/callback";
 const graphApiVersion = "v23.0";
 
@@ -30,10 +28,10 @@ export type DiscoveredFacebookPage = { externalId: string; displayName: string }
 export type DiscoveredLinkedInstagram = { externalId: string; displayName: string };
 
 export function getFstatsLoginRedirectUri(origin: string) {
-  if (origin === productionOrigin || origin === localhostOrigin) {
-    return `${origin}${fstatsLoginCallbackPath}`;
+  if (!["https://www.artistdeck.app", "https://love-strings-dashboard.vercel.app", "http://localhost:3000"].includes(origin)) {
+    throw new Error("Meta Facebook Login is not configured for this app origin.");
   }
-  throw new Error("Meta Facebook Login is not configured for this app origin.");
+  return `https://love-strings-dashboard.vercel.app${fstatsLoginCallbackPath}`;
 }
 
 export function createFstatsLoginAuthorizationUrl({ redirectUri, state }: { redirectUri: string; state: string }) {

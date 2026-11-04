@@ -1,4 +1,4 @@
-import { getCanonicalOAuthOrigin } from "@/lib/oauth-attempt";
+import { getProviderOAuthCallbackUri } from "@/lib/oauth-attempt";
 
 export const creatorSocialInstagramConnectionKind = "creator_social_instagram";
 export const creatorSocialInstagramIntegrationKind = "meta:creator-social-instagram";
@@ -13,7 +13,7 @@ export type CreatorSocialInstagramOAuthStage =
 type StageReporter = (stage: CreatorSocialInstagramOAuthStage, details?: { status?: number }) => void;
 
 export function getCreatorSocialInstagramRedirectUri() {
-  return new URL(callbackPath, getCanonicalOAuthOrigin()).toString();
+  return getProviderOAuthCallbackUri(callbackPath);
 }
 
 export function createCreatorSocialInstagramAuthorizationUrl(state: string) {

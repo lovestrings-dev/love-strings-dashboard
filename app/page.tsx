@@ -755,7 +755,7 @@ const platformStats = [
   }
 ];
 
-const appVersionLabel = "Beta 1.30";
+const appVersionLabel = "Beta 1.31";
 const defaultAppLogoUrl = "/artistdeck-logo.png";
 
 const sections = [

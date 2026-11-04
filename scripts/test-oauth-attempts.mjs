@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-process.env.APP_CANONICAL_ORIGIN = "https://love-strings-dashboard.vercel.app";
+process.env.APP_CANONICAL_ORIGIN = "https://www.artistdeck.app";
 import {
   createOAuthResultReturnUrl,
   defaultOAuthReturnPath,
@@ -62,6 +62,16 @@ assert.throws(() => getAllowedOAuthReturnOrigin("not a url"));
 assert.throws(() => getAllowedOAuthReturnOrigin("https://user:pass@love-strings-dashboard.vercel.app"));
 assert.throws(() => getAllowedOAuthReturnOrigin("https://love-strings-dashboard.vercel.app/callback"));
 assert.throws(() => getAllowedOAuthReturnOrigin("https://love-strings-dashboard.vercel.app/?next=x"));
+
+assert.equal(getAllowedOAuthReturnOrigin("https://www.artistdeck.app"), "https://www.artistdeck.app");
+for (const value of ["https://artistdeck.app", "https://evil.www.artistdeck.app", "https://www.artistdeck.app.evil.example", "http://www.artistdeck.app", "https://user:pass@www.artistdeck.app", "https://www.artistdeck.app/callback"]) {
+  assert.throws(() => getAllowedOAuthReturnOrigin(value));
+}
+assert.equal(createOAuthResultReturnUrl({ origin: "https://www.artistdeck.app", returnPath: "/?settings=general", result: "connected" }).origin, "https://www.artistdeck.app");
+const domainMigration = await readFile(new URL("../supabase/migrations/202611040001_allow_artistdeck_oauth_return_origin.sql", import.meta.url), "utf8");
+assert.ok(domainMigration.includes("'https://www.artistdeck.app'"));
+assert.ok(domainMigration.includes("'https://love-strings-dashboard.vercel.app'"));
+assert.ok(domainMigration.includes("'http://localhost:3000'"));
 
 const resultUrl = createOAuthResultReturnUrl({
   origin: "http://localhost:3000",

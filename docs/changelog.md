@@ -2,6 +2,17 @@
 
 This file tracks app versions that are useful to discuss, test, and deploy. It is for product-level changes, not every small database edit.
 
+## Beta 1.31 — ArtistDeck domain and cross-domain connections
+
+Prepared 4 November 2026; awaiting push and deployment of this code.
+
+- ArtistDeck uses `https://www.artistdeck.app` while all existing Google and Meta provider callback URLs stay on the former Vercel host.
+- Google/Facebook connection attempts carry their initiating user, workspace and return destination in expiring, single-use server records. Google service and Guidance context survive cross-domain returns without relying on old-domain login cookies.
+- Only the four exact provider callback paths bypass the proxy login check; each handler validates its server-bound state. Existing workspace role, expiry and replay protections remain.
+- Invitation/operator link defaults and the manual metrics refresh workflow target ArtistDeck. The old Vercel host remains available for callbacks and transition returns.
+- Migration `202611040001` is already applied and verified. It allows the www return origin and adds callback context to the service-only consume RPC. No campaign, metric or provider-token data repair is part of deployment.
+- Production environment values and Supabase Auth URL settings must match the [domain checklist](custom-domain-setup.md). Live provider reconnection remains a post-deployment acceptance step.
+
 ## Beta 1.30 — Campaign reliability and Platforms Evolution
 
 Prepared 2 November 2026; pending deployment.

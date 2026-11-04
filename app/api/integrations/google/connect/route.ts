@@ -1,4 +1,5 @@
-import { randomBytes } from "node:crypto";
+import { getProviderOAuthCallbackUri } from "@/lib/oauth-attempt";
+import { createFixedCallbackOAuthAttempt } from "@/lib/server/oauth-attempts";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { createGoogleAuthorizationUrl, isGoogleService } from "@/lib/google/oauth";
@@ -14,7 +15,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unknown Google service." }, { status: 400 });
     }
 
-    const { serviceClient, workspaceId } = await requireWorkspaceAdministrator(request);
+    const { serviceClient, user, workspaceId } = await requireWorkspaceAdministrator(request);
     const { data: connection, error } = await serviceClient
       .from("app_google_connections")
       .select("google_account_email")
@@ -22,38 +23,27 @@ export async function GET(request: NextRequest) {
       .maybeSingle();
     if (error) throw error;
 
-    const state = randomBytes(32).toString("base64url");
-    const redirectUri = `${request.nextUrl.origin}/api/integrations/google/callback`;
+    const guidance = request.nextUrl.searchParams.get("guidance") === "1";
+    const guidancePreview = process.env.NODE_ENV === "development"
+      && request.nextUrl.hostname === "localhost"
+      && request.nextUrl.searchParams.get("guidancePreview") === "google";
+    const attempt = await createFixedCallbackOAuthAttempt({
+      client: serviceClient,
+      integrationKind: "google:services",
+      origin: request.nextUrl.origin,
+      returnTarget: "/?settings=general",
+      userId: user.id,
+      workspaceId,
+      context: { service, guidance, guidancePreview }
+    });
+    const redirectUri = getProviderOAuthCallbackUri("/api/integrations/google/callback");
     const authorizationUrl = createGoogleAuthorizationUrl({
       loginHint: connection?.google_account_email,
       redirectUri,
       service,
-      state
+      state: attempt.state
     });
-    const response = NextResponse.redirect(authorizationUrl);
-    const secure = request.nextUrl.protocol === "https:";
-    const cookieOptions = {
-      httpOnly: true,
-      maxAge: 10 * 60,
-      path: "/api/integrations/google",
-      sameSite: "lax" as const,
-      secure
-    };
-    response.cookies.set("ls_google_oauth_state", state, cookieOptions);
-    response.cookies.set("ls_google_oauth_service", service, cookieOptions);
-    response.cookies.set("ls_google_oauth_origin", request.nextUrl.origin, cookieOptions);
-    response.cookies.set("ls_google_oauth_workspace", workspaceId, cookieOptions);
-    if (request.nextUrl.searchParams.get("guidance") === "1") {
-      response.cookies.set("ls_google_oauth_guidance", "1", cookieOptions);
-    }
-    if (
-      process.env.NODE_ENV === "development" &&
-      (request.nextUrl.hostname === "localhost" || request.nextUrl.hostname === "127.0.0.1") &&
-      request.nextUrl.searchParams.get("guidancePreview") === "google"
-    ) {
-      response.cookies.set("ls_google_oauth_guidance_preview", "google", cookieOptions);
-    }
-    return response;
+    return NextResponse.redirect(authorizationUrl);
   } catch (error) {
     if (error instanceof WorkspaceAccessError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

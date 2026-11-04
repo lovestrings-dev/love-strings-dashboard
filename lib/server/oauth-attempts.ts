@@ -80,7 +80,8 @@ export async function createFixedCallbackOAuthAttempt({
   returnTarget,
   userId,
   workspaceId,
-  requiredWorkspaceRole = "admin"
+  requiredWorkspaceRole = "admin",
+  context = {}
 }: {
   client?: SupabaseClient;
   integrationKind: string;
@@ -89,6 +90,7 @@ export async function createFixedCallbackOAuthAttempt({
   userId: string;
   workspaceId: string;
   requiredWorkspaceRole?: Extract<WorkspaceRole, "admin" | "member">;
+  context?: Record<string, unknown>;
 }) {
   if (!integrationKindPattern.test(integrationKind)) {
     throw new OAuthAttemptError("OAuth integration kind is invalid.");
@@ -104,6 +106,7 @@ export async function createFixedCallbackOAuthAttempt({
       expires_at: expiresAt,
       integration_kind: integrationKind,
       required_workspace_role: requiredWorkspaceRole,
+      context,
       return_origin: returnOrigin,
       return_path: returnPath,
       state_hash: hashOAuthState(state),
@@ -187,6 +190,7 @@ export async function consumeFixedCallbackOAuthAttempt({
     returnOrigin: data.return_origin as string,
     returnPath: data.return_path as string,
     userId: data.user_id as string,
+    context: (data.context ?? {}) as Record<string, unknown>,
     workspaceId: data.workspace_id as string
   };
 }

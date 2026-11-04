@@ -3,6 +3,12 @@ import { createHash } from "node:crypto";
 export const oauthAttemptLifetimeMs = 10 * 60 * 1000;
 export const defaultOAuthReturnPath = "/?settings=general";
 export const integrationKindPattern = /^[a-z0-9][a-z0-9:_-]{0,99}$/;
+// Provider consoles retain their already registered Vercel callback URLs.
+export const providerOAuthCallbackOrigin = "https://love-strings-dashboard.vercel.app";
+export function getProviderOAuthCallbackUri(path: string) {
+  return new URL(path, providerOAuthCallbackOrigin).toString();
+}
+
 export const localhostOAuthReturnOrigin = "http://localhost:3000";
 
 export function getCanonicalOAuthOrigin() {
@@ -31,7 +37,8 @@ export function getCanonicalOAuthOrigin() {
 }
 
 export function getAllowedOAuthReturnOrigins() {
-  return new Set([localhostOAuthReturnOrigin, getCanonicalOAuthOrigin()]);
+  // Keep the former production origin available during the domain transition.
+  return new Set([localhostOAuthReturnOrigin, "https://love-strings-dashboard.vercel.app", getCanonicalOAuthOrigin()]);
 }
 
 export function getAllowedOAuthReturnOrigin(value: string) {

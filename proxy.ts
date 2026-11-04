@@ -136,7 +136,13 @@ function isPublicPath(pathname: string) {
     pathname === "/no-workspace" ||
     pathname === "/workspace-unavailable" ||
     pathname === "/set-password" ||
-    pathname === "/api/invitations/accept"
+    pathname === "/api/invitations/accept" ||
+    // These handlers consume an expiring, single-use, server-bound OAuth state.
+    // They must not require login cookies from the initiating domain.
+    pathname === "/api/integrations/google/callback" ||
+    pathname === "/api/integrations/meta/fstats-login/callback" ||
+    pathname === "/api/integrations/meta/instagram/callback" ||
+    pathname === "/api/integrations/meta/threads/callback"
   );
 }
 

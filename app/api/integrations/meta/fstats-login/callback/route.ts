@@ -1,3 +1,4 @@
+import { getAllowedOAuthReturnOrigin, getSafeOAuthReturnPath } from "@/lib/oauth-attempt";
 import { NextResponse, type NextRequest } from "next/server";
 
 import {
@@ -13,18 +14,16 @@ import { encryptMetaTokenPayload } from "@/lib/meta/tokens";
 import { saveMetaConnection, saveMetaFacebookPageCandidates } from "@/lib/server/meta-connections";
 import { runLinkedInstagramDiscovery } from "@/lib/server/meta-fstats-discovery";
 import { readAuthoritativeFstatsLoginState } from "@/lib/server/meta-fstats-state";
-import { consumeOAuthAttempt, OAuthAttemptError } from "@/lib/server/oauth-attempts";
-import { createServiceSupabaseClient, WorkspaceAccessError } from "@/lib/server/workspace-owner";
+import { consumeFixedCallbackOAuthAttempt, OAuthAttemptError } from "@/lib/server/oauth-attempts";
+import { createServiceSupabaseClient } from "@/lib/server/workspace-owner";
 
 export async function GET(request: NextRequest) {
-  let returnPath = "/?settings=general";
+  let attempt: Awaited<ReturnType<typeof consumeFixedCallbackOAuthAttempt>> | null = null;
   try {
-    const attempt = await consumeOAuthAttempt(request, {
+    attempt = await consumeFixedCallbackOAuthAttempt({
       expectedIntegrationKind: fstatsLoginIntegrationKind,
-      requiredWorkspaceRole: "admin",
       state: request.nextUrl.searchParams.get("state")
     });
-    returnPath = attempt.returnPath;
     if (request.nextUrl.searchParams.get("error") || !request.nextUrl.searchParams.get("code")) {
       throw new OAuthAttemptError("Meta authorization was not completed.");
     }
@@ -44,7 +43,7 @@ export async function GET(request: NextRequest) {
       workspaceId: attempt.workspaceId,
       connectionKind: fstatsLoginConnectionKind,
       authorizationUserExternalId,
-      connectedBy: attempt.user.id,
+      connectedBy: attempt.userId,
       encryptedTokenPayload: encryptMetaTokenPayload({ accessToken: token.accessToken }),
       tokenExpiresAt: token.expiresInSeconds ? new Date(Date.now() + token.expiresInSeconds * 1000).toISOString() : null,
       tokenRefreshedAt: new Date().toISOString(),
@@ -61,16 +60,15 @@ export async function GET(request: NextRequest) {
         pageExternalId: state.page.externalId,
       });
     }
-    return NextResponse.redirect(resultUrl(request, returnPath, "selection-required"));
+    return NextResponse.redirect(resultUrl(attempt.returnOrigin, attempt.returnPath, "selection-required"));
   } catch (error) {
-    const status = error instanceof WorkspaceAccessError ? error.status : error instanceof OAuthAttemptError ? 400 : 500;
-    if (status !== 500) return NextResponse.json({ error: "Meta authorization could not be verified." }, { status });
-    return NextResponse.redirect(resultUrl(request, returnPath, "error"));
+    if (!attempt) return NextResponse.json({ error: "Meta authorization could not be verified." }, { status: error instanceof OAuthAttemptError ? 400 : 500 });
+    return NextResponse.redirect(resultUrl(attempt.returnOrigin, attempt.returnPath, "error"));
   }
 }
 
-function resultUrl(request: NextRequest, returnPath: string, result: "selection-required" | "error") {
-  const url = new URL(returnPath, request.nextUrl.origin);
+function resultUrl(origin: string, returnPath: string, result: "selection-required" | "error") {
+  const url = new URL(getSafeOAuthReturnPath(returnPath, origin), getAllowedOAuthReturnOrigin(origin));
   url.searchParams.set("meta", `fstats-login-${result}`);
   return url;
 }

@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-const productionAppUrl = "https://love-strings-dashboard.vercel.app";
+const productionAppUrl = "https://www.artistdeck.app";
 
 /**
  * Delivers the established ordinary workspace-invitation handoff. New

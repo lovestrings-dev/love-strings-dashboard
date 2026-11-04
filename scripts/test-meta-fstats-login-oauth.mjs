@@ -7,14 +7,12 @@ process.env.META_FSTATS_CONFIG_ID = "1034329012852736";
 const { hasRequiredMetaScopes, requiredMetaScopes } = await import("../lib/meta/scopes.ts");
 const { createFstatsLoginAuthorizationUrl, getFstatsLoginRedirectUri } = await import("../lib/meta/fstats-login-oauth.ts");
 
-const callbackForOrigin = (origin) => {
-  if (origin === "https://love-strings-dashboard.vercel.app" || origin === "http://localhost:3000") return `${origin}/api/integrations/meta/fstats-login/callback`;
-  throw new Error("Meta Facebook Login is not configured for this app origin.");
-};
-const fstatsLoginRedirectUri = callbackForOrigin("https://love-strings-dashboard.vercel.app");
-assert.equal(callbackForOrigin("http://localhost:3000"), "http://localhost:3000/api/integrations/meta/fstats-login/callback");
-assert.throws(() => callbackForOrigin("http://localhost:3001"));
-assert.throws(() => callbackForOrigin("https://evil.example"));
+const fstatsLoginRedirectUri = getFstatsLoginRedirectUri("https://www.artistdeck.app");
+assert.equal(fstatsLoginRedirectUri, "https://love-strings-dashboard.vercel.app/api/integrations/meta/fstats-login/callback");
+assert.equal(getFstatsLoginRedirectUri("https://love-strings-dashboard.vercel.app"), "https://love-strings-dashboard.vercel.app/api/integrations/meta/fstats-login/callback");
+for (const origin of ["http://localhost:3001", "https://evil.example", "https://evil.www.artistdeck.app", "https://www.artistdeck.app.evil.example", "https://artistdeck.app", "http://www.artistdeck.app"]) {
+  assert.throws(() => getFstatsLoginRedirectUri(origin));
+}
 const normalizeGrantedScopes = (value) => !Array.isArray(value) ? [] : Array.from(new Set(value.flatMap((entry) => {
   if (!entry || typeof entry !== "object") return [];
   return entry.status === "granted" && typeof entry.permission === "string" && entry.permission ? [entry.permission] : [];
@@ -28,7 +26,7 @@ const normalizeFacebookPages = (value) => {
   }
   return [...pages.values()];
 };
-assert.equal(getFstatsLoginRedirectUri("http://localhost:3000"), "http://localhost:3000/api/integrations/meta/fstats-login/callback");
+assert.equal(getFstatsLoginRedirectUri("http://localhost:3000"), "https://love-strings-dashboard.vercel.app/api/integrations/meta/fstats-login/callback");
 const authorizationUrl = createFstatsLoginAuthorizationUrl({ redirectUri: fstatsLoginRedirectUri, state: "state-test-value" });
 assert.equal(authorizationUrl.origin, "https://www.facebook.com");
 assert.equal(authorizationUrl.pathname, "/v23.0/dialog/oauth");

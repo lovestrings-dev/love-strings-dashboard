@@ -1,4 +1,4 @@
-import { getCanonicalOAuthOrigin } from "@/lib/oauth-attempt";
+import { getProviderOAuthCallbackUri } from "@/lib/oauth-attempt";
 
 export const creatorSocialThreadsConnectionKind = "creator_social_threads";
 export const creatorSocialThreadsIntegrationKind = "meta:creator-social-threads";
@@ -28,7 +28,7 @@ export type CreatorSocialThreadsOAuthStage =
 type StageReporter = (stage: CreatorSocialThreadsOAuthStage, details?: { status?: number }) => void;
 
 export function getCreatorSocialThreadsRedirectUri() {
-  return new URL(callbackPath, getCanonicalOAuthOrigin()).toString();
+  return getProviderOAuthCallbackUri(callbackPath);
 }
 
 export function createCreatorSocialThreadsAuthorizationUrl(state: string) {

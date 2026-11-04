@@ -6,7 +6,9 @@ import {
   fetchGoogleJson,
   isGoogleService
 } from "@/lib/google/oauth";
-import { requireWorkspaceAdministrator } from "@/lib/server/workspace-owner";
+import { createServiceSupabaseClient } from "@/lib/server/workspace-owner";
+import { consumeFixedCallbackOAuthAttempt, OAuthAttemptError } from "@/lib/server/oauth-attempts";
+import { getAllowedOAuthReturnOrigin, getProviderOAuthCallbackUri } from "@/lib/oauth-attempt";
 import { reconcilePlatformAccount } from "@/lib/server/platform-accounts";
 import { collectAfterConnection } from "@/lib/metrics/post-connection-collection";
 
@@ -22,26 +24,20 @@ type AnalyticsAccountSummaries = {
 type AnalyticsDataStreams = { dataStreams?: Array<{ type?: string; webStreamData?: { defaultUri?: string } }> };
 
 export async function GET(request: NextRequest) {
-  const guidanceReturn = request.cookies.get("ls_google_oauth_guidance")?.value === "1";
-  const guidancePreview = request.cookies.get("ls_google_oauth_guidance_preview")?.value;
-  const settingsReturnUrl = createSettingsReturnUrl(request);
-
+  let attempt: Awaited<ReturnType<typeof consumeFixedCallbackOAuthAttempt>> | null = null;
+  let settingsReturnUrl: URL | null = null;
   try {
+    attempt = await consumeFixedCallbackOAuthAttempt({
+      expectedIntegrationKind: "google:services",
+      state: request.nextUrl.searchParams.get("state")
+    });
+    const { service, guidance: guidanceReturn, guidancePreview } = attempt.context;
+    if (typeof service !== "string" || !isGoogleService(service)) throw new OAuthAttemptError("Google service context is invalid.");
+    settingsReturnUrl = createSettingsReturnUrl(attempt.returnOrigin);
     const code = request.nextUrl.searchParams.get("code");
-    const state = request.nextUrl.searchParams.get("state");
     const providerError = request.nextUrl.searchParams.get("error");
     const providerErrorDescription = request.nextUrl.searchParams.get("error_description");
-    const savedState = request.cookies.get("ls_google_oauth_state")?.value;
-    const service = request.cookies.get("ls_google_oauth_service")?.value ?? null;
-    const savedOrigin = request.cookies.get("ls_google_oauth_origin")?.value;
-    const savedWorkspaceId = request.cookies.get("ls_google_oauth_workspace")?.value;
 
-    if (!state || !savedState || state !== savedState || !isGoogleService(service)) {
-      throw new Error("Google authorization session could not be verified.");
-    }
-    if (savedOrigin !== request.nextUrl.origin) {
-      throw new Error("Google authorization returned to an unexpected app origin.");
-    }
     if (providerError) {
       throw new Error(
         providerErrorDescription ||
@@ -54,11 +50,9 @@ export async function GET(request: NextRequest) {
       throw new Error("Google did not return an authorization code.");
     }
 
-    const { serviceClient, user, workspaceId } = await requireWorkspaceAdministrator(request);
-    if (!savedWorkspaceId || savedWorkspaceId !== workspaceId) {
-      throw new Error("The active workspace changed during Google authorization.");
-    }
-    const redirectUri = `${savedOrigin}/api/integrations/google/callback`;
+    const serviceClient = createServiceSupabaseClient();
+    const workspaceId = attempt.workspaceId;
+    const redirectUri = getProviderOAuthCallbackUri("/api/integrations/google/callback");
     const tokens = await exchangeGoogleAuthorizationCode(code, redirectUri);
     const userInfo = await fetchGoogleJson<GoogleUserInfo>(
       tokens.access_token!,
@@ -87,7 +81,7 @@ export async function GET(request: NextRequest) {
     }
 
     const updates: Record<string, unknown> = {
-      connected_by: user.id,
+      connected_by: attempt.userId,
       encrypted_refresh_token: encryptedRefreshToken,
       google_account_email: userInfo.email,
       google_account_subject: userInfo.sub,
@@ -151,34 +145,28 @@ export async function GET(request: NextRequest) {
       await collectAfterConnection(workspaceId, ["google-analytics"]);
     }
 
-    return clearOAuthCookies(NextResponse.redirect(setResult(guidanceReturn ? createGuidanceDashboardReturnUrl(request, guidancePreview) : settingsReturnUrl, analyticsNeedsSelection ? "select-analytics" : "connected")));
+    const destination = guidanceReturn === true
+      ? createGuidanceDashboardReturnUrl(attempt.returnOrigin, guidancePreview === true)
+      : settingsReturnUrl;
+    return NextResponse.redirect(setResult(destination, analyticsNeedsSelection ? "select-analytics" : "connected"));
   } catch (error) {
-    return clearOAuthCookies(
-      NextResponse.redirect(
-        setResult(
-          settingsReturnUrl,
-          "error",
-          error instanceof Error ? error.message : "Google connection failed."
-        )
-      )
-    );
+    if (!attempt || !settingsReturnUrl) {
+      return NextResponse.json({ error: "Google authorization could not be verified." }, { status: error instanceof OAuthAttemptError ? 400 : 500 });
+    }
+    return NextResponse.redirect(setResult(settingsReturnUrl, "error", error instanceof Error ? error.message : "Google connection failed."));
   }
 }
 
-function createSettingsReturnUrl(request: NextRequest) {
-  const url = new URL("/", request.nextUrl.origin);
+function createSettingsReturnUrl(origin: string) {
+  const url = new URL("/", getAllowedOAuthReturnOrigin(origin));
   url.searchParams.set("settings", "general");
   return url;
 }
 
-function createGuidanceDashboardReturnUrl(request: NextRequest, guidancePreview?: string) {
-  const url = new URL("/", request.nextUrl.origin);
+function createGuidanceDashboardReturnUrl(origin: string, guidancePreview: boolean) {
+  const url = new URL("/", getAllowedOAuthReturnOrigin(origin));
   url.searchParams.set("guidance_return", "google-connected");
-  if (
-    process.env.NODE_ENV === "development" &&
-    (request.nextUrl.hostname === "localhost" || request.nextUrl.hostname === "127.0.0.1") &&
-    guidancePreview === "google"
-  ) {
+  if (origin === "http://localhost:3000" && guidancePreview) {
     url.searchParams.set("guidancePreview", "invite-member");
   }
   return url;
@@ -188,18 +176,4 @@ function setResult(url: URL, result: string, message?: string) {
   url.searchParams.set("google", result);
   if (message) url.searchParams.set("google_message", message.slice(0, 240));
   return url;
-}
-
-function clearOAuthCookies(response: NextResponse) {
-  for (const name of [
-    "ls_google_oauth_state",
-    "ls_google_oauth_service",
-    "ls_google_oauth_origin",
-    "ls_google_oauth_workspace",
-    "ls_google_oauth_guidance",
-    "ls_google_oauth_guidance_preview"
-  ]) {
-    response.cookies.set(name, "", { maxAge: 0, path: "/api/integrations/google" });
-  }
-  return response;
 }

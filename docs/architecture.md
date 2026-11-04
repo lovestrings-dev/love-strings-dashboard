@@ -11,6 +11,14 @@ Initial target stack:
 - Data imports first: Excel/CSV/Google Sheets exports
 - API integrations later: YouTube, Instagram, Spotify or platform exports, website analytics, distributor reports
 
+## Current domain and OAuth boundary (Beta 1.31)
+
+- Primary application origin is `https://www.artistdeck.app`; the apex redirects to www. `APP_CANONICAL_ORIGIN` is the app/allowed return origin and `NEXT_PUBLIC_SITE_URL` controls generated invitation destinations.
+- Provider callbacks stay on `https://love-strings-dashboard.vercel.app`, independently of the primary app origin. Both domains must serve the same deployment; the old host must not redirect callback paths.
+- Google/Facebook now use the existing fixed-callback one-time attempt mechanism. The initiating authenticated Admin's workspace/user/return origin are stored server-side. Google service/Guidance data is carried in object-valued `context`, not cookies crossing domains.
+- The proxy passes exactly four callback paths through without login. Handlers consume hashed, expiring one-time state through a service-only RPC, which rechecks the initiating workspace role. Callbacks do not create login sessions. Ordinary API access remains authenticated.
+- Migration `202611040001` has been applied and verified; existing attempts and provider credentials remain. See [domain setup](custom-domain-setup.md) and [Beta 1.31 release](releases/beta-1.31.md) for environment and acceptance requirements.
+
 ## Current chart and campaign boundary (Beta 1.30)
 
 - New song campaign creation converts the API's ISO release date to the display-date input expected by the day builder before saving days. New task statuses start Not started; existing task progress is not reset automatically.

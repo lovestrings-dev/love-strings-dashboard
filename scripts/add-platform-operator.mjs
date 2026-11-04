@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 const targetEmail = process.argv[2]?.trim().toLowerCase();
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const publicSiteUrl = (process.env.NEXT_PUBLIC_SITE_URL?.trim() || "https://love-strings-dashboard.vercel.app").replace(/\/$/, "");
+const publicSiteUrl = (process.env.NEXT_PUBLIC_SITE_URL?.trim() || "https://www.artistdeck.app").replace(/\/$/, "");
 if (!targetEmail || !supabaseUrl || !serviceRoleKey) {
   throw new Error("Usage: add-platform-operator.mjs <email> with Supabase service configuration.");
 }

@@ -1,6 +1,6 @@
 {
   "name": "love-strings-dashboard",
-  "version": "1.30.0-beta.1",
+  "version": "1.31.0-beta.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
+    "test:beta131-release": "node scripts/test-beta131-release.mjs",
     "test:beta130-release": "node scripts/test-beta130-release.mjs",
     "test:dashboard-preferences": "node --experimental-strip-types scripts/test-dashboard-preferences.mjs",
     "test:platform-card-preferences": "node --experimental-strip-types scripts/test-platform-card-preferences.mjs",
