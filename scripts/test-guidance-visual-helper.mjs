@@ -41,7 +41,12 @@ assert.match(page, /Skip step/, "the recommended actionable step has a visible s
 assert.match(page, /skipGuidanceStep/, "skip uses the shared Guidance status boundary");
 assert.match(page, /production-collapse-button/, "Production has a bottom-row Collapse control");
 assert.match(page, /aria-controls=\{`\$\{song.id\}-production-details`\}[\s\S]*?aria-expanded=\{isSongOpen\}/, "Production steps collapse state remains accessible");
-assert.match(accountControl, /guidanceContext === "google-logo"/, "the existing workspace logo is the Google journey cue");
+assert.match(page, /onGoogle=\{\(\) => setGuidanceContext\("account-menu"\)\}/, "Connect starts at the avatar menu cue");
+assert.match(page, /current === "account-menu" \? "google-settings"/, "opening the avatar advances guidance to General Settings");
+assert.match(accountControl, /Tap your avatar to open the account menu\./, "first-time users receive the current trigger instruction");
+assert.match(accountControl, /Choose General Settings, then Google Services\./, "the open menu explains the next destination");
+assert.doesNotMatch(accountControl, /google-logo/, "no obsolete logo cue remains in the header");
+assert.match(accountControl, /guidanceContext === "account-menu"/, "the account-menu trigger receives the Google journey cue");
 assert.match(accountControl, /guidance-target-light/, "the dark-header Guidance targets use a light treatment");
 assert.match(accountControl, /guidance-menu-settings/, "the existing General Settings item is highlighted from the account menu");
 assert.match(accountControl, /onGuidanceAbandon\(\);/, "other choices and dismissals abandon the contextual journey");

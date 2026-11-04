@@ -49,12 +49,19 @@ export async function proxy(request: NextRequest) {
   const authenticatedUser = user;
 
   if (!authenticatedUser) {
+    if (request.nextUrl.pathname === "/api/user/appearance") {
+      return NextResponse.json({ error: "Sign in to save your appearance." }, { status: 401 });
+    }
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     loginUrl.search = "";
     loginUrl.searchParams.set("next", `${request.nextUrl.pathname}${request.nextUrl.search}`);
     return NextResponse.redirect(loginUrl);
   }
+
+  // Account appearance is personal: Viewers and operators without a workspace
+  // may change their own skin. The handler verifies Auth and validates writes.
+  if (request.nextUrl.pathname === "/api/user/appearance") return response;
 
   const { data: memberships, error: membershipError } = await supabase
     .from("app_workspace_members")

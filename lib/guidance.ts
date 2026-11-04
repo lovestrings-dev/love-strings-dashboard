@@ -93,3 +93,11 @@ export function guidanceStatusAfterSkip(
     steps: status.steps
   });
 }
+
+// Feature education is account-scoped and available in existing workspaces,
+// independently of the workspace-admin Getting Started program.
+export const darkModeFeatureProgram = {
+  key: "dark_mode_v1",
+  title: "Dark mode",
+  description: "ArtistDeck now starts in dark mode. Try it on or off below. You can switch it any time in User settings → Appearance."
+} as const;

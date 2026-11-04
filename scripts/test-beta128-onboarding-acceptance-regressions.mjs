@@ -21,8 +21,8 @@ assert.match(page, /return stats\.filter\(\(platform\) => \{[\s\S]*youtube-music
 assert.match(page, /\? "—"\n\s*: String\(value\)/, "unavailable platform values render as an em dash.");
 assert.match(page, /AudienceCardEmptyState/, "Audience retains labeled unavailable-metric rendering.");
 assert.match(accountControl, /resolvedWorkspaceLogoUrl = workspaceLogoUrl \|\| "\/artistdeck-logo\.png"/, "ArtistDeck branding is the non-persistent workspace-logo fallback.");
-assert.match(accountControl, /aria-label=\{`Open workspace menu for \$\{workspaceName\}`\}/, "the left logo remains the workspace menu trigger.");
-assert.match(accountControl, /className=\{`account-avatar/, "the far-right avatar remains display-only.");
+assert.match(accountControl, /aria-label=\{`Open account menu for \$\{displayName\}`\}/, "the left avatar opens the account menu.");
+assert.match(accountControl, /className=\{`account-avatar/, "the left avatar retains the account-avatar class.");
 assert.match(styles, /grid-template-columns: 44px minmax\(0, 1fr\) 44px;/, "header logo and avatar have matching layout footprints.");
 assert.match(styles, /\.account-avatar \{[\s\S]*height: 44px;[\s\S]*width: 44px;/, "the avatar matches the workspace logo diameter.");
 assert.match(styles, /\.dashboard-campaign-card-empty h3 \{\n  color: var\(--text\);/, "empty campaign copy uses default black text.");

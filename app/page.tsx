@@ -1,6 +1,8 @@
 "use client";
 
 import Image from "next/image";
+import { AppearanceSettings } from "./components/appearance-provider";
+import { DarkModeFeature } from "./components/dark-mode-feature";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { Fragment } from "react";
 import { createPortal } from "react-dom";
@@ -121,7 +123,7 @@ type AppNavigationSnapshot = {
   section: Section;
 };
 type WorkspaceRole = "admin" | "member" | "viewer";
-type GuidanceContext = "none" | "add-song" | "song-settings" | "google-logo" | "google-settings" | "invite-member";
+type GuidanceContext = "none" | "add-song" | "song-settings" | "account-menu" | "google-settings" | "invite-member";
 type WorkspaceMember = {
   avatarUrl: string | null;
   displayName: string;
@@ -755,7 +757,7 @@ const platformStats = [
   }
 ];
 
-const appVersionLabel = "Beta 1.31";
+const appVersionLabel = "Beta 1.32";
 const defaultAppLogoUrl = "/artistdeck-logo.png";
 
 const sections = [
@@ -7836,6 +7838,9 @@ export default function Home() {
       return;
     }
 
+    // Skin choice and its feature acknowledgment affect only this account.
+    if (target.closest("[data-personal-appearance]")) return;
+
     const control = target.closest("button, input, label, select, textarea");
     if (!control) {
       return;
@@ -8928,7 +8933,7 @@ export default function Home() {
               setGuidanceContext("none");
               setGuidanceSongId(null);
             }}
-            onGuidanceMenuOpen={() => setGuidanceContext((current) => current === "google-logo" ? "google-settings" : current)}
+            onGuidanceMenuOpen={() => setGuidanceContext((current) => current === "account-menu" ? "google-settings" : current)}
             onReady={markHeaderAccountReady}
             onOpenAboutDashboard={() => setSettingsView("about")}
             onOpenGeneralSettings={() => {
@@ -8977,6 +8982,7 @@ export default function Home() {
           onClickCapture={preventViewerWriteClick}
           onKeyDownCapture={preventViewerWriteKeydown}
         >
+        <DarkModeFeature eligible={!settingsView && !isResolvingInitialWorkspace && activeWorkspaceSetupState === "active"} />
         {!settingsView && guidanceStatus?.active ? (
           <GettingStartedCard
             onFirstSong={() => {
@@ -8984,7 +8990,7 @@ export default function Home() {
               setGuidanceSongId(null);
               navigateWithHistory(() => setActiveSection("Production"));
             }}
-            onGoogle={() => setGuidanceContext("google-logo")}
+            onGoogle={() => setGuidanceContext("account-menu")}
             onInviteMember={() => {
               setGuidanceContext("invite-member");
               setGuidanceYouTubeCardHint(false);
@@ -10855,7 +10861,7 @@ function AboutDashboardView() {
       <header className="user-settings-header">
         <div>
           <p className="eyebrow">Love Strings</p>
-          <h1 id="about-dashboard-title">About Dashboard</h1>
+          <h1 id="about-dashboard-title">About ArtistDeck</h1>
         </div>
       </header>
 
@@ -11138,6 +11144,7 @@ function UserSettingsView({
         </div>
       </header>
       <div className="user-settings-content general-settings-content user-settings-parent-content">
+        <AppearanceSettings />
         <section className="settings-parent-card settings-parent-identity">
           <div className="settings-parent-heading"><p className="eyebrow">Your account</p></div>
           <div className="user-profile-settings">
@@ -12565,7 +12572,7 @@ function BudgetView({
               </article>
             ))}
           </section>
-          <section className="budget-graph-placeholder-grid" aria-label="Future budget graphs">
+          <section className="budget-graph-placeholder-grid" aria-label="Budget evolution graphs">
             <article className="budget-graph-placeholder module-accent-thin module-accent-budget">
               <span className="budget-graph-title-with-legend">
                 <i className="budget-legend-square budget-legend-square-income" aria-hidden />
@@ -12704,7 +12711,7 @@ function BudgetCashflowChart({
       ...point,
       x,
       labelY,
-      y: labelY + 8
+      y: labelY
     };
   });
   const linePoints = chartPoints
@@ -12712,16 +12719,13 @@ function BudgetCashflowChart({
     .join(" ");
   const middleIndex = Math.floor((chartPoints.length - 1) / 2);
   const labeledPointIndexes = new Set([0, middleIndex, chartPoints.length - 1]);
-  const verticalGridLines = Array.from({ length: 6 }, (_, index) => {
-    return padding + (index / 5) * chartWidth;
-  });
   const horizontalGridLines = Array.from({ length: 4 }, (_, index) => {
     return padding + (index / 3) * chartHeight;
   });
 
   return (
     <div className="budget-line-chart">
-      <svg aria-hidden role="presentation" viewBox={`0 0 ${width} ${height}`}>
+      <svg role="img" aria-label="Cumulative cashflow by month" viewBox={`0 0 ${width} ${height}`}>
         <rect
           className="budget-line-chart-grid-frame"
           height={chartHeight}
@@ -12729,16 +12733,6 @@ function BudgetCashflowChart({
           x={padding}
           y={padding}
         />
-        {verticalGridLines.map((x) => (
-          <line
-            className="budget-line-chart-grid-line"
-            key={`vertical-${x.toFixed(1)}`}
-            x1={x}
-            x2={x}
-            y1={padding}
-            y2={gridBottom}
-          />
-        ))}
         {horizontalGridLines.map((y) => (
           <line
             className="budget-line-chart-grid-line"
@@ -12749,10 +12743,11 @@ function BudgetCashflowChart({
             y2={y}
           />
         ))}
+        <polygon className="budget-cashflow-area" points={`${chartPoints[0].x},${gridBottom} ${linePoints} ${chartPoints[chartPoints.length - 1].x},${gridBottom}`} />
         <polyline points={linePoints} />
         {chartPoints.map((point, index) => (
           <g key={point.key}>
-            <circle cx={point.x} cy={point.y} r="4" />
+            <circle cx={point.x} cy={point.y} r="2.5" />
             {labeledPointIndexes.has(index) ? (
               <text
                 className="budget-line-chart-value"
@@ -12800,9 +12795,9 @@ function BudgetIncomeSpendChart({
 
   return (
     <div className="budget-income-spend-chart">
-      <div className="budget-bar-chart" aria-hidden>
+      <div className="budget-bar-chart" role="img" aria-label="Monthly income and spending" style={{ gridTemplateColumns: `repeat(${months.length}, minmax(22px, 1fr))` }}>
         {months.map((month) => (
-          <div className="budget-bar-group" key={month.key}>
+          <div className="budget-bar-group" key={month.key} aria-label={`${month.key}: income ${formatCurrency(month.income)}, spend ${formatCurrency(month.spend)}`} title={`${month.key}: income ${formatCurrency(month.income)}, spend ${formatCurrency(month.spend)}`}>
             <div className="budget-bar">
               <b
                 className={`budget-income-bar${month.income <= 0 ? " is-zero" : ""}`}
@@ -13416,7 +13411,7 @@ function ProductionView({
   restoreContext: { context: ProductionNavigationContext; token: number } | null;
 }) {
   const songElementRefs = useRef<Record<string, HTMLElement | null>>({});
-  const [showProducedSongs, setShowProducedSongs] = useState(false);
+  const [showProducedSongs, setShowProducedSongs] = useState(true);
   const orderedSongs = sortProductionSongsByDeadline([...songs, ...sharing.sharedSongs]);
   const songSharingControl = (song: ProductionSongConfig): ProductionSongSharingControl => ({
     destinations: sharing.destinations,
@@ -15017,6 +15012,11 @@ function MarketingView({
         {orderedCampaigns.map((campaign) => (
           <MarketingCampaignBoard
             campaign={campaign}
+            focusedDayNumber={focusTarget?.campaignId === campaign.id ? getCampaignDays(campaign).find((day) =>
+              focusTarget.elementId === getMarketingCampaignDayElementId(campaign.id, day.dayNumber) ||
+              focusTarget.inputId === getMarketingTaskInputElementId(campaign.id, day.dayNumber) ||
+              day.extraTasks.some((task) => focusTarget.inputId === getMarketingTaskInputElementId(campaign.id, day.dayNumber, task.id))
+            )?.dayNumber : undefined}
             focusToken={
               focusTarget?.campaignId === campaign.id ? focusTarget.token : undefined
             }
@@ -15140,6 +15140,7 @@ function MarketingView({
 function MarketingCampaignBoard({
   campaign,
   focusToken,
+  focusedDayNumber,
   onBudgetLinesChange,
   onDaysChange,
   onDelete,
@@ -15154,6 +15155,7 @@ function MarketingCampaignBoard({
 }: {
   campaign: MarketingCampaignConfig;
   focusToken?: number;
+  focusedDayNumber?: number;
   onBudgetLinesChange: (
     campaignId: string,
     budgetLines: ProductionBudgetLine[]
@@ -15180,6 +15182,10 @@ function MarketingCampaignBoard({
     campaign.releaseDate
   );
   const [isCampaignOpen, setIsCampaignOpen] = useState(false);
+  const [expandedDayNumbers, setExpandedDayNumbers] = useState<Set<number>>(() => {
+    const todayNumber = getActiveCampaignDayNumber(getCampaignDays(campaign));
+    return new Set(todayNumber === null ? [] : [todayNumber]);
+  });
   const [isFocusHighlighted, setIsFocusHighlighted] = useState(false);
   const [isCampaignDeleteArmed, setIsCampaignDeleteArmed] = useState(false);
   const [isBudgetDeleteArmed, setIsBudgetDeleteArmed] = useState(false);
@@ -15286,6 +15292,7 @@ function MarketingCampaignBoard({
 
     const focusTimer = window.setTimeout(() => {
       setIsCampaignOpen(true);
+      if (focusedDayNumber) setExpandedDayNumbers((current) => new Set(current).add(focusedDayNumber));
       setIsFocusHighlighted(true);
     }, 0);
 
@@ -15297,11 +15304,14 @@ function MarketingCampaignBoard({
       window.clearTimeout(focusTimer);
       window.clearTimeout(highlightTimer);
     };
-  }, [focusToken]);
+  }, [focusToken, focusedDayNumber]);
 
   useEffect(() => {
     if (!restoreContext) return;
-    const restoreTimer = window.setTimeout(() => setIsCampaignOpen(true), 0);
+    const restoreTimer = window.setTimeout(() => {
+      setIsCampaignOpen(true);
+      if (restoreContext.context.dayNumber) setExpandedDayNumbers((current) => new Set(current).add(restoreContext.context.dayNumber!));
+    }, 0);
     return () => window.clearTimeout(restoreTimer);
   }, [restoreContext]);
 
@@ -15502,10 +15512,15 @@ function MarketingCampaignBoard({
         : null
     );
     setIsCampaignOpen(nextIsOpen);
-    if (nextIsOpen) scrollToCurrentCampaignDay();
+    if (nextIsOpen) {
+      const todayNumber = getActiveCampaignDayNumber(campaignDays);
+      setExpandedDayNumbers(new Set(todayNumber === null ? [] : [todayNumber]));
+      scrollToCurrentCampaignDay();
+    }
   }
 
   function focusCampaignDay(dayNumber: number) {
+    setExpandedDayNumbers((current) => new Set(current).add(dayNumber));
     onNavigationContextChange({ campaignId: campaign.id, dayNumber });
     onFocus(campaign.id, getMarketingCampaignDayElementId(campaign.id, dayNumber));
   }
@@ -16088,9 +16103,22 @@ function MarketingCampaignBoard({
                     key={day.dayNumber}
                   >
                     <td>
-                      <strong>{day.date}</strong>
-                      <span>{formatReleaseOffset(day.releaseOffset)}</span>
-                      {isGeneralCampaign || !day.isDefaultDay ? (
+                      <div className="campaign-day-heading">
+                        <div><strong>{day.date}</strong><span>{formatReleaseOffset(day.releaseOffset)}</span></div>
+                        <button
+                          aria-label={`${expandedDayNumbers.has(day.dayNumber) ? "Collapse" : "Expand"} campaign day ${day.dayNumber}: ${day.date}`}
+                          aria-expanded={expandedDayNumbers.has(day.dayNumber)}
+                          aria-controls={`${getMarketingCampaignDayElementId(campaign.id, day.dayNumber)}-content`}
+                          className="campaign-day-toggle"
+                          onClick={() => setExpandedDayNumbers((current) => {
+                            const next = new Set(current);
+                            if (next.has(day.dayNumber)) next.delete(day.dayNumber); else next.add(day.dayNumber);
+                            return next;
+                          })}
+                          type="button"
+                        ><ChevronDown size={18} aria-hidden /></button>
+                      </div>
+                      {expandedDayNumbers.has(day.dayNumber) && (isGeneralCampaign || !day.isDefaultDay) ? (
                         <button
                           aria-label={`Delete campaign day ${day.dayNumber}`}
                           className={`delete-campaign-day-button marketing-campaign-day-delete-button${
@@ -16109,6 +16137,7 @@ function MarketingCampaignBoard({
                       ) : null}
                     </td>
                     <MarketingCampaignTaskCell
+                      expanded={expandedDayNumbers.has(day.dayNumber)}
                       campaignId={campaign.id}
                       onAddTask={addExtraTask}
                       day={day}
@@ -16221,6 +16250,7 @@ function getMarketingTaskInputElementId(
 
 function MarketingCampaignTaskCell({
   campaignId,
+  expanded,
   day,
   onAddTask,
   onClipNameChange,
@@ -16229,6 +16259,7 @@ function MarketingCampaignTaskCell({
   onStatusChange
 }: {
   campaignId: string;
+  expanded: boolean;
   day: CampaignDay;
   onAddTask: (dayNumber: number) => void;
   onClipNameChange: (dayNumber: number, clipName: string) => void;
@@ -16245,7 +16276,7 @@ function MarketingCampaignTaskCell({
   ) => void;
 }) {
   return (
-    <td>
+    <td hidden={!expanded} id={`${getMarketingCampaignDayElementId(campaignId, day.dayNumber)}-content`}>
       <div className="campaign-cell">
         <label className="clip-name-field">
           <span>Clip name</span>

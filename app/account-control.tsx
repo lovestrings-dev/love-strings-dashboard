@@ -17,7 +17,7 @@ export function AccountControl({
   workspaceLogoUrl,
   workspaceName
 }: {
-  guidanceContext: "none" | "add-song" | "song-settings" | "google-logo" | "google-settings" | "invite-member";
+  guidanceContext: "none" | "add-song" | "song-settings" | "account-menu" | "google-settings" | "invite-member";
   onGuidanceAbandon: () => void;
   onGuidanceMenuOpen: () => void;
   onOpenAboutDashboard: () => void;
@@ -50,6 +50,8 @@ export function AccountControl({
   }>>([]);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isWorkspacePickerOpen, setIsWorkspacePickerOpen] = useState(false);
+  const [workspaceSwitchError, setWorkspaceSwitchError] = useState("");
   const accountControlRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -159,6 +161,7 @@ export function AccountControl({
         !accountControlRef.current?.contains(event.target)
       ) {
         setIsMenuOpen(false);
+        setIsWorkspacePickerOpen(false);
         onGuidanceAbandon();
       }
     }
@@ -166,6 +169,7 @@ export function AccountControl({
     function closeMenuWithKeyboard(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setIsMenuOpen(false);
+        setIsWorkspacePickerOpen(false);
         onGuidanceAbandon();
       }
     }
@@ -191,6 +195,7 @@ export function AccountControl({
   async function switchWorkspace(workspaceId: string) {
     if (!workspaceId || workspaceId === activeWorkspaceId) return;
     setIsSwitchingWorkspace(true);
+    setWorkspaceSwitchError("");
     try {
       const response = await fetch("/api/workspaces", {
         body: JSON.stringify({ workspaceId }),
@@ -206,6 +211,7 @@ export function AccountControl({
       window.location.reload();
     } catch (error) {
       console.error("Unable to switch workspace.", error);
+      setWorkspaceSwitchError("Workspace could not be switched. Please try again.");
       setIsSwitchingWorkspace(false);
     }
   }
@@ -220,48 +226,62 @@ export function AccountControl({
         <button
           aria-expanded={isMenuOpen}
           aria-haspopup="menu"
-          aria-label={`Open workspace menu for ${workspaceName}`}
-          className={`account-workspace-logo has-image${guidanceContext === "google-logo" ? " guidance-target-light" : ""}`}
+          aria-label={`Open account menu for ${displayName}`}
+          className={`account-avatar${avatarUrl ? " has-image" : ""}${guidanceContext === "account-menu" ? " guidance-target-light" : ""}`}
           onClick={() => {
             const next = !isMenuOpen;
             setIsMenuOpen(next);
+            setIsWorkspacePickerOpen(false);
             if (next) onGuidanceMenuOpen();
           }}
-          style={{ backgroundImage: `url(${JSON.stringify(resolvedWorkspaceLogoUrl)})` }}
+          style={avatarUrl ? { backgroundImage: `url(${JSON.stringify(avatarUrl)})` } : undefined}
           type="button"
         >
+          {avatarUrl ? null : displayName.slice(0, 1).toUpperCase()}
         </button>
         <span className="account-workspace-name"><strong>{workspaceName}</strong><span>ArtistDeck</span></span>
         <span
-          aria-label={`${displayName} avatar`}
-          className={`account-avatar${avatarUrl ? " has-image" : ""}`}
+          aria-label={`${workspaceName} workspace logo`}
+          className="account-workspace-logo has-image"
           role="img"
-          style={avatarUrl ? { backgroundImage: `url(${JSON.stringify(avatarUrl)})` } : undefined}
-        >
-          {avatarUrl ? null : displayName.slice(0, 1).toUpperCase()}
-        </span>
+          style={{ backgroundImage: `url(${JSON.stringify(resolvedWorkspaceLogoUrl)})` }}
+        />
       </div>
+      {!isMenuOpen && guidanceContext === "account-menu" ? <p className="account-guidance-hint" role="status">Tap your avatar to open the account menu.</p> : null}
       {isMenuOpen ? (
         <div className="account-menu" role="menu">
+          {guidanceContext === "google-settings" ? <p className="account-menu-guidance" role="status">Choose General Settings, then Google Services.</p> : null}
           {workspaces.length > 1 ? (
-            <label className="workspace-selector">
+            <div className="workspace-selector">
               <span>Workspace</span>
-              <span className="workspace-selector-control">
-                <select
-                  aria-label="Active workspace"
-                  disabled={isSwitchingWorkspace}
-                  onChange={(event) => void switchWorkspace(event.target.value)}
-                  value={activeWorkspaceId}
-                >
-                  {workspaces.map((workspace) => (
-                    <option key={workspace.id} value={workspace.id}>
-                      {workspace.name}
-                    </option>
-                  ))}
-                </select>
+              <button
+                aria-expanded={isWorkspacePickerOpen}
+                aria-controls="account-workspace-choices"
+                aria-label="Choose workspace"
+                className="workspace-picker-trigger"
+                disabled={isSwitchingWorkspace}
+                onClick={() => setIsWorkspacePickerOpen((current) => !current)}
+                role="menuitem"
+                type="button"
+              >
+                <span>{isSwitchingWorkspace ? "Switching…" : workspaces.find((workspace) => workspace.id === activeWorkspaceId)?.name ?? workspaceName}</span>
                 <ChevronDown aria-hidden size={15} />
-              </span>
-            </label>
+              </button>
+              {isWorkspacePickerOpen ? <div aria-label="Workspaces" className="workspace-picker-options" id="account-workspace-choices" role="group">
+                {workspaces.map((workspace) => <button
+                  aria-checked={workspace.id === activeWorkspaceId}
+                  disabled={isSwitchingWorkspace}
+                  key={workspace.id}
+                  onClick={() => {
+                    if (workspace.id === activeWorkspaceId) setIsWorkspacePickerOpen(false);
+                    else void switchWorkspace(workspace.id);
+                  }}
+                  role="menuitemradio"
+                  type="button"
+                ><span>{workspace.name}</span><span aria-hidden>{workspace.id === activeWorkspaceId ? "✓" : ""}</span></button>)}
+              </div> : null}
+              {workspaceSwitchError ? <p className="workspace-switch-error" role="alert">{workspaceSwitchError}</p> : null}
+            </div>
           ) : null}
           <button
             onClick={() => {
@@ -313,7 +333,7 @@ export function AccountControl({
             type="button"
           >
             <Info aria-hidden size={17} />
-            <span>About Dashboard</span>
+            <span>About ArtistDeck</span>
           </button>
           <button
             aria-label={isSigningOut ? "Signing out" : `Sign out ${displayName}`}

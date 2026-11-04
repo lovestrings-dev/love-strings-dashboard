@@ -81,9 +81,9 @@ function EvolutionChartView({ chart, start, end, mode }: { chart: EvolutionChart
     });
     setSelected(nearest);
   }
-  return <article className="platform-evolution-chart" style={{ "--evolution-color": chart.color } as React.CSSProperties}>
+  return <article className="platform-evolution-chart" style={{ "--evolution-color": chart.color, "--evolution-comparison-color": chart.comparison?.color ?? chart.color } as React.CSSProperties}>
     <header><h3><i aria-hidden />{chart.label}</h3><div><strong>{last ? (mode === "growth" ? signed(last.plottedValue) : number(last.value)) : "Unavailable"}</strong><span>{change === null ? "Change unavailable" : `${signed(change)} in period`}</span></div></header>
-    {chart.comparison ? <p className="platform-evolution-comparison" style={{ color: chart.comparison.color }}><i aria-hidden />{chart.comparison.label}: {comparisonLast ? (mode === "growth" ? signed(comparisonLast.plottedValue) : number(comparisonLast.value)) : "Unavailable"}</p> : null}
+    {chart.comparison ? <p className="platform-evolution-comparison"><i aria-hidden />{chart.comparison.label}: {comparisonLast ? (mode === "growth" ? signed(comparisonLast.plottedValue) : number(comparisonLast.value)) : "Unavailable"}</p> : null}
     <p className="platform-evolution-observation">{last ? `${mode === "growth" ? `Baseline ${dateLabel(first.date, true)} · ` : ""}Latest observation ${dateLabel(last.date, true)}` : "No recorded observations in this period."}</p>
     <div ref={ref} className="platform-evolution-plot">
       {points.length ? <svg viewBox={`0 0 ${width} 202`} role="img" tabIndex={0} aria-label={`${chart.label}${chart.comparison ? ` and ${chart.comparison.label}` : ""}, ${mode} mode. ${points.length} observations. Use left and right arrows to inspect; Home and End jump to first and last.`} aria-describedby={tooltipId}
@@ -104,10 +104,11 @@ function EvolutionChartView({ chart, start, end, mode }: { chart: EvolutionChart
           const value = domain.min + (domain.max - domain.min) * index / 3;
           return <g key={index}><line x1={left} x2={right} y1={y(value)} y2={y(value)} className="platform-evolution-gridline" /><text x={left - 8} y={y(value) + 4} textAnchor="end">{Intl.NumberFormat("en-GB", { notation: "compact", maximumFractionDigits: 1 }).format(value)}</text></g>;
         })}
-        {points.length > 1 ? <polyline points={line} fill="none" stroke={chart.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" /> : null}
-        {comparison.length > 1 ? <polyline points={comparison.map((point) => `${x(point.date)},${y(point.plottedValue)}`).join(" ")} fill="none" stroke={chart.comparison?.color} strokeWidth={2} strokeDasharray="5 3" strokeLinejoin="round" /> : null}
-        {comparison.map((point) => comparison.length <= 60 || point.date === active?.date ? <circle key={`comparison-${point.date}`} cx={x(point.date)} cy={y(point.plottedValue)} r={2.5} fill={chart.comparison?.color} stroke="white" strokeWidth={1.5} /> : null)}
-        {points.map((point, index) => points.length <= 60 || index === selected ? <circle key={point.date} cx={x(point.date)} cy={y(point.plottedValue)} r={index === selected ? 5 : points.length > 60 ? 1.5 : 2.5} fill={chart.color} stroke="white" strokeWidth={1.5} /> : null)}
+        {points.length > 1 ? <polygon className="platform-evolution-area" points={`${x(points[0].date)},${bottom} ${line} ${x(points[points.length - 1].date)},${bottom}`} /> : null}
+        {points.length > 1 ? <polyline className="platform-evolution-series" points={line} fill="none" stroke={chart.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" /> : null}
+        {comparison.length > 1 ? <polyline className="platform-evolution-comparison-series" points={comparison.map((point) => `${x(point.date)},${y(point.plottedValue)}`).join(" ")} fill="none" stroke={chart.comparison?.color} strokeWidth={2} strokeDasharray="5 3" strokeLinejoin="round" /> : null}
+        {comparison.map((point) => comparison.length <= 60 || point.date === active?.date ? <circle className="platform-evolution-comparison-point" key={`comparison-${point.date}`} cx={x(point.date)} cy={y(point.plottedValue)} r={2.5} fill={chart.comparison?.color} stroke="white" strokeWidth={1.5} /> : null)}
+        {points.map((point, index) => points.length <= 60 || index === selected ? <circle className="platform-evolution-point" key={point.date} cx={x(point.date)} cy={y(point.plottedValue)} r={index === selected ? 5 : points.length > 60 ? 1.5 : 2.5} fill={chart.color} stroke="white" strokeWidth={1.5} /> : null)}
         {active ? <line x1={x(active.date)} x2={x(active.date)} y1={top} y2={bottom} stroke={chart.color} strokeOpacity={0.35} strokeDasharray="3 3" /> : null}
         {[...new Set(ticks)].map((date, index, dates) => <text key={date} x={x(date)} y={193} textAnchor={index === 0 ? "start" : index === dates.length - 1 ? "end" : "middle"}>{dateLabel(date)}</text>)}
       </svg> : <div className="platform-evolution-empty">No history for this period. Try a longer range.</div>}

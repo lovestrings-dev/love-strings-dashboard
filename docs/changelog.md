@@ -2,6 +2,20 @@
 
 This file tracks app versions that are useful to discuss, test, and deploy. It is for product-level changes, not every small database edit.
 
+## Beta 1.32 — Dark mode and daily workflow polish
+
+Prepared 4 November 2026; not yet deployed.
+
+- Dark is the default skin for existing and new accounts. User Settings → Appearance saves a personal light/dark choice across workspaces and devices. Sign-in, password, onboarding and provisioning screens use the shared skin.
+- A one-time **New feature: Dark mode** helper offers the same toggle and explains where to find it later. Its acknowledgment is personal and does not reset Getting Started progress.
+- The left user avatar opens the account/workspace menu; the workspace logo is displayed on the right. Workspace choices expand inside the menu with a checked current workspace. Guided onboarding now explicitly points to the avatar → General Settings → Google Services.
+- Produced songs start expanded in every workspace.
+- Marketing campaign days have date-header expand/collapse controls. Opening a campaign expands only today and retains scrolling to today; past/future days remain collapsed. Explicit task/day navigation opens its target. Existing task content and status persistence are unchanged.
+- Budget charts follow Platforms styling with restrained cards, thinner lines, subtle grid/area shading and smaller points. Monthly bars stay on one row, scrolling horizontally when necessary. Financial calculations are unchanged.
+- About Dashboard is now **About ArtistDeck**.
+
+No new dependencies, schema migrations or environment variables. Appearance and helper acknowledgment use authenticated own-account metadata writes. See [Beta 1.32 release checkpoint](releases/beta-1.32.md).
+
 ## Beta 1.31 follow-up — YouTube Topic collection and ArtistDeck title
 
 - Browser tabs, hover labels and new bookmarks use **ArtistDeck** instead of LS Dashboard.

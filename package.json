@@ -1,6 +1,6 @@
 {
   "name": "love-strings-dashboard",
-  "version": "1.31.0-beta.1",
+  "version": "1.32.0-beta.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -9,8 +9,10 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test:youtube-topic-discovery": "node scripts/test-youtube-topic-discovery.mjs",
+    "test:beta132-release": "node scripts/test-beta132-release.mjs",
     "test:beta131-release": "node scripts/test-beta131-release.mjs",
     "test:beta130-release": "node scripts/test-beta130-release.mjs",
+    "test:appearance": "node scripts/test-appearance.mjs",
     "test:dashboard-preferences": "node --experimental-strip-types scripts/test-dashboard-preferences.mjs",
     "test:platform-card-preferences": "node --experimental-strip-types scripts/test-platform-card-preferences.mjs",
     "test:facebook-page-ui": "node scripts/test-facebook-page-ui.mjs",
