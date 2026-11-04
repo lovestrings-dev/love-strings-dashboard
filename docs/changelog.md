@@ -2,6 +2,14 @@
 
 This file tracks app versions that are useful to discuss, test, and deploy. It is for product-level changes, not every small database edit.
 
+## Beta 1.31 follow-up — YouTube Topic collection and ArtistDeck title
+
+- Browser tabs, hover labels and new bookmarks use **ArtistDeck** instead of LS Dashboard.
+- Topic track discovery falls back to a search restricted to the configured channel when YouTube reports its advertised uploads playlist missing (404 `playlistNotFound`), or supplies no uploads playlist. Actual video statistics still provide release counts; unrelated API failures do not trigger search retries.
+- Empty discovery preserves existing release snapshots and updates only available channel totals, with an explicit notice. Missing current-release data is returned as unavailable rather than zero.
+- YouTube failures show concise messages instead of raw provider JSON. Collect stats reports partial success counts and readable YouTube service names; status text wraps on narrow screens.
+- Local validation: 21 offline release regressions, typecheck, lint and production build. Read-only live checks recovered six Love Strings Topic tracks and confirmed regular YouTube video/Short discovery. No connection/token changes or live metric writes. Push/deployment authorized on 4 November 2026.
+
 ## Beta 1.31 — ArtistDeck domain and cross-domain connections
 
 Prepared 4 November 2026; awaiting push and deployment of this code.

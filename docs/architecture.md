@@ -11,6 +11,18 @@ Initial target stack:
 - Data imports first: Excel/CSV/Google Sheets exports
 - API integrations later: YouTube, Instagram, Spotify or platform exports, website analytics, distributor reports
 
+## Pending YouTube Topic collection follow-up (2026-11-04)
+
+`lib/metrics/youtube-data.ts` handles public YouTube reads and structured errors.
+Topic channels may advertise an uploads playlist that returns 404. Only an exact
+`playlistNotFound` response (or absent playlist ID) triggers a channel-restricted
+search fallback; quota, permission and transient errors propagate as concise
+messages. Search is higher-cost than playlist lookup and is limited to this path.
+Video IDs and statistics remain scoped to the configured channel. Empty discovery
+writes channel totals only and preserves prior release snapshots; a collection
+notice explains unavailable release statistics. Other collectors stay independent.
+Regular YouTube video/Short discovery remains unchanged and is regression tested.
+
 ## Current domain and OAuth boundary (Beta 1.31)
 
 - Primary application origin is `https://www.artistdeck.app`; the apex redirects to www. `APP_CANONICAL_ORIGIN` is the app/allowed return origin and `NEXT_PUBLIC_SITE_URL` controls generated invitation destinations.

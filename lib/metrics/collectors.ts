@@ -1,3 +1,4 @@
+import { discoverYouTubeMusicTracks, fetchYouTubeJson } from "@/lib/metrics/youtube-data";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import {
@@ -457,12 +458,13 @@ async function refreshYouTubeMusicMetrics(workspaceId: string): Promise<MetricCo
 
   return {
     metrics: {
-      currentReleasePlays: Number(currentRelease?.statistics?.viewCount ?? 0),
+      currentReleasePlays: currentRelease ? Number(currentRelease.statistics?.viewCount ?? 0) : null,
       currentReleaseTitle: currentRelease?.snippet?.title ?? null,
       subscribers: Number(channelItem.statistics?.subscriberCount ?? 0),
       totalPlays: Number(channelItem.statistics?.viewCount ?? 0)
     },
     name: "youtube-music",
+    ...(currentRelease ? {} : { reason: "Channel totals updated; current release statistics are unavailable." }),
     status: "fulfilled"
   };
 }
@@ -719,27 +721,6 @@ function createServiceSupabaseClient() {
   return createClient(supabaseUrl, supabaseServiceRoleKey);
 }
 
-async function fetchYouTubeJson(
-  apiKey: string,
-  resource: string,
-  params: Record<string, string>
-) {
-  const url = new URL(`https://www.googleapis.com/youtube/v3/${resource}`);
-  url.searchParams.set("key", apiKey);
-
-  for (const [key, value] of Object.entries(params)) {
-    url.searchParams.set(key, value);
-  }
-
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    throw new Error(`YouTube API request failed: ${response.status} ${await response.text()}`);
-  }
-
-  return response.json();
-}
-
 async function fetchSpotifyAccessToken(clientId: string, clientSecret: string) {
   const response = await fetch("https://accounts.spotify.com/api/token", {
     body: new URLSearchParams({ grant_type: "client_credentials" }),
@@ -818,36 +799,6 @@ async function discoverLatestYouTubeUploads(
         (upload: { durationSeconds: number }) => upload.durationSeconds > maxShortDurationSeconds
       ) ?? null
   };
-}
-
-async function discoverYouTubeMusicTracks(apiKey: string, channelItem: any) {
-  const uploadsPlaylistId = channelItem.contentDetails?.relatedPlaylists?.uploads;
-
-  if (!uploadsPlaylistId) {
-    return [];
-  }
-
-  const playlist = await fetchYouTubeJson(apiKey, "playlistItems", {
-    maxResults: "25",
-    part: "snippet,contentDetails",
-    playlistId: uploadsPlaylistId
-  });
-  const trackIds =
-    playlist.items?.map((item: any) => item.contentDetails?.videoId).filter(Boolean) ?? [];
-
-  if (trackIds.length === 0) {
-    return [];
-  }
-
-  const videos = await fetchYouTubeJson(apiKey, "videos", {
-    id: trackIds.join(","),
-    part: "id,snippet,statistics"
-  });
-
-  return ((videos.items ?? []) as YouTubeVideoItem[]).sort(
-    (first, second) =>
-      Date.parse(second.snippet?.publishedAt ?? "") - Date.parse(first.snippet?.publishedAt ?? "")
-  );
 }
 
 function parseYouTubeDurationSeconds(duration: string) {

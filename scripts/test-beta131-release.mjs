@@ -11,6 +11,7 @@ assert.match(page, /const appVersionLabel = "Beta 1\.31";/);
 
 // Explicit offline allowlist: never discover or run live fixture/mutation scripts.
 const scripts = [
+  "test-youtube-topic-discovery.mjs",
   "test-custom-domain-oauth.mjs",
   "test-oauth-attempts.mjs",
   "test-meta-fstats-login-oauth.mjs",

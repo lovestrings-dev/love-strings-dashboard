@@ -6626,14 +6626,18 @@ export default function Home() {
         const failures = result.results
           .filter((item: { status: string }) => item.status === "rejected")
           .map((item: { name: string; reason?: string }) =>
-            `${item.name}: ${item.reason || "Collection failed."}`
+            `${item.name === "youtube-music" ? "YouTube Music" : item.name === "youtube" ? "YouTube Channel" : item.name}: ${item.reason || "Collection failed."}`
           );
-        throw new Error(failures.join(" "));
+        throw new Error(`Updated ${refreshedCount}; ${failedCount} failed. ${failures.join(" ")}`);
       }
 
+      const notices = (result.results ?? [])
+        .filter((item: { status: string; reason?: string }) => item.status === "fulfilled" && item.reason)
+        .map((item: { name: string; reason: string }) => `${item.name === "youtube-music" ? "YouTube Music" : item.name}: ${item.reason}`);
       setRefreshStatus({
-        message:
-          skippedCount > 0
+        message: notices.length > 0
+          ? `Updated ${refreshedCount}. ${notices.join(" ")}`
+          : skippedCount > 0
             ? `Updated ${refreshedCount}; skipped ${skippedCount}.`
             : `Updated ${refreshedCount} data collectors.`,
         state: refreshedCount > 0 ? "success" : "error"

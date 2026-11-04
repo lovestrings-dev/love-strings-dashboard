@@ -3162,6 +3162,9 @@ h2 {
 }
 
 .refresh-status {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;

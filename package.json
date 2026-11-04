@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
+    "test:youtube-topic-discovery": "node scripts/test-youtube-topic-discovery.mjs",
     "test:beta131-release": "node scripts/test-beta131-release.mjs",
     "test:beta130-release": "node scripts/test-beta130-release.mjs",
     "test:dashboard-preferences": "node --experimental-strip-types scripts/test-dashboard-preferences.mjs",
