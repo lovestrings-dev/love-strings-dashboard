@@ -2,6 +2,19 @@
 
 This file tracks app versions that are useful to discuss, test, and deploy. It is for product-level changes, not every small database edit.
 
+## Beta 1.33 — Production reliability and mobile workflow
+
+Prepared 6 November 2026; not yet deployed.
+
+- Release-date changes handle added/deleted Production steps and repeated edits without stale-template failures or ISO/display-date crashes. The save response returns display dates consistently.
+- A Yes/No prompt lets users recalculate Production dates or preserve them while saving a new release date. The settings link opens the Production workflow editor aligned to its header; editing remains Admin-only.
+- Production step cards start collapsed, with status dot, name, date picker and disclosure arrow. Task navigation opens its target. Cards and progress boxes follow date order; boxes match each main step’s red/amber/green status.
+- Produced and active songs, plus the Dashboard Roadmap widget, show oldest releases first. Production steps comes before Song options; release-date helper text explains the prompt.
+- Campaign day headers show red/yellow/green completion circles. The current-day outline remains visible in dark mode on Dashboard and Marketing. Dashboard campaign artwork matches Production’s mobile size.
+- Home-screen standalone app mode supports pull-to-refresh from the top of the page. Regular browser gestures and form/nested-panel interaction remain unchanged.
+
+No new dependencies, migrations or environment variables. No bulk data repairs. See [Beta 1.33 release checkpoint](releases/beta-1.33.md).
+
 ## Beta 1.32 — Dark mode and daily workflow polish
 
 Prepared 4 November 2026; not yet deployed.

@@ -224,6 +224,26 @@ export function getProductionV1TemplateDrift(
  * Release-date changes must pass this plan to the scheduler; current workspace
  * template data belongs only to future-song creation or an explicit replan.
  */
+/** Reconcile song-local additions/deletions without restoring removed work or
+ * assigning template timing to a manually dated custom step. */
+export function reconcileProductionV1Snapshot(
+  snapshot: ProductionV1SongSnapshot,
+  liveSteps: Array<{ id: string; label: string; position?: number }>
+): ProductionV1SongSnapshot {
+  const snapshotById = new Map(snapshot.steps.map((step) => [step.id, step]));
+  return {
+    ...snapshot,
+    steps: liveSteps.map((step, index) => {
+      const existing = snapshotById.get(step.id);
+      return existing ? { ...existing, position: index + 1 } : {
+        id: step.id, stableKey: step.id, displayName: step.label,
+        position: index + 1, stepKind: "production_step", semanticKind: "standard",
+        leadTimeDays: 0, standardCostAmount: 0, timingMode: "fixed"
+      };
+    })
+  };
+}
+
 export function createProductionV1SongPlanFromSnapshot({
   liveSteps,
   productionDeadline,

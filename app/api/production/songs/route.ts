@@ -2,10 +2,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   createProductionV1SongPlanFromSnapshot,
+  reconcileProductionV1Snapshot,
   recalculateProductionV1Song,
   type ProductionV1SongPlan
 } from "@/lib/production-template-v1";
-import { normalizeProductionDateForPersistence } from "@/lib/production-date-format";
+import { formatProductionDateForDisplay, normalizeProductionDateForPersistence } from "@/lib/production-date-format";
 import { requireWorkspaceAccess } from "@/lib/server/workspace-owner";
 
 type MarketingStatus = "not-started" | "in-progress" | "done";
@@ -53,6 +54,7 @@ type ProductionSongConfig = {
   productionTemplateSnapshot?: unknown;
 };
 type ProductionSavePayload = {
+  recalculateSteps?: boolean;
   song?: ProductionSongConfig;
   songs?: ProductionSongConfig[];
 };
@@ -80,7 +82,7 @@ export async function POST(request: NextRequest) {
     const savedSongs = [];
 
     for (const song of songs) {
-      savedSongs.push(await saveProductionSong(song, workspaceId));
+      savedSongs.push(await saveProductionSong(song, workspaceId, payload.recalculateSteps !== false));
     }
 
     return NextResponse.json({
@@ -122,9 +124,9 @@ export async function DELETE(request: NextRequest) {
   return NextResponse.json({ status: "ok" });
 }
 
-async function saveProductionSong(song: ProductionSongConfig, workspaceId: string) {
+async function saveProductionSong(song: ProductionSongConfig, workspaceId: string, recalculateSteps = true) {
   if (song.schedulingModel === "template-v1") {
-    return saveProductionV1SongAtomically(song, workspaceId);
+    return saveProductionV1SongAtomically(song, workspaceId, recalculateSteps);
   }
 
   const supabase = createServiceSupabaseClient();
@@ -172,6 +174,14 @@ async function saveProductionSong(song: ProductionSongConfig, workspaceId: strin
 
   if (!savedSong) {
     throw new Error("Production song was not found in the active workspace.");
+  }
+
+  if (!recalculateSteps) {
+    // The legacy release trigger sets this field; restore the requested value
+    // without re-firing that trigger. Step rows below retain their dates.
+    const { error } = await supabase.from("production_songs")
+      .update({ production_deadline: productionDeadline }).eq("id", savedSong.id).eq("workspace_id", workspaceId);
+    if (error) throw error;
   }
 
   const { error: campaignSyncError } = await supabase
@@ -323,7 +333,8 @@ async function saveProductionSong(song: ProductionSongConfig, workspaceId: strin
 
 async function saveProductionV1SongAtomically(
   song: ProductionSongConfig,
-  workspaceId: string
+  workspaceId: string,
+  recalculateSteps = true
 ) {
   const releaseDate = normalizeProductionDateForPersistence(song.releaseDate);
 
@@ -340,24 +351,28 @@ async function saveProductionV1SongAtomically(
   if (song.dbId) {
     const [{ data: existingSong, error: songError }, { data: existingSteps, error: stepsError }] = await Promise.all([
       supabase.from("production_songs").select("production_deadline, release_date, production_template_id, production_template_version, production_template_snapshot").eq("id", song.dbId).eq("workspace_id", workspaceId).eq("scheduling_model", "template-v1").single(),
-      supabase.from("production_steps").select("stable_key, step_deadline, status, template_step_id").eq("production_song_id", song.dbId).order("position")
+      supabase.from("production_steps").select("stable_key, label, position, step_deadline, status, template_step_id").eq("production_song_id", song.dbId).order("position")
     ]);
     if (songError || stepsError || !existingSong || !existingSteps) throw songError ?? stepsError ?? new Error("Template-v1 Production song was not found.");
+    const persistedSnapshot = reconcileProductionV1Snapshot(
+      existingSong.production_template_snapshot as ProductionV1SongPlan["snapshot"],
+      existingSteps.map((step) => ({ ...step, id: step.template_step_id ?? step.stable_key }))
+    );
     // The persisted snapshot, not a debounced client document, owns schedule semantics.
-    if (existingSong.release_date !== releaseDate) {
+    if (existingSong.release_date !== releaseDate && recalculateSteps) {
       const requestedStatusByStableKey = new Map(song.steps.map((step) => [step.id, step.status]));
       const plan = createProductionV1SongPlanFromSnapshot({
         liveSteps: existingSteps.map((step) => ({ deadline: step.step_deadline, id: step.template_step_id ?? step.stable_key, status: requestedStatusByStableKey.get(step.stable_key) ?? step.status })),
         productionDeadline: existingSong.production_deadline,
         releaseDate: existingSong.release_date,
-        snapshot: existingSong.production_template_snapshot as ProductionV1SongPlan["snapshot"]
+        snapshot: persistedSnapshot
       });
       const recalculated = recalculateProductionV1Song(plan, releaseDate);
       canonicalSong = {
         ...song,
         deadline: recalculated.productionDeadline,
         productionTemplateId: existingSong.production_template_id,
-        productionTemplateSnapshot: existingSong.production_template_snapshot,
+        productionTemplateSnapshot: persistedSnapshot,
         productionTemplateVersion: existingSong.production_template_version,
         steps: song.steps.map((step) => ({
           ...step,
@@ -365,10 +380,24 @@ async function saveProductionV1SongAtomically(
         }))
       };
     } else {
-      canonicalSong = { ...song, productionTemplateId: existingSong.production_template_id, productionTemplateSnapshot: existingSong.production_template_snapshot, productionTemplateVersion: existingSong.production_template_version };
+      canonicalSong = {
+        ...song,
+        ...(existingSong.release_date !== releaseDate && !recalculateSteps ? {
+          deadline: existingSong.production_deadline,
+          steps: song.steps.map((step) => ({ ...step, deadline: existingSteps.find((saved) => saved.stable_key === step.id)?.step_deadline ?? step.deadline }))
+        } : {}),
+        productionTemplateId: existingSong.production_template_id, productionTemplateSnapshot: persistedSnapshot, productionTemplateVersion: existingSong.production_template_version
+      };
     }
   }
   const productionDeadline = normalizeProductionDateForPersistence(canonicalSong.deadline);
+  canonicalSong = {
+    ...canonicalSong,
+    productionTemplateSnapshot: reconcileProductionV1Snapshot(
+      canonicalSong.productionTemplateSnapshot as ProductionV1SongPlan["snapshot"],
+      canonicalSong.steps.map((step) => ({ ...step, id: step.templateStepId ?? step.id.replace(/^v1-/, "") }))
+    )
+  };
   if (!productionDeadline) throw new Error(`Invalid Production dates for ${song.title}.`);
   const rpcSong = {
     ...canonicalSong,
@@ -404,7 +433,16 @@ async function saveProductionV1SongAtomically(
     throw new Error("Atomic Production V1 save did not return a song.");
   }
 
-  return { dbId: savedSong.id, id: savedSong.slug, song: canonicalSong };
+  return {
+    dbId: savedSong.id,
+    id: savedSong.slug,
+    song: {
+      ...canonicalSong,
+      deadline: formatProductionDateForDisplay(canonicalSong.deadline),
+      releaseDate: formatProductionDateForDisplay(releaseDate),
+      steps: canonicalSong.steps.map((step) => ({ ...step, deadline: formatProductionDateForDisplay(step.deadline) }))
+    }
+  };
 }
 
 function normalizeBudgetLines(budgetLines: ProductionBudgetLine[]) {

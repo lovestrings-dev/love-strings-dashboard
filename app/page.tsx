@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { PullToRefresh } from "./components/pull-to-refresh";
 import { AppearanceSettings } from "./components/appearance-provider";
 import { DarkModeFeature } from "./components/dark-mode-feature";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
@@ -53,6 +54,7 @@ import {
 } from "@/lib/marketing-defaults";
 import {
   createProductionV1SongPlanFromSnapshot,
+  reconcileProductionV1Snapshot,
   instantiateProductionV1Song,
   recalculateProductionV1Song,
   type ProductionTemplateV1,
@@ -60,6 +62,7 @@ import {
 } from "@/lib/production-template-v1";
 import { DateInput } from "./date-input";
 import { toDisplayDate, toIsoDate } from "@/lib/date-input";
+import { formatProductionDateForDisplay, normalizeProductionDateForPersistence } from "@/lib/production-date-format";
 import { completeStepsForPastRelease } from "@/lib/production-completion";
 import {
   addBudgetRecurrenceCadence,
@@ -757,7 +760,7 @@ const platformStats = [
   }
 ];
 
-const appVersionLabel = "Beta 1.32";
+const appVersionLabel = "Beta 1.33";
 const defaultAppLogoUrl = "/artistdeck-logo.png";
 
 const sections = [
@@ -1943,8 +1946,8 @@ function sortProductionSongsByDeadline(songs: ProductionSongConfig[]) {
 function sortProductionStepsByDeadline(steps: ProductionStep[]) {
   return [...steps].sort(
     (firstStep, secondStep) =>
-      getProductionDeadlineSortTime(firstStep.deadline) -
-      getProductionDeadlineSortTime(secondStep.deadline)
+      getProductionDeadlineSortTime(formatProductionDateForDisplay(firstStep.deadline)) -
+      getProductionDeadlineSortTime(formatProductionDateForDisplay(secondStep.deadline))
   );
 }
 
@@ -1979,20 +1982,23 @@ function applyProductionV1ReleaseSchedule(song: ProductionSongConfig, releaseDat
   if (song.schedulingModel !== "template-v1" || !song.productionTemplateSnapshot || !toIsoDate(releaseDateInput)) return song;
   const plan = createProductionV1SongPlanFromSnapshot({
     liveSteps: song.steps.map((step) => ({
-      deadline: toIsoDate(step.deadline) ?? "",
+      deadline: normalizeProductionDateForPersistence(step.deadline) ?? "",
       id: step.templateStepId ?? step.id.replace(/^v1-/, ""),
       status: step.status as "not-started" | "in-progress" | "done"
     })),
-    productionDeadline: toIsoDate(song.deadline) ?? "",
-    releaseDate: toIsoDate(song.releaseDate) ?? "",
-    snapshot: song.productionTemplateSnapshot as ProductionV1SongPlan["snapshot"]
+    productionDeadline: normalizeProductionDateForPersistence(song.deadline) ?? "",
+    releaseDate: normalizeProductionDateForPersistence(song.releaseDate) ?? "",
+    snapshot: reconcileProductionV1Snapshot(
+      song.productionTemplateSnapshot as ProductionV1SongPlan["snapshot"],
+      song.steps.map((step) => ({ ...step, id: step.templateStepId ?? step.id.replace(/^v1-/, "") }))
+    )
   });
   const recalculated = recalculateProductionV1Song(plan, toIsoDate(releaseDateInput)!);
   return {
-    ...song, deadline: formatDateKeyForInput(recalculated.productionDeadline), releaseDate: releaseDateInput,
+    ...song, productionTemplateSnapshot: plan.snapshot, deadline: formatDateKeyForInput(recalculated.productionDeadline), releaseDate: releaseDateInput,
     steps: sortProductionStepsForSong(song, song.steps.map((step) => {
       const next = recalculated.steps.find((candidate) => candidate.id === (step.templateStepId ?? step.id.replace(/^v1-/, "")));
-      return next ? { ...step, deadline: formatDateKeyForInput(next.deadline) } : step;
+      return next ? { ...step, deadline: formatDateKeyForInput(next.deadline) } : { ...step, deadline: formatProductionDateForDisplay(step.deadline) };
     }))
   };
 }
@@ -4979,11 +4985,12 @@ async function createRoadmapAwareProductionSong(
 }
 
 async function saveProductionSongToSupabase(
-  song: ProductionSongConfig
+  song: ProductionSongConfig,
+  recalculateSteps = true
 ): Promise<ProductionSongSaveResult> {
   try {
     const response = await fetch("/api/production/songs", {
-      body: JSON.stringify({ song }),
+      body: JSON.stringify({ song, recalculateSteps }),
       credentials: "same-origin",
       headers: {
         "Content-Type": "application/json",
@@ -5451,6 +5458,8 @@ async function saveBudgetSnapshotToSupabase({
 }
 
 export default function Home() {
+  const [pendingReleaseUpdate, setPendingReleaseUpdate] = useState<{ workspaceId: string | null; songId: string; updates: Partial<ProductionSongConfig> } | null>(null);
+  const productionReleaseChoices = useRef(new Map<string, boolean>());
   const productionSaveTimers = useRef<Record<string, number>>({});
   const productionSaveChains = useRef(new Map<string, Promise<void>>());
   const productionSaveVersions = useRef(new Map<string, number>());
@@ -5980,6 +5989,7 @@ export default function Home() {
   function queueProductionSongSave(song: ProductionSongConfig) {
     const existingTimer = productionSaveTimers.current[song.id];
     const songWorkspaceId = activeWorkspaceId;
+    const recalculateSteps = productionReleaseChoices.current.get(song.id) ?? true;
 
     if (existingTimer) {
       window.clearTimeout(existingTimer);
@@ -5998,7 +6008,7 @@ export default function Home() {
       });
       const previousSave = productionSaveChains.current.get(song.id) ?? Promise.resolve();
       const nextSave = previousSave.catch(() => undefined).then(async () => {
-        const savedSong = await saveProductionSongToSupabase(song);
+        const savedSong = await saveProductionSongToSupabase(song, recalculateSteps);
         if (activeWorkspaceIdRef.current !== songWorkspaceId || productionSaveVersions.current.get(song.id) !== saveVersion) return;
         if (!savedSong.ok) {
           const lastConfirmed = productionLastConfirmedSongs.current.get(song.id);
@@ -6010,6 +6020,7 @@ export default function Home() {
           productionLastConfirmedSongs.current.set(song.id, savedSong.song);
           setProductionSongDrafts((current) => sortProductionSongsByDeadline(current.map((currentSong) => currentSong.id === song.id ? savedSong.song! : currentSong)));
         }
+        productionReleaseChoices.current.delete(song.id);
         setProductionSaveStatus({ message: "Production saved.", state: "success" });
       });
       productionSaveChains.current.set(song.id, nextSave);
@@ -6875,8 +6886,15 @@ export default function Home() {
     }
   }
 
-  function updateProductionSong(songId: string, updates: Partial<ProductionSongConfig>) {
+  function updateProductionSong(songId: string, updates: Partial<ProductionSongConfig>, recalculateSteps?: boolean) {
     const currentSong = productionSongDrafts.find((song) => song.id === songId);
+    if (currentSong && updates.releaseDate && updates.releaseDate !== currentSong.releaseDate) {
+      if (recalculateSteps === undefined) {
+        setPendingReleaseUpdate({ workspaceId: activeWorkspaceId, songId, updates });
+        return;
+      }
+      productionReleaseChoices.current.set(songId, recalculateSteps);
+    }
     const mergedSong = currentSong
       ? ({
           ...currentSong,
@@ -6886,7 +6904,7 @@ export default function Home() {
             : currentSong.steps
         } satisfies ProductionSongConfig)
       : null;
-    const scheduledSong = mergedSong && updates.releaseDate
+    const scheduledSong = mergedSong && updates.releaseDate && recalculateSteps !== false
       ? (mergedSong.schedulingModel === "template-v1" ? applyProductionV1ReleaseSchedule(mergedSong, updates.releaseDate) : applyProductionReleaseSchedule(mergedSong, updates.releaseDate))
       : mergedSong;
     const nextSong = scheduledSong && updates.releaseDate
@@ -8924,6 +8942,7 @@ export default function Home() {
 
   return (
     <main className="dashboard-shell">
+      <PullToRefresh />
       {!isResolvingInitialWorkspace ? <>
       <aside className="sidebar" aria-label="Primary">
         <div className="brand-header">
@@ -9252,8 +9271,48 @@ export default function Home() {
       </section>
       </> : null}
       {isResolvingInitialWorkspace || (!settingsView && activeSection === "Dashboard" && !isDashboardInitialLoadReady) ? <DashboardInitialLoadingOverlay /> : null}
+      {pendingReleaseUpdate && pendingReleaseUpdate.workspaceId === activeWorkspaceId ? (
+        <ProductionReleasePrompt
+          canEditSettings={workspaceRole === "admin"}
+          onCancel={() => setPendingReleaseUpdate(null)}
+          onChoose={(recalculate) => {
+            updateProductionSong(pendingReleaseUpdate.songId, pendingReleaseUpdate.updates, recalculate);
+            setPendingReleaseUpdate(null);
+          }}
+          onOpenSettings={() => {
+            setPendingReleaseUpdate(null);
+            setOpenProductionWorkflowFromRoadmap(true);
+            setSettingsView("general");
+          }}
+        />
+      ) : null}
       {isLayoutDebugEnabled ? <LayoutDebugPanel section={activeSection} /> : null}
     </main>
+  );
+}
+
+function ProductionReleasePrompt({ canEditSettings, onCancel, onChoose, onOpenSettings }: {
+  canEditSettings: boolean;
+  onCancel: () => void;
+  onChoose: (recalculate: boolean) => void;
+  onOpenSettings: () => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    dialog?.showModal();
+    return () => dialog?.close();
+  }, []);
+  return (
+    <dialog className="production-release-prompt" ref={dialogRef} aria-labelledby="production-release-prompt-title" onCancel={onCancel}>
+      <h2 id="production-release-prompt-title">Do you want to recalculate production steps according to your preset release cadence?</h2>
+      <p>You can adjust your cadence in settings <button className="production-release-settings-link" disabled={!canEditSettings} onClick={onOpenSettings} type="button">here</button>.</p>
+      {!canEditSettings ? <p>Only workspace admins can edit cadence settings.</p> : null}
+      <div className="production-release-prompt-actions">
+        <button onClick={() => onChoose(false)} type="button">No</button>
+        <button onClick={() => onChoose(true)} type="button">Yes</button>
+      </div>
+    </dialog>
   );
 }
 
@@ -9674,6 +9733,7 @@ function GeneralSettingsView({
   const [editingPlatformSlug, setEditingPlatformSlug] = useState<string | null>(null);
   const [isWorkspaceSetupOpen, setIsWorkspaceSetupOpen] = useState(false);
   const [isProductionWorkflowOpen, setIsProductionWorkflowOpen] = useState(false);
+  const pendingProductionSettingsFocus = useRef(false);
   const [isMarketingDefaultsOpen, setIsMarketingDefaultsOpen] = useState(false);
   const [isMemberAccessOpen, setIsMemberAccessOpen] = useState(false);
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
@@ -9717,9 +9777,31 @@ function GeneralSettingsView({
 
   useEffect(() => {
     if (!openProductionWorkflowOnMount) return;
+    pendingProductionSettingsFocus.current = true;
     setActiveGeneralSettingsPanel("production");
     onProductionWorkflowOpenConsumed();
   }, [onProductionWorkflowOpenConsumed, openProductionWorkflowOnMount, setActiveGeneralSettingsPanel]);
+
+  useEffect(() => {
+    if (!isProductionWorkflowOpen || !pendingProductionSettingsFocus.current) return;
+    const section = document.getElementById("production-module-settings");
+    if (!section) return;
+    // Loading the workflow changes document height; align after it has loaded
+    // as well as on the initial render, rather than keeping a clamped scroll.
+    const align = () => {
+      const sidebar = document.querySelector<HTMLElement>(".sidebar");
+      const offset = sidebar && window.matchMedia("(max-width: 980px)").matches ? sidebar.getBoundingClientRect().bottom : 0;
+      window.scrollTo({ top: Math.max(0, window.scrollY + section.getBoundingClientRect().top - offset), behavior: "instant" });
+      if (section.querySelector(".production-workflow-settings")) {
+        pendingProductionSettingsFocus.current = false;
+        observer.disconnect();
+      }
+    };
+    const observer = new ResizeObserver(align);
+    observer.observe(section);
+    const frame = window.requestAnimationFrame(align);
+    return () => { window.cancelAnimationFrame(frame); observer.disconnect(); };
+  }, [isProductionWorkflowOpen]);
 
   useEffect(() => {
     if (!openGoogleServicesOnMount) return;
@@ -10581,7 +10663,7 @@ function GeneralSettingsView({
 
         </section>
 
-        <section className="settings-parent-card settings-parent-production">
+        <section className="settings-parent-card settings-parent-production" id="production-module-settings">
           <div className="settings-parent-heading workspace-setup-parent-heading">
             <div><p className="eyebrow">Production module</p>{!isProductionWorkflowOpen ? <p className="settings-parent-summary">Manage you new song defaults.</p> : null}</div>
             <button aria-expanded={isProductionWorkflowOpen} aria-label={isProductionWorkflowOpen ? "Collapse Production module" : "Edit Production module"} className="settings-icon-button" onClick={() => toggleGeneralSettingsPanel("production")} type="button"><Pencil aria-hidden size={16} /></button>
@@ -13424,9 +13506,7 @@ function ProductionView({
     }
   });
   const activeSongs = orderedSongs.filter((song) => getRoadmapProductionStatus(song) !== "done");
-  const producedSongs = orderedSongs
-    .filter((song) => getRoadmapProductionStatus(song) === "done")
-    .sort((first, second) => getCampaignSortTime(second.releaseDate) - getCampaignSortTime(first.releaseDate));
+  const producedSongs = orderedSongs.filter((song) => getRoadmapProductionStatus(song) === "done");
 
   useEffect(() => {
     if (!focusTarget) {
@@ -13512,6 +13592,7 @@ function ProductionView({
                     }
                     key={song.id}
                     sharingControl={songSharingControl(song)}
+                    stepFocusTarget={focusTarget?.songId === song.id ? focusTarget : null}
                     onChange={song.receivedShare ? () => undefined : onSongChange}
                     onDelete={onDeleteSong}
                     onFocus={onFocusSong}
@@ -13539,6 +13620,7 @@ function ProductionView({
             }
             key={song.id}
             sharingControl={songSharingControl(song)}
+                    stepFocusTarget={focusTarget?.songId === song.id ? focusTarget : null}
             onChange={song.receivedShare ? () => undefined : onSongChange}
             onDelete={onDeleteSong}
             onFocus={onFocusSong}
@@ -13561,6 +13643,7 @@ function ProductionView({
 
 function ProductionSongBoard({
   focusToken,
+  stepFocusTarget,
   sharingControl,
   guidanceSongSettingsHint,
   openSongOptionsOnFocus,
@@ -13574,6 +13657,7 @@ function ProductionSongBoard({
   restoreContext
 }: {
   focusToken?: number;
+  stepFocusTarget: { elementId?: string; inputId?: string; token: number } | null;
   sharingControl: ProductionSongSharingControl;
   guidanceSongSettingsHint: boolean;
   openSongOptionsOnFocus?: boolean;
@@ -13740,7 +13824,6 @@ function ProductionSongBoard({
       return;
     }
 
-    setAppliedDeadlineInput(deadlineInput);
     setIsReleaseDateEditing(false);
     onFocus(song.id);
     onChange(song.id, {
@@ -13945,6 +14028,16 @@ function ProductionSongBoard({
 
       <div className="production-song-controls">
         <button
+          aria-controls={`${song.id}-production-details`}
+          aria-expanded={isSongOpen}
+          className="production-section-toggle"
+          onClick={toggleSongDetails}
+          type="button"
+        >
+          <ChevronDown aria-hidden size={14} />
+          Production steps
+        </button>
+        <button
           aria-controls={`${song.id}-production-options`}
           aria-expanded={isSongOptionsOpen}
           className={`production-section-toggle${guidanceSongSettingsHint ? " guidance-target" : ""}`}
@@ -13956,16 +14049,6 @@ function ProductionSongBoard({
         >
           <ChevronDown aria-hidden size={14} />
           Song options
-        </button>
-        <button
-          aria-controls={`${song.id}-production-details`}
-          aria-expanded={isSongOpen}
-          className="production-section-toggle"
-          onClick={toggleSongDetails}
-          type="button"
-        >
-          <ChevronDown aria-hidden size={14} />
-          Production steps
         </button>
       </div>
       <div className="campaign-details production-song-options" hidden={!isSongOptionsOpen} id={`${song.id}-production-options`}>
@@ -14094,8 +14177,7 @@ function ProductionSongBoard({
               </div>
               {isReleaseDateEditing ? (
                 <span className="release-date-change-warning">
-                  Changing release date will recalculate Production deadlines and
-                  update Marketing and Roadmap planning!
+                  When you save, choose whether to recalculate step dates. Marketing and Roadmap will use the new release date.
                 </span>
               ) : null}
             </div>
@@ -14151,11 +14233,11 @@ function ProductionSongBoard({
         hidden={!isSongOpen}
         id={`${song.id}-production-details`}
       >
-        <fieldset className="production-shared-readonly" disabled={Boolean(song.receivedShare)}>
+        <div className="production-shared-readonly">
         <div className="campaign-table-wrap">
           <table className="campaign-table production-table">
             <tbody>
-              {song.steps.map((step) => (
+              {sortProductionStepsByDeadline(song.steps).map((step) => (
                 <ProductionStepRow
                   key={step.id}
                   onAddTask={addStepTask}
@@ -14165,6 +14247,14 @@ function ProductionSongBoard({
                   onStepDeadlineCommit={commitStepDeadline}
                   onTaskChange={updateStepTask}
                   songId={song.id}
+                  readOnly={Boolean(song.receivedShare)}
+                  revealToken={
+                    stepFocusTarget?.elementId === getProductionStepElementId(song.id, step.id) ||
+                    stepFocusTarget?.elementId?.startsWith(`production-task-${song.id}-${step.id}-`) ||
+                    stepFocusTarget?.inputId?.startsWith(`production-task-input-${song.id}-${step.id}-`)
+                      ? stepFocusTarget.token
+                      : restoreContext?.context.stepId === step.id ? restoreContext.token : undefined
+                  }
                   step={step}
                 />
               ))}
@@ -14174,6 +14264,7 @@ function ProductionSongBoard({
         <div className="campaign-day-actions">
           <button
             className="add-campaign-day-button"
+            disabled={Boolean(song.receivedShare)}
             onClick={addProductionStep}
             type="button"
           >
@@ -14189,7 +14280,7 @@ function ProductionSongBoard({
                   <ChevronUp size={18} aria-hidden />
                 </button>
         </div>
-        </fieldset>
+        </div>
       </div>
     </section>
   );
@@ -14201,22 +14292,22 @@ function ProductionProgressStrip({
   steps: ProductionStep[];
 }) {
   return (
-    <div className="campaign-progress-strip" aria-label="Production step progress">
+    <div className="campaign-progress-strip production-progress-strip" aria-label="Production step progress">
       <strong className="campaign-progress-percent">
         {calculateProductionCompletion(steps)}%
       </strong>
       <div className="campaign-progress-boxes">
-        {steps.map((step) => {
+        {sortProductionStepsByDeadline(steps).map((step) => {
           const status = getProductionStepProgressStatus(step);
           return (
             <span
-              aria-label={`${step.label}: ${campaignDayStatusLabels[status]}`}
+              aria-label={`${step.label}: ${statusLabels[step.status]}`}
               className={[
                 "campaign-progress-box",
                 `campaign-progress-box-${status}`
               ].join(" ")}
               key={step.id}
-              title={`${step.label}: ${campaignDayStatusLabels[status]}`}
+              title={`${step.label}: ${statusLabels[step.status]}`}
             />
           );
         })}
@@ -14255,6 +14346,8 @@ function ProductionStepRow({
   onStepDeadlineCommit,
   onTaskChange,
   songId,
+  readOnly,
+  revealToken,
   step
 }: {
   onAddTask: (stepId: string) => void;
@@ -14268,17 +14361,32 @@ function ProductionStepRow({
     updates: Partial<Pick<ExtraCampaignTask, "budgetLines" | "status" | "title">>
   ) => void;
   songId: string;
+  readOnly: boolean;
+  revealToken?: number;
   step: ProductionStep;
 }) {
   const canDeleteStep =
     !step.isDefaultStep ||
     deletableProductionStepLabels.has(step.label.trim().toLowerCase());
   const formattedDeadline = formatCampaignDateKey(
-    formatInputDateForDatabase(step.deadline) ?? ""
+    normalizeProductionDateForPersistence(step.deadline) ?? ""
   );
+  const [isStepOpen, setIsStepOpen] = useState(false);
+  const detailsId = `${getProductionStepElementId(songId, step.id)}-details`;
   const [isDeleteArmed, setIsDeleteArmed] = useState(false);
-  const [deadlineDraft, setDeadlineDraft] = useState(step.deadline);
+  const [deadlineDraft, setDeadlineDraft] = useState(() => formatProductionDateForDisplay(step.deadline));
   const deleteButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (revealToken === undefined) return;
+    const timer = window.setTimeout(() => setIsStepOpen(true), 0);
+    return () => window.clearTimeout(timer);
+  }, [revealToken]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDeadlineDraft(formatProductionDateForDisplay(step.deadline)), 0);
+    return () => window.clearTimeout(timer);
+  }, [step.deadline]);
 
   useEffect(() => {
     if (!isDeleteArmed) {
@@ -14321,11 +14429,15 @@ function ProductionStepRow({
     <tr className="production-step-row" id={getProductionStepElementId(songId, step.id)}>
       <td className="production-step-content-cell" colSpan={2}>
         <div className="campaign-cell">
-          <div className="production-step-deadline-section">
-            <strong>{formattedDeadline ? `Deadline, ${formattedDeadline}` : "Deadline"}</strong>
+          <div className="production-step-header">
+            <div className="production-step-heading">
+              <StatusDot label={statusLabels[step.status]} status={step.status} />
+              <strong>{step.label}</strong>
+            </div>
             <label className="production-step-date-field">
               <DateInput
                 aria-label={`${step.label} deadline`}
+                disabled={readOnly}
                 calendarLabel={`Choose ${step.label} deadline`}
                 error={
                   deadlineDraft && !toIsoDate(deadlineDraft)
@@ -14349,7 +14461,20 @@ function ProductionStepRow({
                 value={deadlineDraft}
               />
             </label>
+            <button
+              aria-label={`${isStepOpen ? "Collapse" : "Expand"} ${step.label} step`}
+              aria-expanded={isStepOpen}
+              aria-controls={detailsId}
+              className="settings-icon-button production-step-toggle"
+              onClick={() => { setIsStepOpen((current) => !current); setIsDeleteArmed(false); }}
+              type="button"
+            >
+              {isStepOpen ? <ChevronUp size={18} aria-hidden /> : <ChevronDown size={18} aria-hidden />}
+            </button>
           </div>
+          <div className="production-step-body" hidden={!isStepOpen} id={detailsId}>
+          <fieldset className="production-shared-readonly" disabled={readOnly}>
+          <strong className="production-step-deadline-summary">{formattedDeadline ? `Deadline, ${formattedDeadline}` : "Deadline"}</strong>
           <div className="production-step-details-section">
             <div className="production-step-task-row">
               <label className="clip-name-field">
@@ -14443,6 +14568,8 @@ function ProductionStepRow({
               <Plus size={16} aria-hidden />
               Add Subtask
             </button>
+          </div>
+          </fieldset>
           </div>
         </div>
       </td>
@@ -16104,7 +16231,13 @@ function MarketingCampaignBoard({
                   >
                     <td>
                       <div className="campaign-day-heading">
-                        <div><strong>{day.date}</strong><span>{formatReleaseOffset(day.releaseOffset)}</span></div>
+                        <div className="campaign-day-date-label">
+                          <span
+                            aria-label={`Day ${day.dayNumber}: ${campaignDayStatusLabels[getCampaignDayStatus(day)]}`}
+                            className={`status-dot campaign-day-status-${getCampaignDayStatus(day)}`}
+                          />
+                          <div><strong>{day.date}</strong><span>{formatReleaseOffset(day.releaseOffset)}</span></div>
+                        </div>
                         <button
                           aria-label={`${expandedDayNumbers.has(day.dayNumber) ? "Collapse" : "Expand"} campaign day ${day.dayNumber}: ${day.date}`}
                           aria-expanded={expandedDayNumbers.has(day.dayNumber)}
@@ -16212,7 +16345,7 @@ function CampaignProgressStrip({
           const isReleaseDay = showReleaseDay && day.releaseOffset === 0;
           const dayLabel = `Day ${day.dayNumber}: ${
             campaignDayStatusLabels[status]
-          }${isReleaseDay ? ", release day" : ""}`;
+          }${isReleaseDay ? ", release day" : ""}${isActiveDay ? ", current day" : ""}`;
           return (
             <span
               aria-label={dayLabel}
@@ -18274,9 +18407,9 @@ function DashboardRoadmapPhasePreview({
   songs: ProductionSongConfig[];
 }) {
   const [isSongListOpen, setIsSongListOpen] = useState(false);
-  const phaseSongs = [...songs]
-    .filter((song) => song.roadmapPhaseId === phase.id)
-    .sort((first, second) => (first.roadmapGeneralPosition ?? Number.MAX_SAFE_INTEGER) - (second.roadmapGeneralPosition ?? Number.MAX_SAFE_INTEGER));
+  const phaseSongs = sortProductionSongsByDeadline(
+    songs.filter((song) => song.roadmapPhaseId === phase.id)
+  );
   const releasedCount = phaseSongs.filter(isRoadmapSongReleased).length;
 
   return (
@@ -20118,21 +20251,9 @@ function getProductionStepTaskLabel(step: ProductionStep) {
 }
 
 function getProductionStepProgressStatus(step: ProductionStep): CampaignDayProgressStatus {
-  const statuses = [
-    step.status,
-    ...step.extraTasks.map((task) => task.status)
-  ];
-  const doneCount = statuses.filter((status) => status === "done").length;
-
-  if (doneCount === statuses.length) {
-    return "complete";
-  }
-
-  if (doneCount === 0) {
-    return "empty";
-  }
-
-  return "partial";
+  if (step.status === "done") return "complete";
+  if (step.status === "in-progress") return "partial";
+  return "empty";
 }
 
 function formatProductionStepDate(value: string) {

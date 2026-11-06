@@ -8,7 +8,7 @@ const [route, migration, derivedTimingMigration] = await Promise.all([
 ]);
 
 assert.match(route, /song\.schedulingModel === "template-v1"/);
-assert.match(route, /saveProductionV1SongAtomically\(song, workspaceId\)/);
+assert.match(route, /saveProductionV1SongAtomically\(song, workspaceId, recalculateSteps\)/);
 assert.match(route, /\.rpc\("save_production_v1_song_with_derived_custom_timing"/);
 
 assert.match(migration, /create or replace function public\.save_production_v1_song_atomically/);
@@ -26,7 +26,7 @@ assert.match(migration, /coalesce\(p_song ->> 'schedulingModel', ''\) <> 'templa
 assert.match(migration, /grant execute on function public\.save_production_v1_song_atomically\(uuid, jsonb\) to service_role/);
 
 const legacyDeleteInsertPath = route.indexOf('const { error: deleteStepsError }');
-const v1Branch = route.indexOf('return saveProductionV1SongAtomically(song, workspaceId);');
+const v1Branch = route.indexOf('return saveProductionV1SongAtomically(song, workspaceId, recalculateSteps);');
 assert.ok(v1Branch >= 0 && legacyDeleteInsertPath > v1Branch, "V1 exits before the legacy delete/reinsert path.");
 assert.match(derivedTimingMigration, /greatest\(0, \(coalesce\(next_step\.step_deadline, song\.release_date\) - custom_step\.step_deadline\)\)::integer/);
 assert.match(derivedTimingMigration, /'\{timingMode\}', '"derived"'::jsonb/);

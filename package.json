@@ -1,6 +1,6 @@
 {
   "name": "love-strings-dashboard",
-  "version": "1.32.0-beta.1",
+  "version": "1.33.0-beta.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -9,6 +9,7 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test:youtube-topic-discovery": "node scripts/test-youtube-topic-discovery.mjs",
+    "test:beta133-release": "node scripts/test-beta133-release.mjs",
     "test:beta132-release": "node scripts/test-beta132-release.mjs",
     "test:beta131-release": "node scripts/test-beta131-release.mjs",
     "test:beta130-release": "node scripts/test-beta130-release.mjs",
@@ -84,7 +85,9 @@
     "import:youtube": "node scripts/import-youtube-metrics.mjs --apply",
     "test:google-refresh-errors": "node scripts/test-google-refresh-errors.mjs",
     "test:production-past-release": "node scripts/test-production-past-release.mjs",
-    "test:production-sharing": "node scripts/test-production-sharing.mjs"
+    "test:production-sharing": "node scripts/test-production-sharing.mjs",
+    "test:production-snapshot-reconciliation": "node --experimental-strip-types scripts/test-production-snapshot-reconciliation.mjs",
+    "test:pull-to-refresh": "node scripts/test-pull-to-refresh.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.4",

@@ -8323,10 +8323,10 @@ h2 {
 }
 
 .production-release-date-editor .release-date-change-warning {
-  color: var(--preview-negative, #b73131);
-  font-size: 11px;
-  font-weight: 800;
-  line-height: 1.3;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
   text-transform: none;
 }
 
@@ -8402,7 +8402,7 @@ h2 {
 }
 
 .campaign-progress-box-active {
-  box-shadow: 0 0 0 2px #111315;
+  box-shadow: 0 0 0 2px var(--text);
 }
 
 .campaign-progress-box-release {
@@ -8411,7 +8411,7 @@ h2 {
 
 .campaign-progress-box-release.campaign-progress-box-active {
   border-color: #d49a20;
-  box-shadow: 0 0 0 2px #111315;
+  box-shadow: 0 0 0 2px var(--text);
 }
 
 .campaign-progress-box-empty {
@@ -10195,22 +10195,26 @@ h2 {
     white-space: nowrap;
   }
 
-  .dashboard-production-card:not(.dashboard-production-card-compact) .dashboard-production-card-header {
+  .dashboard-production-card:not(.dashboard-production-card-compact) .dashboard-production-card-header,
+  .dashboard-campaign-card:not(.dashboard-campaign-card-compact) .dashboard-campaign-card-header {
     align-items: start;
     display: grid;
     gap: 8px;
     grid-template-columns: 84px minmax(0, 1fr) 112px;
   }
 
-  .dashboard-production-card:not(.dashboard-production-card-compact) .dashboard-production-title-row {
+  .dashboard-production-card:not(.dashboard-production-card-compact) .dashboard-production-title-row,
+  .dashboard-campaign-card:not(.dashboard-campaign-card-compact) .dashboard-benchmark-title-row {
     display: contents;
   }
 
-  .dashboard-production-card:not(.dashboard-production-card-compact) .dashboard-production-title-row > div {
+  .dashboard-production-card:not(.dashboard-production-card-compact) .dashboard-production-title-row > div,
+  .dashboard-campaign-card:not(.dashboard-campaign-card-compact) .dashboard-benchmark-title-row > div {
     min-width: 0;
   }
 
-  .dashboard-production-card .dashboard-campaign-date {
+  .dashboard-production-card .dashboard-campaign-date,
+  .dashboard-campaign-card:not(.dashboard-campaign-card-compact) .dashboard-campaign-date {
     box-sizing: border-box;
     height: 84px;
     justify-self: stretch;
@@ -10220,11 +10224,13 @@ h2 {
     width: 100%;
   }
 
-  .dashboard-production-card .dashboard-campaign-date span {
+  .dashboard-production-card .dashboard-campaign-date span,
+  .dashboard-campaign-card:not(.dashboard-campaign-card-compact) .dashboard-campaign-date span {
     white-space: nowrap;
   }
 
-  .dashboard-production-card:not(.dashboard-production-card-compact) .dashboard-production-art {
+  .dashboard-production-card:not(.dashboard-production-card-compact) .dashboard-production-art,
+  .dashboard-campaign-card:not(.dashboard-campaign-card-compact) .dashboard-production-art {
     height: 84px;
     width: 84px;
   }
@@ -11184,3 +11190,194 @@ h2 {
 .budget-bar-group small { font-size: 10px; font-weight: 500; }
 
 .marketing-campaign-board .marketing-campaign-day-row > td:last-child { border-radius: 0; }
+
+/* Each Production step keeps its date available while details are folded. */
+.production-step-content-cell .campaign-cell {
+  display: flex;
+  flex-direction: column;
+}
+
+.production-step-header {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) 150px 36px;
+}
+
+.production-step-heading {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.production-step-heading strong {
+  overflow-wrap: anywhere;
+}
+
+.production-step-header .production-step-date-field {
+  min-width: 0;
+}
+
+.production-step-toggle {
+  height: 36px;
+  width: 36px;
+}
+
+.production-step-body[hidden] {
+  display: none;
+}
+
+.production-step-body > fieldset {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.production-step-deadline-summary {
+  font-size: 13px;
+}
+
+@media (max-width: 620px) {
+  .production-step-header {
+    column-gap: 8px;
+    grid-template-columns: minmax(0, 1fr) 140px 32px;
+  }
+
+  .production-step-header .production-step-date-field input {
+    padding-inline: 6px;
+  }
+
+  .production-step-toggle {
+    height: 32px;
+    width: 32px;
+  }
+
+  .production-step-content-cell .production-step-body .production-step-details-section,
+  .production-step-content-cell .production-step-body .production-step-task-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .production-step-content-cell .production-step-body .production-step-task-row > *,
+  .production-step-content-cell .production-step-body .production-step-notes-field {
+    grid-column: auto;
+    grid-row: auto;
+    width: 100%;
+  }
+}
+
+@media (max-width: 380px) {
+  .production-step-header {
+    grid-template-columns: minmax(0, 1fr) 32px;
+  }
+
+  .production-step-heading {
+    grid-column: 1 / -1;
+  }
+}
+
+.production-release-prompt {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--text);
+  max-width: 440px;
+  padding: 24px;
+  width: calc(100% - 32px);
+}
+
+.production-release-prompt::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+
+.production-release-prompt h2 {
+  font-size: 18px;
+  line-height: 1.4;
+  margin: 0 0 12px;
+}
+
+.production-release-prompt p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.production-release-settings-link {
+  background: none;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.production-release-prompt-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+.production-release-prompt-actions button {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  min-height: 42px;
+  min-width: 80px;
+}
+
+.production-release-prompt-actions button:last-child {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Production boxes mirror the main step status dots, independently of subtasks. */
+.production-progress-strip .campaign-progress-box-partial {
+  background: #e69b2e;
+}
+
+.pull-to-refresh {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 18%);
+  color: var(--text);
+  display: flex;
+  font-size: 13px;
+  font-weight: 700;
+  gap: 8px;
+  left: 50%;
+  padding: 12px 18px;
+  pointer-events: none;
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  z-index: 20000;
+}
+
+.pull-to-refresh svg { color: var(--accent); }
+.pull-to-refresh-spinner { animation: pull-refresh-spin 0.8s linear infinite; }
+@keyframes pull-refresh-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .pull-to-refresh-spinner { animation: none; }
+}
+
+.campaign-day-date-label {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+}
+
+.campaign-day-heading .status-dot {
+  margin-top: 0;
+}
+
+.campaign-day-status-empty { background: #d94343; }
+.campaign-day-status-partial { background: #e6c64a; }
+.campaign-day-status-complete { background: #1f9d68; }

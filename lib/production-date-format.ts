@@ -19,3 +19,11 @@ function isIsoCalendarDate(value: string) {
   const parsed = new Date(`${value}T00:00:00.000Z`);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
+
+/** DateInput consumes display dates even when a schedule came from the API. */
+export function formatProductionDateForDisplay(value: string) {
+  const iso = normalizeProductionDateForPersistence(value);
+  if (!iso) return value;
+  const [year, month, day] = iso.split("-");
+  return `${day}/${month}/${year}`;
+}

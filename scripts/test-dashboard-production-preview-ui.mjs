@@ -8,9 +8,12 @@ const [page, styles] = await Promise.all([
 
 assert.match(page, /const activeSongs = sortedSongs\.filter\([\s\S]*getProductionCompletionScore\(song\) < 100 && !isRoadmapSongReleased\(song\)/);
 assert.match(page, /const \[current, next\] = activeSongs;/);
-assert.match(styles, /dashboard-production-card:not\(\.dashboard-production-card-compact\) \.dashboard-production-card-header \{[\s\S]*grid-template-columns: 84px minmax\(0, 1fr\) 112px;/);
-assert.match(styles, /\.dashboard-production-card \.dashboard-campaign-date \{[\s\S]*height: 84px;[\s\S]*min-height: 84px;/);
-assert.match(styles, /\.dashboard-production-card \.dashboard-campaign-date span \{[\s\S]*white-space: nowrap;/);
-assert.match(styles, /dashboard-production-card:not\(\.dashboard-production-card-compact\) \.dashboard-production-art \{[\s\S]*height: 84px;[\s\S]*width: 84px;/);
+assert.match(styles, /dashboard-production-card:not\(\.dashboard-production-card-compact\) \.dashboard-production-card-header[^{]*\{[\s\S]*grid-template-columns: 84px minmax\(0, 1fr\) 112px;/);
+assert.match(styles, /\.dashboard-production-card \.dashboard-campaign-date[^{]*\{[\s\S]*height: 84px;[\s\S]*min-height: 84px;/);
+assert.match(styles, /\.dashboard-production-card \.dashboard-campaign-date span[^{]*\{[\s\S]*white-space: nowrap;/);
+assert.match(styles, /dashboard-production-card:not\(\.dashboard-production-card-compact\) \.dashboard-production-art[^{]*\{[\s\S]*height: 84px;[\s\S]*width: 84px;/);
+
+assert.match(styles, /dashboard-campaign-card:not\(\.dashboard-campaign-card-compact\) \.dashboard-production-art[^{]*\{[^}]*height: 84px;[^}]*width: 84px;/);
+assert.match(styles, /\.campaign-progress-box-active \{[^}]*box-shadow: 0 0 0 2px var\(--text\);/);
 
 console.log("Dashboard production preview checks passed.");
