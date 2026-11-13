@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { PullToRefresh } from "./components/pull-to-refresh";
+import { AudioPlayer } from "./components/audio-player";
 import { AppearanceSettings } from "./components/appearance-provider";
 import { DarkModeFeature } from "./components/dark-mode-feature";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
@@ -256,6 +257,8 @@ type ProductionSongConfig = {
   roadmapPhaseId: string | null;
   roadmapGeneralPosition?: number;
   albumArtUrl: string;
+  audioUrl?: string;
+  audioFileName?: string;
   steps: ProductionStep[];
   schedulingModel?: "legacy-v0" | "template-v1";
   productionTemplateId?: string;
@@ -531,6 +534,12 @@ type ProductionStepDbRow = {
   template_step_kind?: "idea_anchor" | "production_step" | "release_anchor" | null;
   template_step_lead_time_days?: number | null;
   template_step_standard_cost_amount?: number | string | null;
+};
+type StudioAudioAssetDbRow = {
+  cloudinary_url: string;
+  is_current: boolean;
+  original_file_name: string;
+  studio_projects: Array<{ production_song_id: string | null }>;
 };
 type ProductionStepTaskDbRow = {
   id: string;
@@ -4552,16 +4561,23 @@ function mapMarketingCampaignDayRows(
 }
 
 function mapProductionRows({
+  audioAssets = [],
   budgetLines,
   songs,
   steps,
   tasks
 }: {
+  audioAssets?: StudioAudioAssetDbRow[];
   budgetLines: ProductionBudgetLineDbRow[];
   songs: ProductionSongDbRow[];
   steps: ProductionStepDbRow[];
   tasks: ProductionStepTaskDbRow[];
 }) {
+  const audioByProductionSongId = new Map(
+    audioAssets
+      .filter((asset) => asset.is_current && asset.studio_projects[0]?.production_song_id)
+      .map((asset) => [asset.studio_projects[0]!.production_song_id!, asset])
+  );
   const tasksByStepId = new Map<string, ProductionStepTaskDbRow[]>();
   const stepBudgetLinesByStepId = new Map<string, ProductionBudgetLineDbRow[]>();
   const taskBudgetLinesByTaskId = new Map<string, ProductionBudgetLineDbRow[]>();
@@ -4592,6 +4608,10 @@ function mapProductionRows({
   return sortProductionSongsByDeadline(
     songs.map((song) => ({
       albumArtUrl: song.album_art_url,
+      ...(audioByProductionSongId.get(song.id) ? {
+        audioUrl: audioByProductionSongId.get(song.id)!.cloudinary_url,
+        audioFileName: audioByProductionSongId.get(song.id)!.original_file_name
+      } : {}),
       dbId: song.id,
       deadline: formatDateKeyForInput(song.production_deadline),
       releaseDate: formatDateKeyForInput(song.release_date),
@@ -8608,17 +8628,12 @@ export default function Home() {
       if (!requestedWorkspaceId) return;
       try {
         const supabase = createBrowserSupabaseClient();
-        const [
-          songsResult,
-          stepsResult,
-          tasksResult,
-          budgetLinesResult
-        ] = await Promise.all([
-          supabase
-            .from("production_songs")
-            .select("id, slug, title, production_deadline, release_date, roadmap_phase_id, roadmap_general_position, album_art_url, scheduling_model, production_template_id, production_template_version, production_template_snapshot")
-            .eq("workspace_id", requestedWorkspaceId)
-            .order("production_deadline", { ascending: true }),
+        const songsResult = await supabase
+          .from("production_songs")
+          .select("id, slug, title, production_deadline, release_date, roadmap_phase_id, roadmap_general_position, album_art_url, scheduling_model, production_template_id, production_template_version, production_template_snapshot")
+          .eq("workspace_id", requestedWorkspaceId)
+          .order("production_deadline", { ascending: true });
+        const [stepsResult, tasksResult, budgetLinesResult, audioAssetsResult] = await Promise.all([
           supabase
             .from("production_steps")
             .select(
@@ -8634,7 +8649,13 @@ export default function Home() {
             .select(
               "id, production_step_id, production_step_task_id, description, amount, budget_bucket, position"
             )
-            .order("position", { ascending: true })
+            .order("position", { ascending: true }),
+          supabase
+            .from("studio_audio_assets")
+            .select("cloudinary_url, is_current, original_file_name, studio_projects!inner(production_song_id)")
+            .eq("workspace_id", requestedWorkspaceId)
+            .eq("asset_kind", "song-source")
+            .eq("is_current", true)
         ]);
 
         if (songsResult.error) throw songsResult.error;
@@ -8654,6 +8675,7 @@ export default function Home() {
 
         const nextSongs = normalizeProductionSongsWithBudgetDefaults(
           mapProductionRows({
+            audioAssets: (audioAssetsResult.data ?? []) as StudioAudioAssetDbRow[],
             budgetLines: (budgetLinesResult.data ?? []) as ProductionBudgetLineDbRow[],
             songs: (songsResult.data ?? []) as ProductionSongDbRow[],
             steps: (stepsResult.data ?? []) as ProductionStepDbRow[],
@@ -13675,6 +13697,7 @@ function ProductionSongBoard({
   const [deadlineInput, setDeadlineInput] = useState(song.releaseDate);
   const [appliedDeadlineInput, setAppliedDeadlineInput] = useState(song.releaseDate);
   const [albumArtUrl, setAlbumArtUrl] = useState(song.albumArtUrl);
+  const [audioUploadStatus, setAudioUploadStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
   const [artworkUploadStatus, setArtworkUploadStatus] = useState<RefreshStatus>({ message: "", state: "idle" });
   const [isAlbumArtEditorOpen, setIsAlbumArtEditorOpen] = useState(false);
   const [isFocusHighlighted, setIsFocusHighlighted] = useState(false);
@@ -14147,6 +14170,30 @@ function ProductionSongBoard({
                 </span>
               ) : null}
             </label>
+            <ProductionAudioControl
+              audioFileName={song.audioFileName ?? ""}
+              audioUrl={song.audioUrl ?? ""}
+              artworkUrl={song.albumArtUrl}
+              disabled={Boolean(song.receivedShare)}
+              onStatusChange={setAudioUploadStatus}
+              onUploaded={({ fileName, url }) => onChange(song.id, { audioFileName: fileName, audioUrl: url })}
+              productionSongId={song.dbId}
+              songTitle={songTitle}
+            />
+            {audioUploadStatus.message ? (
+              <span
+                className={`artwork-upload-status ${
+                  audioUploadStatus.state === "error"
+                    ? "settings-error"
+                    : audioUploadStatus.state === "loading"
+                      ? "artwork-upload-status-pending"
+                      : "settings-status"
+                }`}
+                role={audioUploadStatus.state === "error" ? "alert" : "status"}
+              >
+                {audioUploadStatus.message}
+              </span>
+            ) : null}
             <div className="song-release-options-field production-release-date-editor">
               <span className="song-option-field-heading">Release date</span>
               <div className="release-date-input-row">
@@ -18945,6 +18992,55 @@ function ManagedImageUploadButton({
     } catch (error) { updateStatus({ message: error instanceof Error ? error.message : "Image upload failed.", state: "error" }); }
   }
   return <div className="managed-image-upload"><input accept="image/jpeg,image/png,image/webp" aria-label="Upload image" disabled={disabled || status.state === "loading"} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }} ref={inputRef} type="file" /><button disabled={disabled || status.state === "loading"} onClick={() => inputRef.current?.click()} type="button"><Upload aria-hidden size={14} />Upload image</button>{status.message && !onStatusChange ? <span className={status.state === "error" ? "settings-error" : "settings-status"} role={status.state === "error" ? "alert" : "status"}>{status.message}</span> : null}</div>;
+}
+
+function ProductionAudioControl({
+  audioFileName,
+  audioUrl,
+  artworkUrl,
+  disabled,
+  onStatusChange,
+  onUploaded,
+  productionSongId,
+  songTitle
+}: {
+  audioFileName: string;
+  audioUrl: string;
+  artworkUrl: string;
+  disabled: boolean;
+  onStatusChange: (status: RefreshStatus) => void;
+  onUploaded: (audio: { fileName: string; url: string }) => void;
+  productionSongId?: string;
+  songTitle: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function upload(file: File) {
+    onStatusChange({ message: "Uploading MP3…", state: "loading" });
+    try {
+      const form = new FormData();
+      form.set("file", file);
+      form.set("productionSongId", productionSongId ?? "");
+      const response = await fetch("/api/media/audio", { body: form, method: "POST" });
+      const payload = await response.json() as { error?: string; fileName?: string; url?: string };
+      if (!response.ok || !payload.url || !payload.fileName) throw new Error(payload.error || "MP3 upload failed.");
+      onUploaded({ fileName: payload.fileName, url: payload.url });
+      onStatusChange({ message: "MP3 uploaded.", state: "success" });
+    } catch (error) {
+      onStatusChange({ message: error instanceof Error ? error.message : "MP3 upload failed.", state: "error" });
+    }
+  }
+
+  return (
+    <div className="production-audio-options">
+      <span className="song-option-field-heading">Song audio</span>
+      {audioUrl ? (
+        <AudioPlayer artworkUrl={artworkUrl} className="production-audio-player" fileName={audioFileName || `${songTitle}.mp3`} src={audioUrl} title={songTitle} />
+      ) : <p className="production-audio-empty">Upload the MP3 source for this song.</p>}
+      <input accept="audio/mpeg,audio/mp3,.mp3" aria-label="Upload MP3" className="production-audio-input" disabled={disabled || !productionSongId} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }} ref={inputRef} type="file" />
+      {!disabled ? <button className="production-audio-upload" disabled={!productionSongId} onClick={() => inputRef.current?.click()} type="button"><Upload aria-hidden size={14} />{audioUrl ? "Replace MP3" : "Upload MP3"}</button> : null}
+    </div>
+  );
 }
 
 function QrCodeLinksSection({

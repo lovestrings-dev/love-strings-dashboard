@@ -125,6 +125,20 @@ Current integration boundary:
   is intentionally deferred rather than silently applying that integration to
   a new workspace.
 
+## Production audio boundary
+
+- Studio owns MP3 metadata rather than `production_songs`. A Studio project can
+  link to one Production song, and its versioned Studio audio assets retain the
+  current Cloudinary delivery URL and original filename.
+- The binary is uploaded only through the authenticated `/api/media/audio`
+  route, which accepts MP3 files up to 25 MB and writes to Cloudinary's
+  `workspaces/<workspace-id>/production/audio` folder.
+- Cloudinary credentials remain server-only. Workspace Members and Admins may
+  upload; Viewers can play a shared song's existing audio but cannot replace it.
+- Replacing a file retires the prior `song-source` asset and creates a new
+  Studio asset. The app deliberately does not delete the old Cloudinary binary
+  automatically, preserving a source history for future Studio workflows.
+
 ## Production Template V1 Foundation
 
 - Workspace-level `production_templates` and `production_template_steps` hold
