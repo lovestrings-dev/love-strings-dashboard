@@ -44,3 +44,6 @@ VIDEO/
 
 # Local duplicate of an obsolete Vercel cron configuration
 vercel 2.json
+# Never commit downloaded Google service-account keys.
+*-service-account.json
+service-account*.json

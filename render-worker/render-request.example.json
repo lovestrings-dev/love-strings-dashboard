@@ -1,0 +1,14 @@
+{
+  "render_id": "rk_20261113_001",
+  "video_uri": "gs://adstudio-staging-1023633877337/media/videos/source.mp4",
+  "audio_uri": "gs://adstudio-staging-1023633877337/media/audio/clip.mp3",
+  "output_uri": "gs://adstudio-renders-1023633877337/renders/rk_20261113_001/final.mp4",
+  "duration_seconds": 30,
+  "overlay": {
+    "image_uri": "gs://adstudio-staging-1023633877337/media/overlays/cover.png",
+    "text": "NEW SINGLE OUT NOW",
+    "text_color": "#ffffff",
+    "font_size": 58,
+    "position": "bottom"
+  }
+}
