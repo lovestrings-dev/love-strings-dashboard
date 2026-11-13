@@ -10824,7 +10824,7 @@ function GeneralSettingsView({
                 </button>
               )}
             </div>
-            {!googleConnection?.analytics.enabled && googleConnection?.accountEmail && analyticsProperties.length > 1 ? <div className="google-analytics-property-selector"><span>Choose the Google Analytics property LS Dashboard should track.</span><div className="google-topic-config"><select aria-label="Analytics property" onChange={(event) => setSelectedAnalyticsProperty(event.target.value)} value={selectedAnalyticsProperty}><option value="">Choose Analytics property</option>{analyticsProperties.map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}</select><button disabled={!selectedAnalyticsProperty || googleStatus.state === "loading"} onClick={() => void selectAnalyticsProperty()} type="button">Use property</button></div></div> : null}
+            {!googleConnection?.analytics.enabled && googleConnection?.accountEmail && analyticsProperties.length > 1 ? <div className="google-analytics-property-selector"><span>Choose the Google Analytics property ArtistDeck should track.</span><div className="google-topic-config"><select aria-label="Analytics property" onChange={(event) => setSelectedAnalyticsProperty(event.target.value)} value={selectedAnalyticsProperty}><option value="">Choose Analytics property</option>{analyticsProperties.map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}</select><button disabled={!selectedAnalyticsProperty || googleStatus.state === "loading"} onClick={() => void selectAnalyticsProperty()} type="button">Use property</button></div></div> : null}
 
           </div>
 
@@ -19018,11 +19018,24 @@ function ProductionAudioControl({
   async function upload(file: File) {
     onStatusChange({ message: "Uploading MP3…", state: "loading" });
     try {
-      const form = new FormData();
-      form.set("file", file);
-      form.set("productionSongId", productionSongId ?? "");
-      const response = await fetch("/api/media/audio", { body: form, method: "POST" });
-      const payload = await response.json() as { error?: string; fileName?: string; url?: string };
+      const uploadRequest = { byteSize: file.size, fileName: file.name, mimeType: file.type, productionSongId: productionSongId ?? "" };
+      const signingResponse = await fetch("/api/media/audio/sign", { body: JSON.stringify(uploadRequest), headers: { "content-type": "application/json" }, method: "POST" });
+      const signing = await readUploadResponse(signingResponse) as CloudinaryAudioSignature;
+      if (!signingResponse.ok || !signing.apiKey || !signing.cloudName || !signing.signature) throw new Error(signing.error || "Could not prepare MP3 upload.");
+      const cloudinaryForm = new FormData();
+      cloudinaryForm.set("api_key", signing.apiKey);
+      cloudinaryForm.set("context", signing.context);
+      cloudinaryForm.set("file", file);
+      cloudinaryForm.set("folder", signing.folder);
+      cloudinaryForm.set("public_id", signing.public_id);
+      cloudinaryForm.set("signature", signing.signature);
+      cloudinaryForm.set("tags", signing.tags);
+      cloudinaryForm.set("timestamp", String(signing.timestamp));
+      const cloudinaryResponse = await fetch(`https://api.cloudinary.com/v1_1/${signing.cloudName}/video/upload`, { body: cloudinaryForm, method: "POST" });
+      const cloudinaryResult = await readUploadResponse(cloudinaryResponse) as { error?: { message?: string }; secure_url?: string };
+      if (!cloudinaryResponse.ok || !cloudinaryResult.secure_url) throw new Error(cloudinaryResult.error?.message || "Cloudinary audio upload failed.");
+      const response = await fetch("/api/media/audio", { body: JSON.stringify({ ...uploadRequest, url: cloudinaryResult.secure_url }), headers: { "content-type": "application/json" }, method: "POST" });
+      const payload = await readUploadResponse(response) as { error?: string; fileName?: string; url?: string };
       if (!response.ok || !payload.url || !payload.fileName) throw new Error(payload.error || "MP3 upload failed.");
       onUploaded({ fileName: payload.fileName, url: payload.url });
       onStatusChange({ message: "MP3 uploaded.", state: "success" });
