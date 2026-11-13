@@ -19056,6 +19056,15 @@ function ProductionAudioControl({
   );
 }
 
+type CloudinaryAudioSignature = { apiKey?: string; cloudName?: string; context: string; error?: string; folder: string; public_id: string; signature?: string; tags: string; timestamp: number };
+
+async function readUploadResponse(response: Response) {
+  const body = await response.text();
+  try { return JSON.parse(body) as unknown; } catch {
+    return { error: response.status === 413 ? "This MP3 is too large for the upload host. Please choose a file under 25 MB." : body.slice(0, 180) || "The upload service returned an unexpected response." };
+  }
+}
+
 function QrCodeLinksSection({
   links,
   onAddLink,
