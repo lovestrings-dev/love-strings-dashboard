@@ -539,7 +539,7 @@ type StudioAudioAssetDbRow = {
   cloudinary_url: string;
   is_current: boolean;
   original_file_name: string;
-  studio_projects: Array<{ production_song_id: string | null }>;
+  studio_projects: { production_song_id: string | null } | Array<{ production_song_id: string | null }>;
 };
 type ProductionStepTaskDbRow = {
   id: string;
@@ -4575,8 +4575,12 @@ function mapProductionRows({
 }) {
   const audioByProductionSongId = new Map(
     audioAssets
-      .filter((asset) => asset.is_current && asset.studio_projects[0]?.production_song_id)
-      .map((asset) => [asset.studio_projects[0]!.production_song_id!, asset])
+      .map((asset) => ({
+        asset,
+        project: Array.isArray(asset.studio_projects) ? asset.studio_projects[0] : asset.studio_projects
+      }))
+      .filter(({ asset, project }) => asset.is_current && project?.production_song_id)
+      .map(({ asset, project }) => [project!.production_song_id!, asset])
   );
   const tasksByStepId = new Map<string, ProductionStepTaskDbRow[]>();
   const stepBudgetLinesByStepId = new Map<string, ProductionBudgetLineDbRow[]>();
