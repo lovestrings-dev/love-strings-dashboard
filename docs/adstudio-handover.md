@@ -124,8 +124,9 @@ Overlay image, Overlay Text, and Export.
 - A saved Audio snippet is currently a **local Test Project draft record**,
   not a rendered/cut file: `{ id, songId, title, sourceUrl, sourceFileName,
   artworkUrl, start, end }`. The ID is source + start + end; a duplicate
-  replaces the prior local entry. Snippets survive Audio → Video → Audio in
-  the active Studio view, but do not yet survive a full page reload.
+  replaces the prior local entry. Snippets survive in-app Studio navigation
+  and Settings round trips during the active app session, but do not yet
+  survive a full page reload.
 - Audio UI now has three cards across: Production sources, a local live
   composition preview, and bounded trimmed-audio players. The full-width
   trimmer stays underneath.

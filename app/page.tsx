@@ -5517,8 +5517,10 @@ export default function Home() {
   const dashboardMetricsLoadWorkspaceRef = useRef("");
   const activeWorkspaceIdRef = useRef("");
   const hasRequestedQrCodeSupabaseLoad = useRef(false);
+  const studioSidebarNavRef = useRef<HTMLDivElement>(null);
   const [activeSection, setActiveSection] = useState<Section>("Dashboard");
   const [isStudioMenuOpen, setIsStudioMenuOpen] = useState(true);
+  const [studioAudioSnippets, setStudioAudioSnippets] = useState<StudioAudioSnippetRecord[]>([]);
   const [guidanceStatus, setGuidanceStatus] = useState<GuidanceStatus | null>(null);
   const [guidanceContext, setGuidanceContext] = useState<GuidanceContext>("none");
   const [guidanceSongId, setGuidanceSongId] = useState<string | null>(null);
@@ -5563,6 +5565,15 @@ export default function Home() {
   const [settingsView, setSettingsView] = useState<
     "about" | "general" | "platform" | "user" | null
   >(null);
+
+  useEffect(() => {
+    if (activeSection !== "Studio" || !isStudioMenuOpen || !window.matchMedia("(max-width: 980px)").matches) return;
+    const closeOnTapAway = (event: PointerEvent) => {
+      if (!studioSidebarNavRef.current?.contains(event.target as Node)) setIsStudioMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnTapAway);
+    return () => document.removeEventListener("pointerdown", closeOnTapAway);
+  }, [activeSection, isStudioMenuOpen]);
   const [workspaceRole, setWorkspaceRole] = useState<WorkspaceRole | null>(null);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
   const [activeWorkspaceResolvedId, setActiveWorkspaceResolvedId] = useState("");
@@ -9011,7 +9022,7 @@ export default function Home() {
         <div className="nav-scroll-shell">
           <nav className="nav-list">
             {navigationSections.map((section) => section === "Studio" ? (
-              <div className="studio-sidebar-nav-control" key={section}>
+              <div className="studio-sidebar-nav-control" key={section} ref={studioSidebarNavRef}>
                 <button
                   aria-current={activeSection === section ? "page" : undefined}
                   aria-expanded={activeSection === "Studio" && isStudioMenuOpen}
@@ -9244,7 +9255,7 @@ export default function Home() {
             songs={productionSongDrafts}
           />
         ) : null}
-        {!settingsView && activeSection === "Studio" ? <StudioView productionSongs={productionSongDrafts} /> : null}
+        {!settingsView && activeSection === "Studio" ? <StudioView audioSnippets={studioAudioSnippets} onAudioSnippetsChange={setStudioAudioSnippets} productionSongs={productionSongDrafts} /> : null}
         {!settingsView && activeSection === "Budget" ? (
           <BudgetView
             entries={budgetEntriesWithForecast}
@@ -9377,10 +9388,17 @@ function StudioSidebarMenu({ isMobileClosed }: { isMobileClosed: boolean }) {
   );
 }
 
-function StudioView({ productionSongs }: { productionSongs: ProductionSongConfig[] }) {
-  const [projectDurationChoice, setProjectDurationChoice] = useState<15 | 30 | "custom">(30);
+function StudioView({
+  audioSnippets,
+  onAudioSnippetsChange,
+  productionSongs
+}: {
+  audioSnippets: StudioAudioSnippetRecord[];
+  onAudioSnippetsChange: Dispatch<SetStateAction<StudioAudioSnippetRecord[]>>;
+  productionSongs: ProductionSongConfig[];
+}) {
+  const [projectDurationChoice, setProjectDurationChoice] = useState<15 | 30 | "custom">(15);
   const [customProjectDuration, setCustomProjectDuration] = useState("30");
-  const [audioSnippets, setAudioSnippets] = useState<StudioAudioSnippetRecord[]>([]);
   const parsedCustomProjectDuration = Number.parseInt(customProjectDuration, 10);
   const projectDuration = projectDurationChoice === "custom"
     ? Math.min(180, Math.max(1, Number.isFinite(parsedCustomProjectDuration) ? parsedCustomProjectDuration : 30))
@@ -9395,7 +9413,7 @@ function StudioView({ productionSongs }: { productionSongs: ProductionSongConfig
         </div>
       </header>
 
-      <StudioAudioEditor audioSnippets={audioSnippets} durationChoice={projectDurationChoice} isCustomDuration={projectDurationChoice === "custom"} onAudioSnippetsChange={setAudioSnippets} onDurationChoiceChange={setProjectDurationChoice} productionSongs={productionSongs} projectDuration={projectDuration} />
+      <StudioAudioEditor audioSnippets={audioSnippets} durationChoice={projectDurationChoice} isCustomDuration={projectDurationChoice === "custom"} onAudioSnippetsChange={onAudioSnippetsChange} onDurationChoiceChange={setProjectDurationChoice} productionSongs={productionSongs} projectDuration={projectDuration} />
       <StudioWorkflowProgress activeProcess="Audio" availableProcesses={["Audio"]} />
     </section>
   );
@@ -9564,19 +9582,53 @@ function StudioAudioSnippet({
   return <article className="studio-audio-snippet"><AudioPlayer artworkAlt={`${snippet.title} snippet artwork`} artworkUrl={snippet.artworkUrl} clipEndSeconds={snippet.end} clipStartSeconds={snippet.start} fileName={clipLabel} src={snippet.sourceUrl} title={`${snippet.title} snippet`} /><button aria-label={`Delete ${snippet.title} audio snippet`} onClick={onDelete} type="button">×</button></article>;
 }
 
-function StudioAudioVideoPreview({ projectDuration }: { projectDuration: number }) {
+function StudioAudioVideoPreview({ audioSnippet, projectDuration }: { audioSnippet?: StudioAudioSnippetRecord; projectDuration: number }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [position, setPosition] = useState(Math.min(12, projectDuration));
+  const clipDuration = audioSnippet ? Math.max(0.1, audioSnippet.end - audioSnippet.start) : 0;
+
+  function setPreviewPosition(nextPosition: number) {
+    const safePosition = Math.min(projectDuration, Math.max(0, nextPosition));
+    setPosition(safePosition);
+    if (audioSnippet && audioRef.current) {
+      audioRef.current.currentTime = audioSnippet.start + (safePosition / projectDuration) * clipDuration;
+    }
+  }
+
+  function togglePreviewPlayback() {
+    const audio = audioRef.current;
+    if (!audio || !audioSnippet) return;
+    if (audio.paused) {
+      const startAt = audioSnippet.start + (position / projectDuration) * clipDuration;
+      audio.currentTime = Math.min(audioSnippet.end, Math.max(audioSnippet.start, startAt));
+      void audio.play().catch(() => setIsPlaying(false));
+    } else audio.pause();
+  }
+
+  function updatePreviewPlayback(event: React.SyntheticEvent<HTMLAudioElement>) {
+    if (!audioSnippet) return;
+    const elapsed = event.currentTarget.currentTime - audioSnippet.start;
+    if (event.currentTarget.currentTime >= audioSnippet.end) {
+      event.currentTarget.pause();
+      event.currentTarget.currentTime = audioSnippet.start;
+      setPosition(0);
+      return;
+    }
+    setPosition(Math.min(projectDuration, Math.max(0, (elapsed / clipDuration) * projectDuration)));
+  }
+
   return <section className="studio-audio-video-preview" aria-labelledby="studio-audio-video-preview-heading">
     <div className="studio-panel-heading"><div><p className="eyebrow">Live composition</p><h3 id="studio-audio-video-preview-heading">Preview</h3></div><span>{formatStudioDuration(position)} / {formatStudioDuration(projectDuration)}</span></div>
-    <div className="studio-audio-preview-phone">
+    {audioSnippet ? <audio onPause={() => setIsPlaying(false)} onPlay={() => setIsPlaying(true)} onTimeUpdate={updatePreviewPlayback} preload="metadata" ref={audioRef} src={audioSnippet.sourceUrl} /> : null}
+    <div className={`studio-audio-preview-phone${isPlaying ? " is-playing" : ""}`}>
       <span className="studio-audio-preview-platforms">Spotify · Apple · YouTube</span>
       <strong>YOUR<br />STORY</strong>
       <span className="studio-audio-preview-project">TEST PROJECT</span>
-      <button aria-label={isPlaying ? "Pause video preview" : "Play video preview"} onClick={() => setIsPlaying((current) => !current)} type="button">{isPlaying ? <Pause size={19} /> : <Play size={19} />}</button>
+      <button aria-label={audioSnippet ? isPlaying ? "Pause video preview" : "Play saved audio in video preview" : "Create an audio snippet to preview"} disabled={!audioSnippet} onClick={togglePreviewPlayback} type="button">{isPlaying ? <Pause size={19} /> : <Play size={19} />}</button>
       <i aria-hidden style={{ left: `${projectDuration ? (position / projectDuration) * 100 : 0}%` }} />
     </div>
-    <label className="studio-audio-preview-controls"><span>{formatStudioDuration(0)}</span><input aria-label="Video preview position" max={projectDuration} min="0" onChange={(event) => setPosition(Number(event.target.value))} step="1" type="range" value={position} /><span>{formatStudioDuration(projectDuration)}</span></label>
+    <label className="studio-audio-preview-controls"><span>{formatStudioDuration(0)}</span><input aria-label="Video preview position" disabled={!audioSnippet} max={projectDuration} min="0" onChange={(event) => setPreviewPosition(Number(event.target.value))} step="1" type="range" value={position} /><span>{formatStudioDuration(projectDuration)}</span></label>
   </section>;
 }
 
@@ -9620,7 +9672,7 @@ function StudioAudioEditor({
             <div className="studio-panel-heading"><p className="eyebrow">Production audio library</p><span>{availableAudio.length} shown</span></div>
             {availableAudio.length ? <div className="studio-audio-player-list">{availableAudio.map((song) => <article className={`studio-library-audio-item${selectedAudio?.id === song.id ? " is-selected" : ""}`} key={song.id}><AudioPlayer artworkUrl={song.albumArtUrl} fileName={song.audioFileName || `${song.title}.mp3`} src={song.audioUrl!} title={song.title} /><button aria-pressed={selectedAudio?.id === song.id} onClick={() => selectAudioForTrim(song.id)} type="button">{selectedAudio?.id === song.id ? "Selected for trim" : "Select for trim"}</button></article>)}</div> : <div className="studio-audio-empty-state"><strong>No Production MP3 files yet</strong><span>Upload an MP3 in Production → Song options and it will appear here.</span></div>}
           </section>
-          <StudioAudioVideoPreview projectDuration={projectDuration} />
+          <StudioAudioVideoPreview audioSnippet={audioSnippets[0]} key={`${audioSnippets[0]?.id ?? "empty"}-${projectDuration}`} projectDuration={projectDuration} />
           <section className="studio-audio-snippet-library" aria-labelledby="studio-audio-snippet-library-heading">
             <div className="studio-panel-heading"><div><p className="eyebrow">Trimmed audio clips</p><h3 id="studio-audio-snippet-library-heading">Your audio snippets</h3></div><span>{audioSnippets.length} saved</span></div>
             {audioSnippets.length ? <div className="studio-audio-snippet-list">{audioSnippets.map((snippet) => <StudioAudioSnippet key={snippet.id} onDelete={() => onAudioSnippetsChange((current) => current.filter((candidate) => candidate.id !== snippet.id))} snippet={snippet} />)}</div> : <div className="studio-audio-empty-state studio-audio-snippet-empty"><strong>No trimmed clips yet</strong><span>Choose a part of a Production track, then use audio to add it here.</span></div>}

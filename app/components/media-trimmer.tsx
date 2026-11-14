@@ -32,13 +32,23 @@ export const MediaTrimmer = forwardRef<MediaTrimmerHandle, MediaTrimmerProps>(fu
   const [trimEnd, setTrimEnd] = useState(15);
   const [playhead, setPlayhead] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [zoom, setZoom] = useState(1);
   const excerptLimit = Math.min(mediaDuration, Math.max(0.1, maxExcerptSeconds ?? mediaDuration));
   const isLockedToProject = !isTrimEditable && typeof maxExcerptSeconds === "number";
   const trimLength = Math.max(0, trimEnd - trimStart);
+  const visibleDuration = Math.min(mediaDuration, Math.max(trimLength + 2, mediaDuration / zoom));
+  const selectionCenter = (trimStart + trimEnd) / 2;
+  const viewStart = Math.min(Math.max(0, selectionCenter - visibleDuration / 2), Math.max(0, mediaDuration - visibleDuration));
+  const viewEnd = viewStart + visibleDuration;
+  const toVisiblePercent = (time: number) => ((time - viewStart) / visibleDuration) * 100;
   const selectionStyle = {
-    "--media-trim-end": `${(trimEnd / mediaDuration) * 100}%`,
-    "--media-trim-playhead": `${(playhead / mediaDuration) * 100}%`,
-    "--media-trim-start": `${(trimStart / mediaDuration) * 100}%`
+    "--media-trim-end": `${toVisiblePercent(trimEnd)}%`,
+    "--media-trim-playhead": `${toVisiblePercent(playhead)}%`,
+    "--media-trim-start": `${toVisiblePercent(trimStart)}%`
+  } as CSSProperties;
+  const waveformStyle = {
+    transform: `translateX(-${(viewStart / mediaDuration) * 100}%)`,
+    width: `${(mediaDuration / visibleDuration) * 100}%`
   } as CSSProperties;
 
   function syncDuration(duration: number) {
@@ -97,7 +107,7 @@ export const MediaTrimmer = forwardRef<MediaTrimmerHandle, MediaTrimmerProps>(fu
     if (!dragStart || !isLockedToProject) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     const nextStart = Math.min(
-      Math.max(0, dragStart.start + ((event.clientX - dragStart.clientX) / bounds.width) * mediaDuration),
+      Math.max(0, dragStart.start + ((event.clientX - dragStart.clientX) / bounds.width) * visibleDuration),
       Math.max(0, mediaDuration - trimLength)
     );
     const nextEnd = nextStart + trimLength;
@@ -136,12 +146,13 @@ export const MediaTrimmer = forwardRef<MediaTrimmerHandle, MediaTrimmerProps>(fu
       <div className="media-trimmer-waveform">
         {showPlayButton && playButtonPlacement === "waveform" ? <button aria-label={isPlaying ? `Pause trimmed ${title}` : `Play trimmed ${title}`} className="media-trimmer-waveform-play" onClick={togglePlayback} type="button">{artworkUrl ? <Image alt={artworkAlt ?? `${title} album art`} height={58} src={artworkUrl} unoptimized width={58} /> : <span aria-hidden>{title.slice(0, 1).toUpperCase()}</span>}<span aria-hidden className="media-trimmer-waveform-play-overlay">{isPlaying ? <Pause size={18} /> : <Play size={18} />}</span></button> : null}
         <div className={`media-trimmer-waveform-track${isLockedToProject ? " is-selection-movable" : ""}`} onPointerCancel={endSelectionMove} onPointerDown={beginSelectionMove} onPointerMove={moveSelection} onPointerUp={endSelectionMove}>
+          <div aria-hidden className="media-trimmer-waveform-bars" style={waveformStyle}>{waveformHeights.map((height, index) => <i aria-hidden key={index} style={{ height: `${height}%` }} />)}</div>
           <div aria-hidden className="media-trimmer-selection" />
-          {waveformHeights.map((height, index) => <i aria-hidden key={index} style={{ height: `${height}%` }} />)}
           <span aria-hidden className="media-trimmer-playhead" />
-          <input aria-label={`Playback position for ${title}`} max={mediaDuration} min="0" onChange={(event) => updatePlayhead(Number(event.target.value))} step="0.05" type="range" value={playhead} />
+          {!isLockedToProject ? <input aria-label={`Playback position for ${title}`} max={viewEnd} min={viewStart} onChange={(event) => updatePlayhead(Number(event.target.value))} step="0.05" type="range" value={Math.min(viewEnd, Math.max(viewStart, playhead))} /> : null}
         </div>
       </div>
+      <label className="media-trimmer-zoom"><span>Zoom</span><input aria-label={`Zoom trim editor for ${title}`} max="6" min="1" onChange={(event) => setZoom(Number(event.target.value))} step="1" type="range" value={zoom} /><output>{zoom}×</output></label>
       {isTrimEditable ? <div className="media-trimmer-range"><label>Start<input aria-label={`Trim start for ${title}`} max={Math.max(0, trimEnd - 0.1)} min="0" onChange={(event) => updateStart(Number(event.target.value))} step="0.05" type="range" value={trimStart} /></label><label>End<input aria-label={`Trim end for ${title}`} max={Math.min(mediaDuration, trimStart + excerptLimit)} min={Math.min(mediaDuration, trimStart + 0.1)} onChange={(event) => updateEnd(Number(event.target.value))} step="0.05" type="range" value={trimEnd} /></label></div> : null}
     </div>
   );

@@ -1,17 +1,17 @@
 # Beta 1.34 release checkpoint
 
 Prepared 14 November 2026. Version `1.34.0-beta.2`; UI **Beta 1.34**.
-Status: local release preparation; no push or deployment authorized.
+Status: approved for push and deployment.
 
 ## Scope
 
 - Production can accept and play managed, workspace-scoped MP3 source files. Current audio metadata is registered through the Studio project/audio-asset model and delivered from Cloudinary through protected server code.
 - Studio is exposed as a controlled **Audio-only** beta. The final primary-navigation item opens the Test Project tree; Audio is available and every later workflow stage remains visible but locked.
-- Studio Audio lists Production MP3 sources, provides reusable player controls, a local visual composition preview, bounded audio trimming, and local parameter-only snippets. The same project navigation is integrated in the desktop sidebar and toggles a readable right-side drawer on mobile.
+- Studio Audio lists Production MP3 sources, provides reusable player controls, a local composition preview that plays the first saved excerpt, bounded audio trimming, and local parameter-only snippets. The initial duration is 15 seconds; a zoomed trimmer scales the waveform beneath its draggable preset selection window. The same project navigation is integrated in the desktop sidebar and toggles a readable right-side drawer on mobile, including tap-away dismissal.
 
 ## Explicit limits
 
-- Snippets describe a source asset and start/end timestamps only. They are not cut media files and remain local to the current Studio view; they do not survive a browser reload.
+- Snippets describe a source asset and start/end timestamps only. They are not cut media files and remain local to the active app session; they do not survive a browser reload.
 - No Pexels/video library, video snippets, rendered preview, export, FFmpeg invocation, or advertising-platform handoff is included in this release.
 - The displayed waveforms are decorative. No waveform analysis is claimed.
 
