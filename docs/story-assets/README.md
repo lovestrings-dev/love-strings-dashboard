@@ -1,6 +1,6 @@
 # Story Assets
 
-This folder keeps visual material for future Love Strings Dashboard Reels, Shorts, posts, and behind-the-scenes content.
+This folder keeps visual material for future ArtistDeck Reels, Shorts, posts, and behind-the-scenes content.
 
 ## Screenshot Workflow
 

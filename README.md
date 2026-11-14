@@ -1,6 +1,6 @@
-# Love Strings Dashboard
+# ArtistDeck
 
-This folder is the working home for the Love Strings Sprint Dashboard project.
+This folder is the working home for ArtistDeck: a daily operating system for independent music projects. Love Strings is the flagship/reference workspace.
 
 Copyright (c) 2026 Dmitrii Baiakin, 1030 Vienna, Austria. All rights reserved.
 This project is proprietary. See `LICENSE` for details.

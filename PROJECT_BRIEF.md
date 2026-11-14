@@ -1,8 +1,8 @@
-# Love Strings Sprint Dashboard - Project Brief
+# ArtistDeck - Project Brief
 
 ## Project Concept
 
-Love Strings needs a mobile and desktop web dashboard that works as a daily operating system for the music project.
+ArtistDeck is a mobile and desktop web dashboard that works as a daily operating system for an independent music project. Love Strings is its flagship/reference workspace.
 
 The dashboard should support an agile-hybrid workflow where each 2-3 week sprint is centered around one song release. It should help track production, marketing, platform performance, content execution, and project finances in one place.
 

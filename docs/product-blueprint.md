@@ -6,7 +6,7 @@ This is not a strict sprint plan. It is a future-proof map of the app we are bui
 
 ## Product Vision
 
-Love Strings Dashboard should become the daily operating system for an independent music project.
+ArtistDeck should become the daily operating system for an independent music project.
 
 It should combine:
 
@@ -19,11 +19,11 @@ It should combine:
 - general task capture
 - later, voice-driven updates
 
-The app should stay useful for Dmitrii and Yuliia first. Only after the internal workflow becomes strong should it be adapted for other musicians.
+The app should stay useful for the Love Strings workspace first. The same product should be ready for other musicians through workspace-scoped data and configuration.
 
 ## Original Project Brief
 
-The project began as an "executive dashboard" idea, then quickly became more specific: a mobile and desktop web dashboard for Love Strings.
+The project began as an "executive dashboard" idea, then quickly became more specific: a mobile and desktop web dashboard for Love Strings. It has since been rebranded as ArtistDeck, with Love Strings as the reference workspace.
 
 Core goal:
 
@@ -77,7 +77,7 @@ Current near-term sequence:
 
 Goal:
 
-Create a reliable private app that Love Strings can use every day for campaigns, production, platform stats, budget, roadmap, shows, and current priorities.
+Create a reliable private app that artists can use every day for campaigns, production, platform stats, budget, roadmap, shows, and current priorities.
 
 This version is for Dmitrii and Yuliia, not yet for public users.
 

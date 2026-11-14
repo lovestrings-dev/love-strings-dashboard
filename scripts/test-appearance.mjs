@@ -36,7 +36,7 @@ const route = compile("../app/api/user/appearance/route.ts", {
   }
 });
 const { NextRequest } = require("next/server");
-const request = (body, origin = "http://localhost:3000") => new NextRequest("http://localhost:3000/api/user/appearance", { method: "PATCH", headers: { origin, "content-type": "application/json", "x-love-strings-dashboard": "write" }, body: JSON.stringify(body) });
+const request = (body, origin = "http://localhost:3000") => new NextRequest("http://localhost:3000/api/user/appearance", { method: "PATCH", headers: { origin, "content-type": "application/json", "x-artistdeck": "write" }, body: JSON.stringify(body) });
 let result = await route.GET(new NextRequest("http://localhost:3000/api/user/appearance"));
 assert.deepEqual(await result.json(), { theme: "dark", featureAcknowledged: false });
 assert.match(result.headers.get("set-cookie"), /artistdeck-theme=dark/);

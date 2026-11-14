@@ -81,7 +81,7 @@ async function loadPreferences(serviceClient: Awaited<ReturnType<typeof requireW
 }
 
 function isSameOriginWrite(request: NextRequest) {
-  if (request.headers.get("x-love-strings-dashboard") !== "write") return false;
+  if (request.headers.get("x-artistdeck") !== "write") return false;
   const host = request.headers.get("host");
   if (!host) return false;
   if (request.headers.get("sec-fetch-site") === "same-origin") return true;

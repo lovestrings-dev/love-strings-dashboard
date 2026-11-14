@@ -30,7 +30,7 @@ async function requestDashboardPreferences(
     body: body ? JSON.stringify(body) : undefined,
     headers: method === "GET" ? undefined : {
       "content-type": "application/json",
-      "x-love-strings-dashboard": "write"
+      "x-artistdeck": "write"
     },
     method
   });

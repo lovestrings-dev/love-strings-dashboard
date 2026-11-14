@@ -1,6 +1,6 @@
 # Source Data
 
-This folder keeps source files that are useful for rebuilding or auditing the Love Strings Dashboard seed data.
+This folder keeps source files that are useful for rebuilding or auditing ArtistDeck seed data for the Love Strings reference workspace.
 
 ## Love Strings ADMIN.xlsx
 

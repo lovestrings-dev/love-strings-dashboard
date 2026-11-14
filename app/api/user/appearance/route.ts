@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   const origin = request.headers.get("origin");
-  if (!origin || origin !== request.nextUrl.origin || request.headers.get("x-love-strings-dashboard") !== "write") {
+  if (!origin || origin !== request.nextUrl.origin || request.headers.get("x-artistdeck") !== "write") {
     return NextResponse.json({ error: "Unauthorized request." }, { status: 403 });
   }
   try {

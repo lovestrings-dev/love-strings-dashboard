@@ -2,11 +2,11 @@
 
 ## Current Integration
 
-The Supabase GitHub integration is connected to the Love Strings dashboard repository.
+The Supabase GitHub integration is connected to the ArtistDeck application repository.
 
 Recommended settings:
 
-- GitHub repository: `lovestrings-dev/love-strings-dashboard`
+- GitHub repository: `lovestrings-dev/love-strings-dashboard` (current legacy slug; rename externally when ready)
 - Working directory: `.`
 - Production branch: `main`
 - Deploy to production: enabled

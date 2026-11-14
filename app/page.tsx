@@ -3,9 +3,10 @@
 import Image from "next/image";
 import { PullToRefresh } from "./components/pull-to-refresh";
 import { AudioPlayer } from "./components/audio-player";
+import { MediaTrimmer } from "./components/media-trimmer";
 import { AppearanceSettings } from "./components/appearance-provider";
 import { DarkModeFeature } from "./components/dark-mode-feature";
-import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, SetStateAction } from "react";
 import { Fragment } from "react";
 import { createPortal } from "react-dom";
 import { forwardRef } from "react";
@@ -28,7 +29,9 @@ import {
   Megaphone,
   Upload,
   Music2,
+  Pause,
   Pencil,
+  Play,
   Plus,
   RefreshCw,
   Save,
@@ -769,7 +772,7 @@ const platformStats = [
   }
 ];
 
-const appVersionLabel = "Beta 1.33";
+const appVersionLabel = "Beta 1.34";
 const defaultAppLogoUrl = "/artistdeck-logo.png";
 
 const sections = [
@@ -779,7 +782,8 @@ const sections = [
   "Platforms",
   "Events",
   "Budget",
-  "Roadmap"
+  "Roadmap",
+  "Studio"
 ] as const;
 
 const dashboardNavigationSections: Partial<Record<DashboardCardId, Section>> = {
@@ -5514,6 +5518,7 @@ export default function Home() {
   const activeWorkspaceIdRef = useRef("");
   const hasRequestedQrCodeSupabaseLoad = useRef(false);
   const [activeSection, setActiveSection] = useState<Section>("Dashboard");
+  const [isStudioMenuOpen, setIsStudioMenuOpen] = useState(true);
   const [guidanceStatus, setGuidanceStatus] = useState<GuidanceStatus | null>(null);
   const [guidanceContext, setGuidanceContext] = useState<GuidanceContext>("none");
   const [guidanceSongId, setGuidanceSongId] = useState<string | null>(null);
@@ -5903,7 +5908,11 @@ export default function Home() {
       const section = dashboardNavigationSections[cardId];
       return section ? [section] : [];
     });
-    return ["Dashboard", ...personalizedModules] as Section[];
+    return [
+      "Dashboard",
+      ...personalizedModules,
+      "Studio"
+    ] as Section[];
   }, [dashboardPreferences.topLevelOrder]);
 
   const savePersonalDashboardPreferences = useCallback(async (
@@ -9001,7 +9010,29 @@ export default function Home() {
 
         <div className="nav-scroll-shell">
           <nav className="nav-list">
-            {navigationSections.map((section) => (
+            {navigationSections.map((section) => section === "Studio" ? (
+              <div className="studio-sidebar-nav-control" key={section}>
+                <button
+                  aria-current={activeSection === section ? "page" : undefined}
+                  aria-expanded={activeSection === "Studio" && isStudioMenuOpen}
+                  className="nav-module-studio"
+                  onClick={() => {
+                    if (activeSection !== "Studio") {
+                      setIsStudioMenuOpen(true);
+                      navigateToSidebarSection("Studio");
+                      return;
+                    }
+                    if (window.matchMedia("(max-width: 980px)").matches) {
+                      setIsStudioMenuOpen((current) => !current);
+                    }
+                  }}
+                  type="button"
+                >
+                  Studio
+                </button>
+                {activeSection === "Studio" ? <StudioSidebarMenu isMobileClosed={!isStudioMenuOpen} /> : null}
+              </div>
+            ) : (
               <button
                 aria-current={activeSection === section ? "page" : undefined}
                 className={`nav-module-${section.toLowerCase().replaceAll(" ", "-")}`}
@@ -9213,6 +9244,7 @@ export default function Home() {
             songs={productionSongDrafts}
           />
         ) : null}
+        {!settingsView && activeSection === "Studio" ? <StudioView productionSongs={productionSongDrafts} /> : null}
         {!settingsView && activeSection === "Budget" ? (
           <BudgetView
             entries={budgetEntriesWithForecast}
@@ -9252,6 +9284,7 @@ export default function Home() {
         activeSection !== "Platforms" &&
         activeSection !== "Marketing" &&
         activeSection !== "Production" &&
+        activeSection !== "Studio" &&
         activeSection !== "Events" &&
         activeSection !== "Budget" ? (
           <DashboardView
@@ -9315,6 +9348,415 @@ export default function Home() {
       {isLayoutDebugEnabled ? <LayoutDebugPanel section={activeSection} /> : null}
     </main>
   );
+}
+
+function StudioSidebarMenu({ isMobileClosed }: { isMobileClosed: boolean }) {
+  const [projectsOpen, setProjectsOpen] = useState(true);
+  const [testProjectOpen, setTestProjectOpen] = useState(true);
+  const steps = ["Compose", "Audio", "Video", "Overlay image", "Overlay Text", "Export"];
+
+  return (
+    <section aria-label="Studio projects" className={isMobileClosed ? "studio-sidebar-menu is-mobile-closed" : "studio-sidebar-menu"}>
+      <button aria-expanded={projectsOpen} className="studio-sidebar-tree-toggle" onClick={() => setProjectsOpen((current) => !current)} type="button">
+        <ChevronDown aria-hidden className={projectsOpen ? "is-open" : undefined} size={15} />
+        <strong>Projects</strong>
+        <span>1</span>
+      </button>
+      {projectsOpen ? <div className="studio-sidebar-tree-children">
+        <button aria-expanded={testProjectOpen} className="studio-sidebar-tree-toggle studio-sidebar-project-toggle" onClick={() => setTestProjectOpen((current) => !current)} type="button">
+          <ChevronDown aria-hidden className={testProjectOpen ? "is-open" : undefined} size={15} />
+          <strong>Test Project</strong>
+        </button>
+        {testProjectOpen ? <div aria-label="Test Project process" className="studio-sidebar-process-list">
+          {steps.map((step) => <button aria-current={step === "Audio" ? "step" : undefined} className={step === "Audio" ? "is-active" : undefined} disabled={step !== "Audio"} key={step} type="button">
+            <span aria-hidden />{step}
+          </button>)}
+        </div> : null}
+      </div> : null}
+    </section>
+  );
+}
+
+function StudioView({ productionSongs }: { productionSongs: ProductionSongConfig[] }) {
+  const [projectDurationChoice, setProjectDurationChoice] = useState<15 | 30 | "custom">(30);
+  const [customProjectDuration, setCustomProjectDuration] = useState("30");
+  const [audioSnippets, setAudioSnippets] = useState<StudioAudioSnippetRecord[]>([]);
+  const parsedCustomProjectDuration = Number.parseInt(customProjectDuration, 10);
+  const projectDuration = projectDurationChoice === "custom"
+    ? Math.min(180, Math.max(1, Number.isFinite(parsedCustomProjectDuration) ? parsedCustomProjectDuration : 30))
+    : projectDurationChoice;
+
+  return (
+    <section className="studio-view" aria-labelledby="studio-heading">
+      <header className="page-heading studio-heading">
+        <div>
+          <p className="eyebrow">Creative workspace</p>
+          <h1 id="studio-heading">Audio</h1>
+        </div>
+      </header>
+
+      <StudioAudioEditor audioSnippets={audioSnippets} durationChoice={projectDurationChoice} isCustomDuration={projectDurationChoice === "custom"} onAudioSnippetsChange={setAudioSnippets} onDurationChoiceChange={setProjectDurationChoice} productionSongs={productionSongs} projectDuration={projectDuration} />
+      <StudioWorkflowProgress activeProcess="Audio" availableProcesses={["Audio"]} />
+    </section>
+  );
+}
+
+function StudioWorkflowProgress({
+  activeProcess,
+  availableProcesses
+}: {
+  activeProcess: string;
+  availableProcesses: readonly string[];
+}) {
+  const steps = [
+    { description: "Project overview", label: "Compose" },
+    { description: "Track selected", label: "Audio" },
+    { description: "Select clips", label: "Video" },
+    { description: "Add media", label: "Overlay image" },
+    { description: "Add message", label: "Overlay Text" },
+    { description: "Generate video", label: "Export" }
+  ];
+  const activeIndex = Math.max(0, steps.findIndex((step) => step.label === activeProcess));
+
+  return (
+    <nav aria-label="Studio workflow progress" className="studio-workflow-progress">
+      {steps.map((step, index) => (
+        <StudioWorkflowStep activeIndex={activeIndex} available={availableProcesses.includes(step.label)} index={index} key={step.label} step={step} />
+      ))}
+    </nav>
+  );
+}
+
+function StudioWorkflowStep({
+  activeIndex,
+  available,
+  index,
+  step
+}: {
+  activeIndex: number;
+  available: boolean;
+  index: number;
+  step: { description: string; label: string };
+}) {
+  const isActive = available && index === activeIndex;
+  const isComplete = available && index < activeIndex;
+
+  return (
+    <Fragment>
+      <button
+        aria-current={isActive ? "step" : undefined}
+        className={isComplete ? "is-complete" : isActive ? "is-active" : "is-locked"}
+        disabled={!available}
+        type="button"
+      >
+        <span className="studio-workflow-number">{index + 1}</span>
+        <span><strong>{step.label}</strong><small>{step.description}</small></span>
+      </button>
+      {index < 5 ? <i aria-hidden className={isComplete ? "is-complete" : undefined} /> : null}
+    </Fragment>
+  );
+}
+
+function StudioComposeOverview({
+  customDuration,
+  durationChoice,
+  onChooseProcess,
+  onCustomDurationChange,
+  onDurationChoiceChange,
+  projectDuration
+}: {
+  customDuration: string;
+  durationChoice: 15 | 30 | "custom";
+  onChooseProcess: (process: string) => void;
+  onCustomDurationChange: (duration: string) => void;
+  onDurationChoiceChange: (duration: 15 | 30 | "custom") => void;
+  projectDuration: number;
+}) {
+  const sources = [
+    { detail: "No track selected", label: "Audio", process: "Audio", tone: "blue" },
+    { detail: "0 clips selected", label: "Video clips", process: "Video", tone: "violet" },
+    { detail: "0 visual layers", label: "Overlay image", process: "Overlay image", tone: "orange" },
+    { detail: "0 text layers", label: "Overlay Text", process: "Overlay Text", tone: "pink" }
+  ];
+  const timelineMarkers = [0, Math.round(projectDuration / 3), Math.round((projectDuration * 2) / 3), projectDuration];
+  const durationLabel = `${projectDuration}s`;
+  const durationTime = formatStudioDuration(projectDuration);
+
+  return (
+    <section className="studio-compose" aria-labelledby="studio-compose-heading">
+      <header className="studio-compose-header">
+        <div>
+          <p className="eyebrow">Test Project · Start screen</p>
+          <h2 id="studio-compose-heading">Compose your first variant</h2>
+          <p>Gather the building blocks, then shape one vertical creative before generating variants.</p>
+        </div>
+        <StudioDurationBadge durationChoice={durationChoice} onDurationChoiceChange={onDurationChoiceChange} projectDuration={projectDuration} />
+      </header>
+
+      <div className="studio-compose-grid">
+        <section className="studio-source-panel" aria-labelledby="studio-sources-heading">
+          <div className="studio-panel-heading"><div><p className="eyebrow">Project assets</p><h3 id="studio-sources-heading">Start with your sources</h3></div><span>0 / 4 ready</span></div>
+          <div className="studio-source-list">
+            {sources.map((source, index) => (
+              <button className={`studio-source-card studio-source-${source.tone}`} key={source.process} onClick={() => onChooseProcess(source.process)} type="button">
+                <span className="studio-source-index">{String(index + 1).padStart(2, "0")}</span>
+                <span><strong>{source.label}</strong><small>{source.detail}</small></span>
+                <span className="studio-source-action">Add</span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="studio-preview-panel" aria-labelledby="studio-preview-heading">
+          <div className="studio-panel-heading"><div><p className="eyebrow">Live composition</p><h3 id="studio-preview-heading">Preview</h3></div><span className="studio-preview-status">Draft</span></div>
+          <div className="studio-phone-preview">
+            <div className="studio-preview-glow" />
+            <p>YOUR STORY<br />STARTS HERE</p>
+            <span>Test Project</span>
+            <div className="studio-preview-scrim" />
+          </div>
+          <div className="studio-preview-controls"><span>00:00</span><div><i /></div><span>{durationTime}</span></div>
+        </section>
+
+        <section className="studio-inspector" aria-labelledby="studio-inspector-heading">
+          <div className="studio-panel-heading"><div><p className="eyebrow">Selected layer</p><h3 id="studio-inspector-heading">Project settings</h3></div></div>
+          <dl className="studio-inspector-list"><div><dt>Duration</dt><dd><span className="studio-duration-picker" role="radiogroup" aria-label="Project duration"><button aria-checked={durationChoice === 15} onClick={() => onDurationChoiceChange(15)} role="radio" type="button">15s</button><button aria-checked={durationChoice === 30} onClick={() => onDurationChoiceChange(30)} role="radio" type="button">30s</button><button aria-checked={durationChoice === "custom"} onClick={() => onDurationChoiceChange("custom")} role="radio" type="button">Custom</button>{durationChoice === "custom" ? <label><span className="visually-hidden">Custom project duration in seconds</span><input max="180" min="1" onChange={(event) => onCustomDurationChange(event.target.value)} type="number" value={customDuration} /><small>s</small></label> : null}</span></dd></div><div><dt>Layers</dt><dd>2</dd></div></dl>
+          <p>Every project starts with a text overlay and GIF overlay. Add audio or video when you are ready.</p>
+          <button className="studio-primary-action" onClick={() => onChooseProcess("Audio")} type="button">Start with audio</button>
+        </section>
+      </div>
+
+      <section className="studio-timeline" aria-label="Test Project timeline">
+        <div className="studio-timeline-heading"><div><p className="eyebrow">Project timeline</p><h3>Ready for your first layer</h3></div><span>00:00 / {durationTime}</span></div>
+        <div className="studio-timeline-ruler">{timelineMarkers.map((marker, index) => <span key={`${marker}-${index}`}>{formatStudioDuration(marker)}</span>)}</div>
+        <div className="studio-timeline-lanes"><div><span>Audio</span><i /></div><div><span>Video</span><i /></div><div><span>Image</span><i /></div><div><span>Text</span><i /></div></div>
+      </section>
+    </section>
+  );
+}
+
+function StudioDurationBadge({
+  durationChoice,
+  onDurationChoiceChange,
+  projectDuration
+}: {
+  durationChoice: 15 | 30 | "custom";
+  onDurationChoiceChange: (duration: 15 | 30) => void;
+  projectDuration: number;
+}) {
+  return <div className="studio-duration-badge"><span>Duration</span><div><button aria-pressed={durationChoice === 15} onClick={() => onDurationChoiceChange(15)} type="button">15s</button><button aria-pressed={durationChoice === 30} onClick={() => onDurationChoiceChange(30)} type="button">30s</button></div><small>{durationChoice === "custom" ? `Custom · ${projectDuration}s` : "Project length"}</small></div>;
+}
+
+function formatStudioDuration(seconds: number) {
+  return `00:${String(Math.max(0, Math.floor(seconds))).padStart(2, "0")}`;
+}
+
+type StudioAudioSnippetRecord = { artworkUrl: string; end: number; id: string; songId: string; sourceFileName: string; sourceUrl: string; start: number; title: string };
+
+function StudioAudioSnippet({
+  onDelete,
+  snippet
+}: {
+  onDelete: () => void;
+  snippet: StudioAudioSnippetRecord;
+}) {
+  const clipLabel = `${snippet.title} · ${formatStudioDuration(snippet.start)}–${formatStudioDuration(snippet.end)}`;
+  return <article className="studio-audio-snippet"><AudioPlayer artworkAlt={`${snippet.title} snippet artwork`} artworkUrl={snippet.artworkUrl} clipEndSeconds={snippet.end} clipStartSeconds={snippet.start} fileName={clipLabel} src={snippet.sourceUrl} title={`${snippet.title} snippet`} /><button aria-label={`Delete ${snippet.title} audio snippet`} onClick={onDelete} type="button">×</button></article>;
+}
+
+function StudioAudioVideoPreview({ projectDuration }: { projectDuration: number }) {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [position, setPosition] = useState(Math.min(12, projectDuration));
+  return <section className="studio-audio-video-preview" aria-labelledby="studio-audio-video-preview-heading">
+    <div className="studio-panel-heading"><div><p className="eyebrow">Live composition</p><h3 id="studio-audio-video-preview-heading">Preview</h3></div><span>{formatStudioDuration(position)} / {formatStudioDuration(projectDuration)}</span></div>
+    <div className="studio-audio-preview-phone">
+      <span className="studio-audio-preview-platforms">Spotify · Apple · YouTube</span>
+      <strong>YOUR<br />STORY</strong>
+      <span className="studio-audio-preview-project">TEST PROJECT</span>
+      <button aria-label={isPlaying ? "Pause video preview" : "Play video preview"} onClick={() => setIsPlaying((current) => !current)} type="button">{isPlaying ? <Pause size={19} /> : <Play size={19} />}</button>
+      <i aria-hidden style={{ left: `${projectDuration ? (position / projectDuration) * 100 : 0}%` }} />
+    </div>
+    <label className="studio-audio-preview-controls"><span>{formatStudioDuration(0)}</span><input aria-label="Video preview position" max={projectDuration} min="0" onChange={(event) => setPosition(Number(event.target.value))} step="1" type="range" value={position} /><span>{formatStudioDuration(projectDuration)}</span></label>
+  </section>;
+}
+
+function StudioAudioEditor({
+  audioSnippets,
+  durationChoice,
+  onDurationChoiceChange,
+  onAudioSnippetsChange,
+  productionSongs,
+  projectDuration,
+  isCustomDuration
+}: {
+  audioSnippets: StudioAudioSnippetRecord[];
+  durationChoice: 15 | 30 | "custom";
+  isCustomDuration: boolean;
+  onAudioSnippetsChange: Dispatch<SetStateAction<StudioAudioSnippetRecord[]>>;
+  onDurationChoiceChange: (duration: 15 | 30) => void;
+  productionSongs: ProductionSongConfig[];
+  projectDuration: number;
+}) {
+  const [selectedAudioId, setSelectedAudioId] = useState<string | null>(null);
+  const [trimRange, setTrimRange] = useState({ end: projectDuration, start: 0 });
+  const availableAudio = productionSongs.filter((song) => Boolean(song.audioUrl));
+  const selectedAudio = availableAudio.find((song) => song.id === selectedAudioId) ?? availableAudio[0];
+
+  function selectAudioForTrim(songId: string) {
+    setSelectedAudioId(songId);
+    setTrimRange({ end: projectDuration, start: 0 });
+  }
+
+  return (
+    <section className="studio-audio" aria-label="Test Project audio">
+      <header className="studio-audio-header">
+        <p className="eyebrow">Test Project · Audio</p>
+        <StudioDurationBadge durationChoice={durationChoice} onDurationChoiceChange={onDurationChoiceChange} projectDuration={projectDuration} />
+      </header>
+
+      <div className="studio-audio-workspace">
+        <div className="studio-audio-libraries">
+          <section className="studio-audio-library studio-audio-library-full" aria-label="Production audio library">
+            <div className="studio-panel-heading"><p className="eyebrow">Production audio library</p><span>{availableAudio.length} shown</span></div>
+            {availableAudio.length ? <div className="studio-audio-player-list">{availableAudio.map((song) => <article className={`studio-library-audio-item${selectedAudio?.id === song.id ? " is-selected" : ""}`} key={song.id}><AudioPlayer artworkUrl={song.albumArtUrl} fileName={song.audioFileName || `${song.title}.mp3`} src={song.audioUrl!} title={song.title} /><button aria-pressed={selectedAudio?.id === song.id} onClick={() => selectAudioForTrim(song.id)} type="button">{selectedAudio?.id === song.id ? "Selected for trim" : "Select for trim"}</button></article>)}</div> : <div className="studio-audio-empty-state"><strong>No Production MP3 files yet</strong><span>Upload an MP3 in Production → Song options and it will appear here.</span></div>}
+          </section>
+          <StudioAudioVideoPreview projectDuration={projectDuration} />
+          <section className="studio-audio-snippet-library" aria-labelledby="studio-audio-snippet-library-heading">
+            <div className="studio-panel-heading"><div><p className="eyebrow">Trimmed audio clips</p><h3 id="studio-audio-snippet-library-heading">Your audio snippets</h3></div><span>{audioSnippets.length} saved</span></div>
+            {audioSnippets.length ? <div className="studio-audio-snippet-list">{audioSnippets.map((snippet) => <StudioAudioSnippet key={snippet.id} onDelete={() => onAudioSnippetsChange((current) => current.filter((candidate) => candidate.id !== snippet.id))} snippet={snippet} />)}</div> : <div className="studio-audio-empty-state studio-audio-snippet-empty"><strong>No trimmed clips yet</strong><span>Choose a part of a Production track, then use audio to add it here.</span></div>}
+          </section>
+        </div>
+
+        <section className="studio-audio-trim" aria-labelledby="studio-audio-trim-heading">
+          <div className="studio-panel-heading"><div><p className="eyebrow">Selected track</p><h3 id="studio-audio-trim-heading">{selectedAudio?.title ?? "Choose a Production MP3"}</h3></div><span className="studio-preview-status">MP3</span></div>
+          {selectedAudio ? <><MediaTrimmer artworkUrl={selectedAudio.albumArtUrl} isTrimEditable={isCustomDuration} key={`${selectedAudio.id}-${projectDuration}-${isCustomDuration}`} maxExcerptSeconds={projectDuration} onTrimChange={setTrimRange} playButtonPlacement="waveform" src={selectedAudio.audioUrl!} title={selectedAudio.title} /><button className="studio-primary-action" onClick={() => { const snippet = { artworkUrl: selectedAudio.albumArtUrl, end: trimRange.end, id: `${selectedAudio.id}:${trimRange.start.toFixed(2)}:${trimRange.end.toFixed(2)}`, songId: selectedAudio.id, sourceFileName: selectedAudio.audioFileName || `${selectedAudio.title}.mp3`, sourceUrl: selectedAudio.audioUrl!, start: trimRange.start, title: selectedAudio.title }; onAudioSnippetsChange((current) => [...current.filter((candidate) => candidate.id !== snippet.id), snippet]); }} type="button">Use audio</button></> : <div className="studio-audio-empty-state"><strong>Select an MP3 source</strong><span>When Production has an uploaded MP3, choose it here to prepare an excerpt up to {formatStudioDuration(projectDuration)}.</span></div>}
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function StudioVideoEditor({ onChooseProcess }: { onChooseProcess: (process: string) => void }) {
+  const clips = [
+    { duration: 12, id: "coast", label: "Coastline", tone: "coast" },
+    { duration: 15, id: "forest", label: "Golden forest", tone: "forest" },
+    { duration: 10, id: "city", label: "City afterglow", tone: "city" },
+    { duration: 8, id: "stage", label: "Stage lights", tone: "stage" },
+    { duration: 11, id: "road", label: "Night drive", tone: "road" },
+    { duration: 9, id: "ocean", label: "Open water", tone: "ocean" }
+  ];
+  const [selectedClipIds, setSelectedClipIds] = useState(["coast", "forest", "city"]);
+  const selectedClips = clips.filter((clip) => selectedClipIds.includes(clip.id));
+  const totalDuration = selectedClips.reduce((total, clip) => total + clip.duration, 0);
+  const toggleClip = (clipId: string) => setSelectedClipIds((current) => current.includes(clipId) ? current.filter((id) => id !== clipId) : [...current, clipId]);
+
+  return (
+    <section className="studio-video" aria-labelledby="studio-video-heading">
+      <header className="studio-video-header">
+        <div><p className="eyebrow">Test Project · Video</p><h2 id="studio-video-heading">Select video clips</h2><p>Build the visual sequence for your 30-second vertical story.</p></div>
+        <div className="studio-format-badge"><span>Project format</span><strong>9:16</strong><small>Vertical</small></div>
+      </header>
+
+      <div className="studio-video-grid">
+        <section className="studio-video-library" aria-labelledby="studio-video-library-heading">
+          <div className="studio-panel-heading"><div><p className="eyebrow">Pexels · Library</p><h3 id="studio-video-library-heading">Find vertical clips</h3></div><span>{clips.length} available</span></div>
+          <label className="studio-search"><span className="visually-hidden">Search video clips</span><input placeholder="Search vertical video" type="search" /></label>
+          <div className="studio-clip-grid">
+            {clips.map((clip) => {
+              const selected = selectedClipIds.includes(clip.id);
+              return <article className={`studio-clip-card studio-clip-${clip.tone}${selected ? " is-selected" : ""}`} key={clip.id}><div className="studio-clip-visual"><span>{`00:${String(clip.duration).padStart(2, "0")}`}</span></div><div><strong>{clip.label}</strong><button aria-pressed={selected} onClick={() => toggleClip(clip.id)} type="button">{selected ? "Added" : "Add clip"}</button></div></article>;
+            })}
+          </div>
+        </section>
+
+        <section className="studio-selected-clips" aria-labelledby="studio-selected-clips-heading">
+          <div className="studio-panel-heading"><div><p className="eyebrow">Sequence</p><h3 id="studio-selected-clips-heading">Selected clips</h3></div><span className="studio-video-duration">{`00:${String(totalDuration).padStart(2, "0")}`}</span></div>
+          {selectedClips.length ? <ol className="studio-selected-list">{selectedClips.map((clip, index) => <li key={clip.id}><span className={`studio-selected-thumbnail studio-clip-${clip.tone}`} aria-hidden><b>{index + 1}</b></span><div><strong>{clip.label}</strong><small>{`Trim · 00:00 - 00:${String(clip.duration).padStart(2, "0")}`}</small></div><span>{`00:${String(clip.duration).padStart(2, "0")}`}</span><button onClick={() => toggleClip(clip.id)} type="button">Remove</button></li>)}</ol> : <div className="studio-video-empty"><strong>No clips selected</strong><span>Add one or more source clips to build the sequence.</span></div>}
+          <div className="studio-video-footer"><div><span>Total duration</span><strong>{`00:${String(totalDuration).padStart(2, "0")}`}</strong><small>{totalDuration === 30 ? "Matches your selected audio" : "Aim for 00:30 to match your audio"}</small></div><button className="studio-primary-action" disabled={!selectedClips.length} onClick={() => onChooseProcess("Overlay image")} type="button">Continue to overlays</button></div>
+        </section>
+      </div>
+
+      <section className="studio-video-timeline" aria-label="Video assembly timeline"><div className="studio-timeline-heading"><div><p className="eyebrow">Video timeline</p><h3>Sequence preview</h3></div><span>{`00:00 / 00:${String(Math.max(totalDuration, 30)).padStart(2, "0")}`}</span></div><div className="studio-timeline-ruler"><span>00:00</span><span>00:10</span><span>00:20</span><span>00:30</span></div><div className="studio-video-track"><span>Video</span><div>{selectedClips.map((clip) => <i className={`studio-clip-${clip.tone}`} key={clip.id} style={{ flexGrow: clip.duration }}>{clip.label}</i>)}</div></div><div className="studio-video-audio-track"><span>Audio</span><div><i /></div></div></section>
+    </section>
+  );
+}
+
+function StudioImageOverlayEditor({ onChooseProcess }: { onChooseProcess: (process: string) => void }) {
+  const layers = [
+    { id: "background", label: "Background video", range: "00:00 - 00:30", tone: "road" },
+    { id: "cover", label: "Cover artwork", range: "00:05 - 00:18", tone: "cover" },
+    { id: "platforms", label: "Platform badges", range: "00:00 - 00:30", tone: "badge" },
+    { id: "cta", label: "Call to action", range: "00:18 - 00:30", tone: "cta" }
+  ];
+  const [selectedLayerId, setSelectedLayerId] = useState("cover");
+  const [opacity, setOpacity] = useState(86);
+  const [scale, setScale] = useState(46);
+  const [blur, setBlur] = useState(0);
+  const [outline, setOutline] = useState(18);
+  const selected = layers.find((layer) => layer.id === selectedLayerId) ?? layers[0];
+
+  return (
+    <section className="studio-overlay-image" aria-labelledby="studio-overlay-image-heading">
+      <header className="studio-overlay-header"><div><p className="eyebrow">Test Project · Overlay image</p><h2 id="studio-overlay-image-heading">Add image and media overlays</h2><p>Position, style, and time visual layers without losing the story underneath.</p></div><div className="studio-format-badge"><span>Project format</span><strong>9:16</strong><small>Vertical</small></div></header>
+
+      <div className="studio-overlay-grid">
+        <section className="studio-layer-controls" aria-labelledby="studio-layer-controls-heading"><div className="studio-panel-heading"><div><p className="eyebrow">Selected layer</p><h3 id="studio-layer-controls-heading">{selected.label}</h3></div><span className="studio-preview-status">Image</span></div><div className="studio-control-list"><StudioRangeControl label="Opacity" onChange={setOpacity} value={opacity} /><StudioRangeControl label="Scale" onChange={setScale} value={scale} /><StudioRangeControl label="Blur" onChange={setBlur} value={blur} /><StudioRangeControl label="Outline" onChange={setOutline} value={outline} /></div><div className="studio-image-timing"><label>In point<output>00:05</output></label><label>Out point<output>00:18</output></label><label>Duration<output>00:13</output></label></div><button className="studio-outline-button" type="button">Choose outline color</button></section>
+
+        <section className="studio-image-preview-panel" aria-labelledby="studio-image-preview-heading"><div className="studio-panel-heading"><div><p className="eyebrow">Live composition</p><h3 id="studio-image-preview-heading">Preview</h3></div><span>00:12 / 00:30</span></div><div className="studio-overlay-phone"><div className="studio-overlay-platforms">Spotify · Apple · YouTube</div><div className="studio-overlay-title">WILD<br />ROADS</div><div className="studio-overlay-cover" style={{ filter: `blur(${blur / 8}px)`, opacity: opacity / 100, transform: `scale(${0.78 + scale / 150})` }}><span>WILD<br />ROADS<small>ACOUSTIC</small></span></div><div className="studio-overlay-cta">LISTEN NOW</div><div className="studio-overlay-playhead" /></div><div className="studio-preview-controls"><span>00:00</span><div><i style={{ width: "40%" }} /></div><span>00:30</span></div></section>
+
+        <section className="studio-layer-stack" aria-labelledby="studio-layer-stack-heading"><div className="studio-panel-heading"><div><p className="eyebrow">Composition</p><h3 id="studio-layer-stack-heading">Layer stack</h3></div><button type="button">Add media</button></div><div className="studio-stack-list">{layers.map((layer) => <button aria-pressed={selectedLayerId === layer.id} className="studio-stack-item" key={layer.id} onClick={() => setSelectedLayerId(layer.id)} type="button"><span className={`studio-stack-thumb studio-clip-${layer.tone}`} aria-hidden /> <span><strong>{layer.label}</strong><small>{layer.range}</small></span><i aria-hidden>⋮⋮</i></button>)}</div><button className="studio-primary-action" onClick={() => onChooseProcess("Overlay Text")} type="button">Continue to text overlays</button></section>
+      </div>
+    </section>
+  );
+}
+
+function StudioTextOverlayEditor({ onChooseProcess }: { onChooseProcess: (process: string) => void }) {
+  const presets = ["Bold headline", "Clean minimal", "Modern stack", "Soft highlight"];
+  const layers = ["Background video", "Cover artwork", "Platform badges", "Call to action"];
+  const [selectedPreset, setSelectedPreset] = useState(presets[0]);
+  const [headline, setHeadline] = useState("CALL TO ACTION");
+  const [subheadline, setSubheadline] = useState("OUT NOW EVERYWHERE");
+  const [fontSize, setFontSize] = useState(64);
+  const [background, setBackground] = useState(true);
+  const [outline, setOutline] = useState(true);
+
+  return (
+    <section className="studio-text-overlay" aria-labelledby="studio-text-overlay-heading">
+      <header className="studio-overlay-header"><div><p className="eyebrow">Test Project · Overlay Text</p><h2 id="studio-text-overlay-heading">Add text overlays</h2><p>Keep the message brand-safe, readable, and timed to the visual sequence.</p></div><div className="studio-format-badge"><span>Project format</span><strong>9:16</strong><small>Vertical</small></div></header>
+
+      <div className="studio-text-grid">
+        <section className="studio-text-controls" aria-labelledby="studio-text-controls-heading"><div className="studio-panel-heading"><div><p className="eyebrow">Style</p><h3 id="studio-text-controls-heading">Text settings</h3></div><span className="studio-preview-status">Text</span></div><label className="studio-text-input">Headline<input maxLength={42} onChange={(event) => setHeadline(event.target.value.toUpperCase())} value={headline} /></label><label className="studio-text-input">Subheadline<input maxLength={56} onChange={(event) => setSubheadline(event.target.value.toUpperCase())} value={subheadline} /></label><div className="studio-text-preset-group"><span>Text presets</span><div>{presets.map((preset) => <button aria-pressed={selectedPreset === preset} key={preset} onClick={() => setSelectedPreset(preset)} type="button">{preset}</button>)}</div></div><div className="studio-text-field-row"><label className="studio-text-input">Font<input readOnly value={selectedPreset === "Bold headline" ? "Montserrat Bold" : selectedPreset} /></label><label className="studio-text-input">Size<input aria-label="Text size" max="96" min="22" onChange={(event) => setFontSize(Number(event.target.value))} type="number" value={fontSize} /></label></div><div className="studio-text-toggles"><label><input checked={background} onChange={(event) => setBackground(event.target.checked)} type="checkbox" /> Background</label><label><input checked={outline} onChange={(event) => setOutline(event.target.checked)} type="checkbox" /> Outline</label></div></section>
+
+        <section className="studio-text-preview-panel" aria-labelledby="studio-text-preview-heading"><div className="studio-panel-heading"><div><p className="eyebrow">Live composition</p><h3 id="studio-text-preview-heading">Preview</h3></div><span>00:12 / 00:30</span></div><div className={`studio-text-phone studio-text-preset-${selectedPreset.replaceAll(" ", "-")}`}><div className="studio-text-platforms">Spotify · Apple · YouTube</div><div className="studio-text-preview-headline" style={{ fontSize: `${Math.min(fontSize, 72) / 2.15}px` }}><span className={background ? "has-background" : undefined}>{headline || "YOUR HEADLINE"}</span></div><div className={outline ? "studio-text-preview-subheadline has-outline" : "studio-text-preview-subheadline"}>{subheadline || "YOUR SUBHEADLINE"}</div><div className="studio-text-preview-cover">WILD<br />ROADS<small>ACOUSTIC</small></div><div className="studio-overlay-playhead" /></div><div className="studio-preview-controls"><span>00:00</span><div><i style={{ width: "40%" }} /></div><span>00:30</span></div></section>
+
+        <section className="studio-text-layer-stack" aria-labelledby="studio-text-layer-stack-heading"><div className="studio-panel-heading"><div><p className="eyebrow">Composition</p><h3 id="studio-text-layer-stack-heading">Layer stack</h3></div><button type="button">Add text</button></div><div className="studio-stack-list">{layers.map((layer, index) => <div className={`studio-text-stack-item${index === 3 ? " is-active" : ""}`} key={layer}><span className="studio-stack-thumb" aria-hidden>{index === 3 ? "T" : ""}</span><span><strong>{layer}</strong><small>{index === 1 ? "00:05 - 00:18" : "00:00 - 00:30"}</small></span><i aria-hidden>⋮⋮</i></div>)}</div><button className="studio-primary-action" onClick={() => onChooseProcess("Export")} type="button">Continue to export</button></section>
+      </div>
+    </section>
+  );
+}
+
+function StudioExportPage() {
+  const sets = [
+    { id: "set-a", label: "Variants set 1", variants: 12, tone: "sunset" },
+    { id: "set-b", label: "Variants set 2", variants: 10, tone: "teal" },
+    { id: "ad-set", label: "Ad set - draft", variants: 22, tone: "night" }
+  ];
+  const [selectedVariantIds, setSelectedVariantIds] = useState<string[]>(["set-a-1", "set-a-4"]);
+  const [notice, setNotice] = useState("");
+  const toggleVariant = (id: string) => setSelectedVariantIds((current) => current.includes(id) ? current.filter((variantId) => variantId !== id) : [...current, id]);
+
+  return (
+    <section className="studio-export" aria-labelledby="studio-export-heading">
+      <header className="studio-export-header"><div><p className="eyebrow">Test Project · Export</p><h2 id="studio-export-heading">Campaign export</h2><p>Review the generated creative sets, select the strongest cuts, and prepare them for download or a future campaign handoff.</p></div><div className="studio-export-status"><strong>Draft export</strong><span>Local preview only</span></div></header>
+      {notice ? <p className="studio-export-notice" role="status">{notice}</p> : null}
+      <div className="studio-export-grid">{sets.map((set) => <section className="studio-export-set" key={set.id}><div className="studio-panel-heading"><div><p className="eyebrow">Generated set</p><h3>{set.label} <span>{set.variants}</span></h3></div><button onClick={() => setNotice(`${set.label} is ready for a future render queue.`)} type="button">View all</button></div><div className="studio-variant-grid">{Array.from({ length: 6 }, (_, index) => { const variantId = `${set.id}-${index + 1}`; const selected = selectedVariantIds.includes(variantId); return <button aria-pressed={selected} className={`studio-variant-card studio-variant-${set.tone}${selected ? " is-selected" : ""}`} key={variantId} onClick={() => toggleVariant(variantId)} type="button"><span className="studio-variant-label">V{String(index + 1).padStart(2, "0")}</span><span className="studio-variant-copy">{index % 2 ? "LISTEN NOW" : "WILD ROADS"}</span><i aria-hidden>{selected ? "Selected" : ""}</i></button>; })}</div><div className="studio-export-audio"><span className="studio-export-play" aria-hidden>▶</span><div>{Array.from({ length: 44 }, (_, index) => <i key={index} style={{ height: `${18 + ((index * 23) % 68)}%` }} />)}</div><strong>00:30</strong></div><div className="studio-export-actions"><button onClick={() => setNotice(`All ${set.label.toLowerCase()} variants are queued for local download preview.`)} type="button">Download all</button><button disabled={!selectedVariantIds.some((id) => id.startsWith(set.id))} onClick={() => setNotice(`Selected ${set.label.toLowerCase()} variants are queued for local download preview.`)} type="button">Download selected</button><button disabled onClick={() => undefined} type="button">Export to Meta later</button></div></section>)}</div>
+      <section className="studio-export-footer"><div><p className="eyebrow">Selection summary</p><h3>{selectedVariantIds.length} variants selected</h3><p>Downloads and Meta publishing are intentionally inactive until real rendering and review are connected.</p></div><button className="studio-primary-action" disabled={!selectedVariantIds.length} onClick={() => setNotice(`${selectedVariantIds.length} selected variants are ready for the future render/export queue.`)} type="button">Prepare selected variants</button></section>
+    </section>
+  );
+}
+
+function StudioRangeControl({ label, onChange, value }: { label: string; onChange: (value: number) => void; value: number }) {
+  return <label className="studio-range-control"><span>{label}</span><input aria-label={`${label} adjustment`} max="100" min="0" onChange={(event) => onChange(Number(event.target.value))} type="range" value={value} /><output>{`${value}%`}</output></label>;
 }
 
 function ProductionReleasePrompt({ canEditSettings, onCancel, onChoose, onOpenSettings }: {

@@ -1,5 +1,5 @@
 {
-  "name": "love-strings-dashboard",
+  "name": "artistdeck",
   "version": "1.34.0-beta.2",
   "private": true,
   "scripts": {
@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test:youtube-topic-discovery": "node scripts/test-youtube-topic-discovery.mjs",
     "test:beta133-release": "node scripts/test-beta133-release.mjs",
+    "test:beta134-release": "node scripts/test-beta134-release.mjs",
     "test:beta132-release": "node scripts/test-beta132-release.mjs",
     "test:beta131-release": "node scripts/test-beta131-release.mjs",
     "test:beta130-release": "node scripts/test-beta130-release.mjs",

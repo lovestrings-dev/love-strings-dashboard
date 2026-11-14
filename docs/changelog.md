@@ -1,6 +1,19 @@
-# Love Strings Dashboard Changelog
+# ArtistDeck Changelog
 
 This file tracks app versions that are useful to discuss, test, and deploy. It is for product-level changes, not every small database edit.
+
+## Beta 1.34 — Production MP3 sources and Studio Audio
+
+Prepared 13 November 2026; not yet deployed.
+
+- Production Song options accepts a managed MP3 source upload and provides a compact player with persistent album-art play control, seeking, duration, and replacement upload.
+- Audio binaries are authorized server-side and stored in the workspace Cloudinary production-audio folder. Metadata is stored in Studio-owned projects and versioned audio assets; replacing a track keeps prior metadata as non-current history.
+- Migration `20261113135755` establishes the workspace-scoped Studio audio foundation with authenticated workspace-member reads. The Production list tolerates a missing audio record and continues to load normally.
+- Studio is now an Audio-only controlled release. Its production-source library reuses the compact MP3 player; users can select a bounded 15-second, 30-second, or custom excerpt and save local parameter-only audio snippets for the active Test Project.
+- The Studio navigation sits last in the main menu. It exposes a nested Projects → Test Project tree on desktop and a readable right-side drawer on mobile. Audio is enabled; Compose, Video, Overlay image, Overlay Text, and Export remain visible but locked.
+- The live-composition card is a local visual preview only. Audio snippet selection is not yet durable across a full page reload; no MP3 is cut, no video is rendered, and no export pipeline is exposed in this beta.
+
+No new client dependencies or public environment variables. Existing server-only Cloudinary credentials are also used for the upload route. The display waveform is deliberately decorative rather than an analyzed audio waveform.
 
 ## Beta 1.33 — Production reliability and mobile workflow
 

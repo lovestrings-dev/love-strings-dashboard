@@ -52,7 +52,7 @@ export function AppearanceProvider({ children, initialTheme }: { children: React
     try {
       const response = await fetch("/api/user/appearance", {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", "x-love-strings-dashboard": "write" },
+        headers: { "Content-Type": "application/json", "x-artistdeck": "write" },
         body: JSON.stringify(input)
       });
       if (!response.ok) throw new Error("Your choice could not be saved. Please try again.");

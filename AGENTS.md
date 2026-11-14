@@ -2,7 +2,7 @@
 
 ## Project
 
-Love Strings Sprint Dashboard is a web app for managing an independent music project release cycle.
+ArtistDeck is a web app for managing an independent music project release cycle. Love Strings is the flagship/reference workspace.
 
 Main goal: provide a daily command screen for production, marketing, platform growth, budget, roadmap, and sprint work.
 
@@ -12,7 +12,7 @@ Main goal: provide a daily command screen for production, marketing, platform gr
 - Package manager: pnpm
 - UI icons: lucide-react
 - Database/backend: Supabase PostgreSQL
-- Repository: GitHub `lovestrings-dev/love-strings-dashboard`
+- Repository: GitHub `lovestrings-dev/love-strings-dashboard` (current legacy repository slug)
 - Future hosting target: Vercel
 
 ## Current State
@@ -324,5 +324,5 @@ Role: helps design the system, write code, run checks, connect tools, explain ar
 - Execute only the approved scope and preserve unrelated working-tree changes.
 - Do not autonomously start the next task; stop and report when the approved task is complete.
 - Do not deploy, merge, release, perform destructive database work, or change external configuration unless explicitly authorized.
-- Read current development-state material when relevant; current LSDB state takes precedence over stale permanent instructions.
+- Read current development-state material when relevant; current ArtistDeck state takes precedence over stale permanent instructions.
 - Stop and report if a material blocker requires scope expansion or a new authorization.
