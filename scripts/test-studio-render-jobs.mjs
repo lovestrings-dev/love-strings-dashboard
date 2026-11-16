@@ -5,12 +5,15 @@ import { validateRenderRequest, renderObjectPaths } from "../lib/studio/render-r
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
 const id = "11111111-1111-4111-8111-111111111111";
-const workspaceId = "22222222-2222-4222-8222-222222222222";
+// Existing Love Strings workspace uses a PostgreSQL UUID with legacy version bits.
+const workspaceId = "00000000-0000-0000-0000-000000000001";
 const videoId = "33333333-3333-4333-8333-333333333333";
 const body = { requestId: id, songId: id, audioSourceUrl: "https://res.cloudinary.com/test-cloud/video/upload/test.mp3", audioStart: 5, audioEnd: 20, videoAssetId: videoId, videoStart: 0, videoEnd: 2.733, durationSeconds: 15 };
 assert.deepEqual(validateRenderRequest(body), body);
 for (const invalid of [{ audioStart: NaN }, { videoEnd: Infinity }, { durationSeconds: 181 }, { audioEnd: 6 }, { videoEnd: 0 }, { videoAssetId: "../other" }]) assert.equal(validateRenderRequest({ ...body, ...invalid }), null);
 assert.throws(() => renderObjectPaths("../other", id));
+assert.throws(() => renderObjectPaths(`${workspaceId}/../other`, id));
+assert.throws(() => renderObjectPaths(workspaceId, workspaceId), "Client request IDs retain RFC UUID validation");
 
 let role = "admin";
 let videoAvailable = true;

@@ -26,7 +26,10 @@ export function validateRenderRequest(value: unknown): StudioRenderRequest | nul
 }
 
 export function renderObjectPaths(workspaceId: string, renderId: string) {
-  if (!isStudioUuid(workspaceId) || !isStudioUuid(renderId)) throw new Error("Invalid render identity.");
+  // Workspace IDs come from authorized database records and may predate RFC
+  // version/variant UUID bits. Keep canonical UUID syntax to protect paths.
+  const workspaceUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!workspaceUuid.test(workspaceId) || !isStudioUuid(renderId)) throw new Error("Invalid render identity.");
   const root = `workspaces/${workspaceId}/studio/renders/${renderId}`;
   // Temporary audio/manifests use the existing lifecycle-managed prefixes.
   return { audio: `media/${root}/audio-source`, manifest: `manifests/${root}/manifest.json`, output: `${root}/final.mp4` };

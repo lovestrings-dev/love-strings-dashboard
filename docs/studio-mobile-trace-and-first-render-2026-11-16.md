@@ -142,3 +142,23 @@ Activation was explicitly approved after the development slice.
   The exact render job now grants `roles/run.jobsExecutorWithOverrides` to
   that same account; independent connector policy readback verified the binding.
 - No render execution started. App commit/push and end-to-end verification remain.
+
+## First deployed submission verification
+
+Production deployment `dpl_AdDxKr8s7Dmc9axNF7KzrqGtJbuC` reached READY for
+commit `491bc67`. The authenticated Export UI loaded the shared sources and
+enabled Generate. Submitted Intro 23.7–38.7 seconds with canvas_1.mp4 once.
+
+The request returned 500 before job reservation; the render table remained
+empty. Reproduced the same failure in the real route harness by replacing its
+workspace fixture with Love Strings' existing
+`00000000-0000-0000-0000-000000000001` UUID. `renderObjectPaths` had incorrectly
+required RFC version/variant bits on a database workspace identifier.
+
+Fixed only workspace path validation to accept canonical PostgreSQL UUID syntax;
+client render-request IDs retain strict RFC validation. Regression covers the
+legacy workspace through dispatch, and rejects traversal and legacy request IDs.
+The API suite, TypeScript and targeted strict ESLint pass. pnpm wrapper attempted
+an unnecessary install and hit its non-TTY guard; checks passed through existing
+installed binaries. No cloud render execution occurred. Push the follow-up fix
+before retrying the approved test; output/playback remain unverified.
