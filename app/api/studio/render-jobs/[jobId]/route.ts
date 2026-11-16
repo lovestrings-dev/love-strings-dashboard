@@ -1,13 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireWorkspaceAccess, WorkspaceAccessError } from "@/lib/server/workspace-owner";
 import { isStudioUuid } from "@/lib/studio/render-request";
+import { canManageStudioRenders } from "@/lib/server/studio-render-access";
 
 export async function DELETE(request: NextRequest, context: { params: Promise<{ jobId: string }> }) {
   try {
     const origin = request.headers.get("origin");
     if (!origin || new URL(origin).host !== request.headers.get("host")) return NextResponse.json({ error: "Unauthorized request." }, { status: 401 });
-    const { serviceClient, workspaceId, role } = await requireWorkspaceAccess(request);
-    if (role === "viewer") return NextResponse.json({ error: "Viewers cannot delete renders." }, { status: 403 });
+    const { serviceClient, workspaceId, role, user } = await requireWorkspaceAccess(request);
+    if (!canManageStudioRenders(user, role)) return NextResponse.json({ error: "Only the proof-of-concept owner can delete renders." }, { status: 403 });
     const { jobId } = await context.params;
     if (!isStudioUuid(jobId)) return NextResponse.json({ error: "Invalid render." }, { status: 400 });
     const { data: job, error } = await serviceClient.from("studio_render_jobs").select("id,status,deleted_at").eq("workspace_id", workspaceId).eq("id", jobId).maybeSingle();

@@ -78,3 +78,25 @@ local browser test picked up a later fourth result without submitting work or
 refreshing. API/batch tests, strict lint and production build/TypeScript passed.
 An initial standalone typecheck encountered duplicate generated .next type files;
 the clean production build regenerated types and passed.
+
+## Proof-of-concept generation account restriction
+
+Only the server-verified, confirmed Auth email dimasounder@gmail.com may submit
+FFmpeg render requests (existing workspace membership and non-Viewer role still
+required). All other accounts, including other workspace admins, receive
+canGenerate=false and cannot reserve jobs, stage audio, or dispatch Cloud Run.
+The same account restriction protects result deletion so other accounts have
+view-only result access. Read/history/preview/download retain workspace access
+checks and remain available to other members/viewers.
+
+The UI displays View-only, disables Generate and automatic queue resumption,
+and hides Delete for other accounts. Permissions refresh with render polling.
+The authorization uses Auth getUser email/confirmation, never browser input or
+user-editable metadata. The environment activation flag remains an additional
+generation gate. No schema, IAM, environment or worker change is needed.
+
+Tests verify blocked generation for other roles/emails, spoofed payload email,
+unconfirmed email and lookalike domain; confirmed owner succeeds. Other-account
+history and signed preview access still work; deletion is denied. API regression,
+strict lint and production build/TypeScript passed. Activate by pushing the local
+commit and letting the normal Vercel Production deployment finish.

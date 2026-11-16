@@ -3,6 +3,7 @@ import { requireWorkspaceAccess, WorkspaceAccessError } from "@/lib/server/works
 import { studioStagingBucketName, studioStorage } from "@/lib/server/adstudio-storage";
 import { dispatchStudioRender, refreshStudioRenderJob, toStudioRenderReply, type StudioRenderJob } from "@/lib/server/studio-render-jobs";
 import { isStudioUuid, renderObjectPaths, validateRenderRequest } from "@/lib/studio/render-request";
+import { canManageStudioRenders } from "@/lib/server/studio-render-access";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -10,7 +11,7 @@ const jobColumns = "id,workspace_id,studio_project_id,status,provider_execution_
 
 export async function GET(request: NextRequest) {
   try {
-    const { serviceClient, workspaceId, role } = await requireWorkspaceAccess(request);
+    const { serviceClient, workspaceId, role, user } = await requireWorkspaceAccess(request);
     const id = request.nextUrl.searchParams.get("id");
     if (id && !isStudioUuid(id)) return NextResponse.json({ error: "Invalid render job." }, { status: 400 });
     let query = serviceClient.from("studio_render_jobs").select(jobColumns).eq("workspace_id", workspaceId).is("deleted_at", null);
@@ -20,7 +21,8 @@ export async function GET(request: NextRequest) {
     // Refresh at most one active operation, including after a browser reload.
     const jobs = [];
     for (const row of data ?? []) jobs.push(toStudioRenderReply(await refreshStudioRenderJob(serviceClient, row as StudioRenderJob)));
-    return NextResponse.json({ jobs, canGenerate: process.env.ADSTUDIO_RENDER_ENABLED === "true" && role !== "viewer" }, { headers: { "Cache-Control": "private, no-store" } });
+    const canManage = canManageStudioRenders(user, role);
+    return NextResponse.json({ jobs, canGenerate: process.env.ADSTUDIO_RENDER_ENABLED === "true" && canManage, canDelete: canManage }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) { return errorReply(error); }
 }
 
@@ -31,7 +33,7 @@ export async function POST(request: NextRequest) {
     if (!sameOrigin(request)) return NextResponse.json({ error: "Unauthorized request." }, { status: 401 });
     access = await requireWorkspaceAccess(request);
     const { serviceClient, workspaceId, role, user } = access;
-    if (role === "viewer") return NextResponse.json({ error: "Viewers cannot generate videos." }, { status: 403 });
+    if (!canManageStudioRenders(user, role)) return NextResponse.json({ error: "Video generation is limited to the proof-of-concept owner." }, { status: 403 });
     // Explicit activation only after the updated worker and job IAM are ready.
     if (process.env.ADSTUDIO_RENDER_ENABLED !== "true") return NextResponse.json({ error: "Video generation is not enabled yet." }, { status: 503 });
     const input = validateRenderRequest(await request.json());
