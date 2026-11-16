@@ -1,0 +1,13 @@
+import assert from "node:assert/strict";
+import { validateComposition } from "../lib/studio/composition.ts";
+const project = "11111111-1111-4111-8111-111111111111";
+const audio = "22222222-2222-4222-8222-222222222222";
+const video = "33333333-3333-4333-8333-333333333333";
+const source = "44444444-4444-4444-8444-444444444444";
+const source2 = "55555555-5555-4555-8555-555555555555";
+const valid = { schemaVersion: 1, projectId: project, durationSeconds: 15, format: "vertical-9:16", audio: [{ id: audio, sourceAssetId: source, startSeconds: 5, endSeconds: 20, sortOrder: 0 }], video: [{ id: video, sourceAssetId: source2, startSeconds: 8, endSeconds: 23, sortOrder: 0 }], overlay: { text: "OUT NOW", textColor: "#ffffff", fontSize: 58, position: "bottom" } };
+assert.deepEqual(validateComposition(valid).value, valid);
+assert.match(validateComposition({ ...valid, video: [] }).error, /exactly one audio and one video/i);
+assert.match(validateComposition({ ...valid, overlay: { text: "bad\ntext" } }).error, /printable/i);
+assert.match(validateComposition({ ...valid, durationSeconds: 30 }).error, /cover the project duration/i);
+console.log("Studio composition contract passed.");

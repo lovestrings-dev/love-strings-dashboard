@@ -1,6 +1,6 @@
 {
   "name": "artistdeck",
-  "version": "1.34.0-beta.2",
+  "version": "1.35.0-beta.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -11,6 +11,7 @@
     "test:youtube-topic-discovery": "node scripts/test-youtube-topic-discovery.mjs",
     "test:beta133-release": "node scripts/test-beta133-release.mjs",
     "test:beta134-release": "node scripts/test-beta134-release.mjs",
+    "test:beta135-release": "node scripts/test-beta135-release.mjs",
     "test:beta132-release": "node scripts/test-beta132-release.mjs",
     "test:beta131-release": "node scripts/test-beta131-release.mjs",
     "test:beta130-release": "node scripts/test-beta130-release.mjs",
@@ -88,7 +89,9 @@
     "test:production-past-release": "node scripts/test-production-past-release.mjs",
     "test:production-sharing": "node scripts/test-production-sharing.mjs",
     "test:production-snapshot-reconciliation": "node --experimental-strip-types scripts/test-production-snapshot-reconciliation.mjs",
-    "test:pull-to-refresh": "node scripts/test-pull-to-refresh.mjs"
+    "test:pull-to-refresh": "node scripts/test-pull-to-refresh.mjs",
+    "test:studio-composition": "node --experimental-strip-types scripts/test-studio-composition.mjs",
+    "test:studio-pixabay": "node --experimental-strip-types scripts/test-studio-pixabay.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.4",

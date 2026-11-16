@@ -22,13 +22,16 @@ contract so it can be reused there.
 Repository: `lovestrings-dev/love-strings-dashboard`
 Local root: `/Users/sun_mac_m1/Documents/LOVE STRINGS/LS_AI_DASHBOARD`
 
-The current branch is `main`. The user commits personally using GitHub Desktop.
-Do **not** make commits unless explicitly asked.
+The current branch is `main`. Latest Studio commit:
 
-The working tree also contains unrelated, pre-existing in-progress changes
-(including `AGENTS.md`, `PROJECT_BRIEF.md`, `app/page.tsx`, and several
-appearance/dashboard files). Preserve them. Keep Studio edits focused to the
-files named below and inspect `git status` before changing a shared file.
+```text
+280d508 fix(studio): refine beta audio editing
+```
+
+It is a clean local commit that has **not yet been pushed** to GitHub. GitHub
+Desktop is authenticated and reports one local commit waiting to push. Pushing
+`main` triggers the existing Vercel deployment; do not push/deploy, invoke the
+Cloud Run Job, or modify cloud configuration without explicit authorization.
 
 The Studio ideas/PDFs are reference-only, outside this Git repository:
 
@@ -56,6 +59,24 @@ The service account has bucket-level `roles/storage.objectUser` on both Studio
 buckets. No JSON service-account key was created. Keep it that way. The
 buckets must remain private; previews/downloads must use short-lived signed
 URLs created only by authorised server code.
+
+### Vercel workload identity for private uploads
+
+The production Vercel workload identity is now permitted to impersonate the
+Studio service account, using the provider's single production-project subject:
+
+`owner:lovestrings-dev:project:love-strings-dashboard:environment:production`
+
+The Studio service account also has its self-scoped
+`roles/iam.serviceAccountTokenCreator` grant, solely so authorised server code
+can sign short-lived Cloud Storage upload, preview, and download URLs. No
+service-account key was created. IAM propagation can take a few minutes after
+the 2026-11-15 policy change.
+
+This completes the cloud access prerequisite. The Next.js server still needs
+to exchange Vercel's OIDC token through the existing workload-identity
+provider and expose a protected upload-signing route; do not proxy video bytes
+through Vercel and do not add browser credentials.
 
 Cloud Run, Cloud Build, Artifact Registry, and Cloud Storage APIs are enabled.
 
@@ -129,7 +150,18 @@ Overlay image, Overlay Text, and Export.
   survive a full page reload.
 - Audio UI now has three cards across: Production sources, a local live
   composition preview, and bounded trimmed-audio players. The full-width
-  trimmer stays underneath.
+  trimmer stays underneath. The default project duration is **15 seconds**;
+  30 seconds and custom remain available.
+- `MediaTrimmer` has a 1×–6× zoom control. At fixed 15s/30s duration, the
+  playback scrubber is intentionally absent so pointer/finger dragging moves
+  the excerpt window. The decorative waveform scales and translates beneath
+  that selection window. In custom-duration mode, the playback scrubber and
+  start/end controls remain available.
+- The Live Composition preview is no longer a dummy toggle: once a snippet
+  exists it plays the first saved snippet only within its start/end timestamps,
+  and animates the `YOUR STORY` artwork while playing.
+- On mobile, the Studio waterfall opens immediately on Studio selection and
+  closes on a tap outside it.
 
 ### Video UI is still placeholder-only
 
@@ -142,12 +174,15 @@ do not treat it as a backend contract.
 
 Use this as the starting brief for the backend/video-development chat:
 
-> Build the Studio video infrastructure inside the existing ArtistDeck app.
-> Preserve the current Studio UI flow and the multi-workspace security model.
-> Treat Audio snippets as the reference: a snippet is metadata describing a
-> source asset plus start/end seconds, not a newly cut media file. Implement
-> the same durable model for video clips, then prepare the Export step to turn
-> selected audio/video snippets into validated FFmpeg render-job instructions.
+> Build the Studio Video and Export foundation inside the existing ArtistDeck
+> app. Preserve the current Studio UI flow, the Audio-only production beta,
+> and the multi-workspace security model. Treat Audio snippets as the
+> interaction reference: a snippet is metadata describing a source asset plus
+> start/end seconds, not a newly cut media file. Audio snippets are currently
+> session-local; establish the durable project-composition model required for
+> both Audio and Video before Export relies on them. Implement the equivalent
+> durable model for video clips, then prepare the Export step to turn selected
+> audio/video snippets into validated FFmpeg render-job instructions.
 >
 > Scope:
 > 1. Add server-only Pexels search/detail integration. Keep `PEXELS_API_KEY`
@@ -160,11 +195,11 @@ Use this as the starting brief for the backend/video-development chat:
 >    source assets and video snippets. A video snippet must at minimum retain
 >    source asset ID, start, end, clip dimensions/duration, and ordering or
 >    selection metadata needed by Export. Preserve tenant/RLS boundaries.
-> 4. Rework the reusable `MediaTrimmer` or introduce a compatible video
->    trimmer that previews actual video frames while respecting the shared
->    15s/30s/custom project-duration constraints. Keep the interaction
->    contract parallel with Audio: choose range → save metadata snippet →
->    replay only that range.
+> 4. Reuse the `MediaTrimmer` interaction contract or introduce a compatible
+>    video trimmer with actual video-frame preview. It must respect the shared
+>    15s/30s/custom project-duration constraints and preserve the mobile
+>    zoom/pan precision model: choose range → save metadata snippet → replay
+>    only that range.
 > 5. Define a versioned export-composition contract which references saved
 >    audio/video snippets, overlay data, duration/format, and deterministic
 >    ordering. The app must validate and stage every referenced asset, write a
@@ -175,11 +210,12 @@ Use this as the starting brief for the backend/video-development chat:
 >    secrets.
 >
 > Start with data model/API contracts and tests before replacing the Video UI
-> placeholders. Keep all user-facing Studio design changes in the UI chat.
+> placeholders. Keep user-facing Studio design changes constrained to the
+> current design system, and leave the already deployed Audio flow functional.
 
 ## Next implementation phase
 
-Implement the Studio app layer before exposing any public UI:
+Implement the Studio app layer before exposing new Video/Export UI:
 
 1. Add workspace-scoped Supabase migrations for render jobs and rendered
    assets. Include status, requested-by user, manifest URI, output object path,
@@ -201,6 +237,20 @@ Implement the Studio app layer before exposing any public UI:
    desktop.
 5. Add deterministic tests for tenant isolation, manifest/object-path
    validation, and signed URL authorisation.
+
+Recommended milestone order:
+
+1. Inspect and document the current `studio_projects` / `studio_audio_assets`
+   migrations and server-route authorization conventions.
+2. Add a versioned project-composition schema that can persist Audio snippet
+   metadata and future Video snippets without breaking the current session UI.
+3. Add Pexels search + authorised staging-bucket ingestion, then Video source
+   and snippet routes with tenant-isolation tests.
+4. Replace only the hard-coded `StudioVideoEditor` placeholder with the real
+   asset library, video preview, trimmer, and saved-snippet UI.
+5. Add Export composition validation, render-job records, manifest staging,
+   Cloud Run Job execution, status polling, and private signed output URLs.
+6. Add overlays only after the composition/export contract is stable.
 
 ## Important constraints
 

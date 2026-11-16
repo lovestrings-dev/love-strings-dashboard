@@ -12,10 +12,13 @@ type MediaTrimmerProps = {
   artworkUrl?: string;
   className?: string;
   isTrimEditable?: boolean;
+  initialTrimRange?: { end: number; start: number };
   maxExcerptSeconds?: number;
   mediaType?: "audio" | "video";
   onPlaybackChange?: (isPlaying: boolean) => void;
   onTrimChange?: (range: { end: number; start: number }) => void;
+  onTrimSelectionCommit?: (range: { end: number; start: number }) => void;
+  playbackPosition?: number;
   playButtonPlacement?: "values" | "waveform";
   showPlayButton?: boolean;
   src: string;
@@ -24,9 +27,10 @@ type MediaTrimmerProps = {
 
 export type MediaTrimmerHandle = { togglePlayback: () => void };
 
-export const MediaTrimmer = forwardRef<MediaTrimmerHandle, MediaTrimmerProps>(function MediaTrimmer({ artworkAlt, artworkUrl, className = "", isTrimEditable = true, maxExcerptSeconds, mediaType = "audio", onPlaybackChange, onTrimChange, playButtonPlacement = "values", showPlayButton = true, src, title }, ref) {
+export const MediaTrimmer = forwardRef<MediaTrimmerHandle, MediaTrimmerProps>(function MediaTrimmer({ artworkAlt, artworkUrl, className = "", initialTrimRange, isTrimEditable = true, maxExcerptSeconds, mediaType = "audio", onPlaybackChange, onTrimChange, onTrimSelectionCommit, playbackPosition, playButtonPlacement = "values", showPlayButton = true, src, title }, ref) {
   const mediaRef = useRef<HTMLAudioElement | HTMLVideoElement>(null);
-  const selectionDragRef = useRef<{ clientX: number; start: number } | null>(null);
+  const selectionDragRef = useRef<{ clientX: number; hasMoved: boolean; start: number } | null>(null);
+  const isVideoTrim = mediaType === "video";
   const [mediaDuration, setMediaDuration] = useState(30);
   const [trimStart, setTrimStart] = useState(0);
   const [trimEnd, setTrimEnd] = useState(15);
@@ -34,30 +38,44 @@ export const MediaTrimmer = forwardRef<MediaTrimmerHandle, MediaTrimmerProps>(fu
   const [isPlaying, setIsPlaying] = useState(false);
   const [zoom, setZoom] = useState(1);
   const excerptLimit = Math.min(mediaDuration, Math.max(0.1, maxExcerptSeconds ?? mediaDuration));
-  const isLockedToProject = !isTrimEditable && typeof maxExcerptSeconds === "number";
+  const isLockedToProject = (isVideoTrim || !isTrimEditable) && typeof maxExcerptSeconds === "number";
+  const usesFixedSelectionWindow = isLockedToProject;
   const trimLength = Math.max(0, trimEnd - trimStart);
-  const visibleDuration = Math.min(mediaDuration, Math.max(trimLength + 2, mediaDuration / zoom));
+  const visibleDuration = usesFixedSelectionWindow
+    ? Math.min(mediaDuration, Math.max(trimLength * 3, trimLength + 2))
+    : Math.min(mediaDuration, Math.max(trimLength + 2, mediaDuration / zoom));
   const selectionCenter = (trimStart + trimEnd) / 2;
-  const viewStart = Math.min(Math.max(0, selectionCenter - visibleDuration / 2), Math.max(0, mediaDuration - visibleDuration));
+  const viewStart = usesFixedSelectionWindow
+    ? Math.min(
+      Math.max(-trimLength, selectionCenter - visibleDuration / 2),
+      Math.max(-trimLength, mediaDuration - trimLength * 2)
+    )
+    : Math.min(Math.max(0, selectionCenter - visibleDuration / 2), Math.max(0, mediaDuration - visibleDuration));
   const viewEnd = viewStart + visibleDuration;
+  const visiblePlayhead = playbackPosition === undefined ? playhead : playbackPosition;
   const toVisiblePercent = (time: number) => ((time - viewStart) / visibleDuration) * 100;
   const selectionStyle = {
     "--media-trim-end": `${toVisiblePercent(trimEnd)}%`,
-    "--media-trim-playhead": `${toVisiblePercent(playhead)}%`,
+    "--media-trim-playhead": `${toVisiblePercent(visiblePlayhead)}%`,
     "--media-trim-start": `${toVisiblePercent(trimStart)}%`
   } as CSSProperties;
   const waveformStyle = {
-    transform: `translateX(-${(viewStart / mediaDuration) * 100}%)`,
+    left: `${toVisiblePercent(0)}%`,
+    transform: "none",
     width: `${(mediaDuration / visibleDuration) * 100}%`
   } as CSSProperties;
 
   function syncDuration(duration: number) {
     if (!Number.isFinite(duration) || duration <= 0) return;
     setMediaDuration(duration);
-    const initialEnd = isLockedToProject ? Math.min(duration, maxExcerptSeconds ?? duration) : Math.min(15, duration, maxExcerptSeconds ?? duration);
+    const initialStart = Math.min(Math.max(0, initialTrimRange?.start ?? 0), Math.max(0, duration - 0.1));
+    const defaultEnd = isLockedToProject ? initialStart + (maxExcerptSeconds ?? duration) : Math.min(15, duration, maxExcerptSeconds ?? duration);
+    const requestedEnd = initialTrimRange?.end ?? defaultEnd;
+    const initialEnd = Math.max(Math.min(duration, initialStart + 0.1), Math.min(duration, initialStart + excerptLimit, requestedEnd));
+    setTrimStart(initialStart);
     setTrimEnd(initialEnd);
-    setPlayhead(0);
-    onTrimChange?.({ end: initialEnd, start: 0 });
+    setPlayhead(initialStart);
+    onTrimChange?.({ end: initialEnd, start: initialStart });
   }
 
   function togglePlayback() {
@@ -97,7 +115,7 @@ export const MediaTrimmer = forwardRef<MediaTrimmerHandle, MediaTrimmerProps>(fu
 
   function beginSelectionMove(event: React.PointerEvent<HTMLDivElement>) {
     if (!isLockedToProject) return;
-    selectionDragRef.current = { clientX: event.clientX, start: trimStart };
+    selectionDragRef.current = { clientX: event.clientX, hasMoved: false, start: trimStart };
     event.currentTarget.setPointerCapture(event.pointerId);
     event.preventDefault();
   }
@@ -105,6 +123,7 @@ export const MediaTrimmer = forwardRef<MediaTrimmerHandle, MediaTrimmerProps>(fu
   function moveSelection(event: React.PointerEvent<HTMLDivElement>) {
     const dragStart = selectionDragRef.current;
     if (!dragStart || !isLockedToProject) return;
+    if (Math.abs(event.clientX - dragStart.clientX) > 1) dragStart.hasMoved = true;
     const bounds = event.currentTarget.getBoundingClientRect();
     const nextStart = Math.min(
       Math.max(0, dragStart.start + ((event.clientX - dragStart.clientX) / bounds.width) * visibleDuration),
@@ -114,10 +133,23 @@ export const MediaTrimmer = forwardRef<MediaTrimmerHandle, MediaTrimmerProps>(fu
     setTrimStart(nextStart);
     setTrimEnd(nextEnd);
     onTrimChange?.({ end: nextEnd, start: nextStart });
-    if (playhead < nextStart || playhead > nextEnd) updatePlayhead(nextStart);
+    if (isVideoTrim) {
+      updatePlayhead(nextStart);
+      const media = mediaRef.current;
+      if (media?.paused) void media.play().catch(() => { setIsPlaying(false); onPlaybackChange?.(false); });
+    } else if (playhead < nextStart || playhead > nextEnd) updatePlayhead(nextStart);
   }
 
   function endSelectionMove(event: React.PointerEvent<HTMLDivElement>) {
+    const dragStart = selectionDragRef.current;
+    if (dragStart?.hasMoved && event.type === "pointerup") {
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const start = Math.min(
+        Math.max(0, dragStart.start + ((event.clientX - dragStart.clientX) / bounds.width) * visibleDuration),
+        Math.max(0, mediaDuration - trimLength)
+      );
+      onTrimSelectionCommit?.({ end: start + trimLength, start });
+    }
     selectionDragRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   }
@@ -140,7 +172,7 @@ export const MediaTrimmer = forwardRef<MediaTrimmerHandle, MediaTrimmerProps>(fu
   };
 
   return (
-    <div className={`media-trimmer ${className}`} style={selectionStyle}>
+    <div className={`media-trimmer${isVideoTrim ? " is-video-trimmer" : ""}${usesFixedSelectionWindow ? " has-fixed-selection-window" : ""} ${className}`} style={selectionStyle}>
       {mediaType === "video" ? <video {...mediaProps} ref={(element) => { mediaRef.current = element; }} /> : <audio {...mediaProps} ref={(element) => { mediaRef.current = element; }} />}
       <div className={`media-trimmer-values${showPlayButton && playButtonPlacement === "values" ? "" : " is-without-play"}`}><label>In <output>{formatMediaTime(trimStart)}</output></label><label>Out <output>{formatMediaTime(trimEnd)}</output></label>{showPlayButton && playButtonPlacement === "values" ? <button aria-label={isPlaying ? `Pause trimmed ${title}` : `Play trimmed ${title}`} className="media-trimmer-play" onClick={togglePlayback} type="button">{isPlaying ? <Pause aria-hidden size={17} /> : <Play aria-hidden size={17} />}</button> : null}</div>
       <div className="media-trimmer-waveform">
@@ -148,12 +180,12 @@ export const MediaTrimmer = forwardRef<MediaTrimmerHandle, MediaTrimmerProps>(fu
         <div className={`media-trimmer-waveform-track${isLockedToProject ? " is-selection-movable" : ""}`} onPointerCancel={endSelectionMove} onPointerDown={beginSelectionMove} onPointerMove={moveSelection} onPointerUp={endSelectionMove}>
           <div aria-hidden className="media-trimmer-waveform-bars" style={waveformStyle}>{waveformHeights.map((height, index) => <i aria-hidden key={index} style={{ height: `${height}%` }} />)}</div>
           <div aria-hidden className="media-trimmer-selection" />
-          <span aria-hidden className="media-trimmer-playhead" />
+          {!usesFixedSelectionWindow || !isVideoTrim ? <span aria-hidden className="media-trimmer-playhead" /> : null}
           {!isLockedToProject ? <input aria-label={`Playback position for ${title}`} max={viewEnd} min={viewStart} onChange={(event) => updatePlayhead(Number(event.target.value))} step="0.05" type="range" value={Math.min(viewEnd, Math.max(viewStart, playhead))} /> : null}
         </div>
       </div>
-      <label className="media-trimmer-zoom"><span>Zoom</span><input aria-label={`Zoom trim editor for ${title}`} max="6" min="1" onChange={(event) => setZoom(Number(event.target.value))} step="1" type="range" value={zoom} /><output>{zoom}×</output></label>
-      {isTrimEditable ? <div className="media-trimmer-range"><label>Start<input aria-label={`Trim start for ${title}`} max={Math.max(0, trimEnd - 0.1)} min="0" onChange={(event) => updateStart(Number(event.target.value))} step="0.05" type="range" value={trimStart} /></label><label>End<input aria-label={`Trim end for ${title}`} max={Math.min(mediaDuration, trimStart + excerptLimit)} min={Math.min(mediaDuration, trimStart + 0.1)} onChange={(event) => updateEnd(Number(event.target.value))} step="0.05" type="range" value={trimEnd} /></label></div> : null}
+      {!usesFixedSelectionWindow ? <label className="media-trimmer-zoom"><span>Zoom</span><input aria-label={`Zoom trim editor for ${title}`} max="6" min="1" onChange={(event) => setZoom(Number(event.target.value))} step="1" type="range" value={zoom} /><output>{zoom}×</output></label> : null}
+      {isTrimEditable && !isVideoTrim ? <div className="media-trimmer-range"><label>Start<input aria-label={`Trim start for ${title}`} max={Math.max(0, trimEnd - 0.1)} min="0" onChange={(event) => updateStart(Number(event.target.value))} step="0.05" type="range" value={trimStart} /></label><label>End<input aria-label={`Trim end for ${title}`} max={Math.min(mediaDuration, trimStart + excerptLimit)} min={Math.min(mediaDuration, trimStart + 0.1)} onChange={(event) => updateEnd(Number(event.target.value))} step="0.05" type="range" value={trimEnd} /></label></div> : null}
     </div>
   );
 });

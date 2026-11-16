@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { PullToRefresh } from "./components/pull-to-refresh";
-import { AudioPlayer } from "./components/audio-player";
+import { AudioPlayer, type AudioPlayerHandle } from "./components/audio-player";
 import { MediaTrimmer } from "./components/media-trimmer";
 import { AppearanceSettings } from "./components/appearance-provider";
 import { DarkModeFeature } from "./components/dark-mode-feature";
@@ -68,6 +68,8 @@ import { DateInput } from "./date-input";
 import { toDisplayDate, toIsoDate } from "@/lib/date-input";
 import { formatProductionDateForDisplay, normalizeProductionDateForPersistence } from "@/lib/production-date-format";
 import { completeStepsForPastRelease } from "@/lib/production-completion";
+import type { PixabayVideoResult, StudioVideoOrientation } from "@/lib/studio/pixabay";
+import { listRecentStudioVideos, saveRecentStudioVideo, type RecentStudioVideo } from "@/lib/studio/local-video-library";
 import {
   addBudgetRecurrenceCadence,
   type BudgetRecurringCadence
@@ -772,7 +774,7 @@ const platformStats = [
   }
 ];
 
-const appVersionLabel = "Beta 1.34";
+const appVersionLabel = "Beta 1.35";
 const defaultAppLogoUrl = "/artistdeck-logo.png";
 
 const sections = [
@@ -5520,7 +5522,10 @@ export default function Home() {
   const studioSidebarNavRef = useRef<HTMLDivElement>(null);
   const [activeSection, setActiveSection] = useState<Section>("Dashboard");
   const [isStudioMenuOpen, setIsStudioMenuOpen] = useState(true);
+  const [studioProcess, setStudioProcess] = useState<"Audio" | "Video">("Audio");
   const [studioAudioSnippets, setStudioAudioSnippets] = useState<StudioAudioSnippetRecord[]>([]);
+  const [isStudioAudioHydrated, setIsStudioAudioHydrated] = useState(false);
+  const [studioAudioHydratedWorkspaceId, setStudioAudioHydratedWorkspaceId] = useState("");
   const [guidanceStatus, setGuidanceStatus] = useState<GuidanceStatus | null>(null);
   const [guidanceContext, setGuidanceContext] = useState<GuidanceContext>("none");
   const [guidanceSongId, setGuidanceSongId] = useState<string | null>(null);
@@ -5585,6 +5590,32 @@ export default function Home() {
     state: "idle"
   });
   const [activeWorkspaceName, setActiveWorkspaceName] = useState("Workspace");
+
+  useEffect(() => {
+    let isCurrent = true;
+    queueMicrotask(() => {
+      if (!isCurrent) return;
+      setIsStudioAudioHydrated(false);
+      setStudioAudioHydratedWorkspaceId("");
+      setStudioAudioSnippets([]);
+      if (!activeWorkspaceId) return;
+      try {
+        const stored = window.localStorage.getItem(workspaceStorageKey(activeWorkspaceId, "studio-audio-snippets-v1"));
+        const parsed = stored ? JSON.parse(stored) : [];
+        if (isCurrent && Array.isArray(parsed)) setStudioAudioSnippets(parsed.filter(isStudioAudioSnippetRecord));
+      } catch { /* Browser storage is an optional local convenience. */ }
+      if (isCurrent) {
+        setStudioAudioHydratedWorkspaceId(activeWorkspaceId);
+        setIsStudioAudioHydrated(true);
+      }
+    });
+    return () => { isCurrent = false; };
+  }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    if (!activeWorkspaceId || !isStudioAudioHydrated || studioAudioHydratedWorkspaceId !== activeWorkspaceId) return;
+    try { window.localStorage.setItem(workspaceStorageKey(activeWorkspaceId, "studio-audio-snippets-v1"), JSON.stringify(studioAudioSnippets)); } catch { /* Preserve the active editor even if browser storage is unavailable. */ }
+  }, [activeWorkspaceId, isStudioAudioHydrated, studioAudioHydratedWorkspaceId, studioAudioSnippets]);
   const [activeWorkspaceSetupState, setActiveWorkspaceSetupState] = useState<"active" | "pending_setup" | "">("");
   const [profileDisplayName, setProfileDisplayName] = useState("");
   const [pendingSetupWorkspaceId, setPendingSetupWorkspaceId] = useState("");
@@ -9041,7 +9072,7 @@ export default function Home() {
                 >
                   Studio
                 </button>
-                {activeSection === "Studio" ? <StudioSidebarMenu isMobileClosed={!isStudioMenuOpen} /> : null}
+                {activeSection === "Studio" ? <StudioSidebarMenu activeProcess={studioProcess} isMobileClosed={!isStudioMenuOpen} onChooseProcess={setStudioProcess} /> : null}
               </div>
             ) : (
               <button
@@ -9255,7 +9286,7 @@ export default function Home() {
             songs={productionSongDrafts}
           />
         ) : null}
-        {!settingsView && activeSection === "Studio" ? <StudioView audioSnippets={studioAudioSnippets} onAudioSnippetsChange={setStudioAudioSnippets} productionSongs={productionSongDrafts} /> : null}
+        {!settingsView && activeSection === "Studio" ? <StudioView activeProcess={studioProcess} audioSnippets={activeWorkspaceId && studioAudioHydratedWorkspaceId === activeWorkspaceId ? studioAudioSnippets : []} onAudioSnippetsChange={setStudioAudioSnippets} onProcessChange={setStudioProcess} productionSongs={productionSongDrafts} workspaceId={activeWorkspaceId} /> : null}
         {!settingsView && activeSection === "Budget" ? (
           <BudgetView
             entries={budgetEntriesWithForecast}
@@ -9361,7 +9392,15 @@ export default function Home() {
   );
 }
 
-function StudioSidebarMenu({ isMobileClosed }: { isMobileClosed: boolean }) {
+function StudioSidebarMenu({
+  activeProcess,
+  isMobileClosed,
+  onChooseProcess
+}: {
+  activeProcess: "Audio" | "Video";
+  isMobileClosed: boolean;
+  onChooseProcess: (process: "Audio" | "Video") => void;
+}) {
   const [projectsOpen, setProjectsOpen] = useState(true);
   const [testProjectOpen, setTestProjectOpen] = useState(true);
   const steps = ["Compose", "Audio", "Video", "Overlay image", "Overlay Text", "Export"];
@@ -9379,7 +9418,7 @@ function StudioSidebarMenu({ isMobileClosed }: { isMobileClosed: boolean }) {
           <strong>Test Project</strong>
         </button>
         {testProjectOpen ? <div aria-label="Test Project process" className="studio-sidebar-process-list">
-          {steps.map((step) => <button aria-current={step === "Audio" ? "step" : undefined} className={step === "Audio" ? "is-active" : undefined} disabled={step !== "Audio"} key={step} type="button">
+          {steps.map((step) => <button aria-current={step === activeProcess ? "step" : undefined} className={step === activeProcess ? "is-active" : undefined} disabled={step !== "Audio" && step !== "Video"} key={step} onClick={() => { if (step === "Audio" || step === "Video") onChooseProcess(step); }} type="button">
             <span aria-hidden />{step}
           </button>)}
         </div> : null}
@@ -9389,16 +9428,24 @@ function StudioSidebarMenu({ isMobileClosed }: { isMobileClosed: boolean }) {
 }
 
 function StudioView({
+  activeProcess,
   audioSnippets,
   onAudioSnippetsChange,
-  productionSongs
+  onProcessChange,
+  productionSongs,
+  workspaceId
 }: {
+  activeProcess: "Audio" | "Video";
   audioSnippets: StudioAudioSnippetRecord[];
   onAudioSnippetsChange: Dispatch<SetStateAction<StudioAudioSnippetRecord[]>>;
+  onProcessChange: (process: "Audio" | "Video") => void;
   productionSongs: ProductionSongConfig[];
+  workspaceId: string;
 }) {
   const [projectDurationChoice, setProjectDurationChoice] = useState<15 | 30 | "custom">(15);
   const [customProjectDuration, setCustomProjectDuration] = useState("30");
+  const [videoOrientation, setVideoOrientation] = useState<StudioVideoOrientation>("vertical");
+  const [audioPreviewVideo, setAudioPreviewVideo] = useState<StudioVideoPreviewSource | undefined>();
   const parsedCustomProjectDuration = Number.parseInt(customProjectDuration, 10);
   const projectDuration = projectDurationChoice === "custom"
     ? Math.min(180, Math.max(1, Number.isFinite(parsedCustomProjectDuration) ? parsedCustomProjectDuration : 30))
@@ -9409,22 +9456,24 @@ function StudioView({
       <header className="page-heading studio-heading">
         <div>
           <p className="eyebrow">Creative workspace</p>
-          <h1 id="studio-heading">Audio</h1>
+          <h1 id="studio-heading">{activeProcess}</h1>
         </div>
       </header>
 
-      <StudioAudioEditor audioSnippets={audioSnippets} durationChoice={projectDurationChoice} isCustomDuration={projectDurationChoice === "custom"} onAudioSnippetsChange={onAudioSnippetsChange} onDurationChoiceChange={setProjectDurationChoice} productionSongs={productionSongs} projectDuration={projectDuration} />
-      <StudioWorkflowProgress activeProcess="Audio" availableProcesses={["Audio"]} />
+      {activeProcess === "Audio" ? <StudioAudioEditor audioSnippets={audioSnippets} durationChoice={projectDurationChoice} isCustomDuration={projectDurationChoice === "custom"} onAudioSnippetsChange={onAudioSnippetsChange} onDurationChoiceChange={setProjectDurationChoice} productionSongs={productionSongs} projectDuration={projectDuration} videoPreviewSource={audioPreviewVideo} /> : <StudioVideoEditor audioSnippet={audioSnippets[0]} key={workspaceId} onAudioPreviewSourceChange={setAudioPreviewVideo} onChooseProcess={() => undefined} onOrientationChange={setVideoOrientation} orientation={videoOrientation} projectDuration={projectDuration} workspaceId={workspaceId} />}
+      <StudioWorkflowProgress activeProcess={activeProcess} availableProcesses={["Audio", "Video"]} onChooseProcess={onProcessChange} />
     </section>
   );
 }
 
 function StudioWorkflowProgress({
   activeProcess,
-  availableProcesses
+  availableProcesses,
+  onChooseProcess
 }: {
   activeProcess: string;
   availableProcesses: readonly string[];
+  onChooseProcess: (process: "Audio" | "Video") => void;
 }) {
   const steps = [
     { description: "Project overview", label: "Compose" },
@@ -9439,7 +9488,7 @@ function StudioWorkflowProgress({
   return (
     <nav aria-label="Studio workflow progress" className="studio-workflow-progress">
       {steps.map((step, index) => (
-        <StudioWorkflowStep activeIndex={activeIndex} available={availableProcesses.includes(step.label)} index={index} key={step.label} step={step} />
+        <StudioWorkflowStep activeIndex={activeIndex} available={availableProcesses.includes(step.label)} index={index} key={step.label} onChooseProcess={onChooseProcess} step={step} />
       ))}
     </nav>
   );
@@ -9449,11 +9498,13 @@ function StudioWorkflowStep({
   activeIndex,
   available,
   index,
+  onChooseProcess,
   step
 }: {
   activeIndex: number;
   available: boolean;
   index: number;
+  onChooseProcess: (process: "Audio" | "Video") => void;
   step: { description: string; label: string };
 }) {
   const isActive = available && index === activeIndex;
@@ -9465,6 +9516,7 @@ function StudioWorkflowStep({
         aria-current={isActive ? "step" : undefined}
         className={isComplete ? "is-complete" : isActive ? "is-active" : "is-locked"}
         disabled={!available}
+        onClick={() => { if (step.label === "Audio" || step.label === "Video") onChooseProcess(step.label); }}
         type="button"
       >
         <span className="studio-workflow-number">{index + 1}</span>
@@ -9570,6 +9622,13 @@ function formatStudioDuration(seconds: number) {
 }
 
 type StudioAudioSnippetRecord = { artworkUrl: string; end: number; id: string; songId: string; sourceFileName: string; sourceUrl: string; start: number; title: string };
+type StudioVideoPreviewSource = { id: string; posterUrl?: string; src?: string; title: string };
+
+function isStudioAudioSnippetRecord(value: unknown): value is StudioAudioSnippetRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.artworkUrl === "string" && typeof candidate.end === "number" && typeof candidate.id === "string" && typeof candidate.songId === "string" && typeof candidate.sourceFileName === "string" && typeof candidate.sourceUrl === "string" && typeof candidate.start === "number" && typeof candidate.title === "string";
+}
 
 function StudioAudioSnippet({
   onDelete,
@@ -9582,8 +9641,9 @@ function StudioAudioSnippet({
   return <article className="studio-audio-snippet"><AudioPlayer artworkAlt={`${snippet.title} snippet artwork`} artworkUrl={snippet.artworkUrl} clipEndSeconds={snippet.end} clipStartSeconds={snippet.start} fileName={clipLabel} src={snippet.sourceUrl} title={`${snippet.title} snippet`} /><button aria-label={`Delete ${snippet.title} audio snippet`} onClick={onDelete} type="button">×</button></article>;
 }
 
-function StudioAudioVideoPreview({ audioSnippet, projectDuration }: { audioSnippet?: StudioAudioSnippetRecord; projectDuration: number }) {
+function StudioAudioVideoPreview({ audioSnippet, projectDuration, videoPreviewSource }: { audioSnippet?: StudioAudioSnippetRecord; projectDuration: number; videoPreviewSource?: StudioVideoPreviewSource }) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [position, setPosition] = useState(Math.min(12, projectDuration));
   const clipDuration = audioSnippet ? Math.max(0.1, audioSnippet.end - audioSnippet.start) : 0;
@@ -9594,16 +9654,25 @@ function StudioAudioVideoPreview({ audioSnippet, projectDuration }: { audioSnipp
     if (audioSnippet && audioRef.current) {
       audioRef.current.currentTime = audioSnippet.start + (safePosition / projectDuration) * clipDuration;
     }
+    if (videoRef.current && Number.isFinite(videoRef.current.duration) && videoRef.current.duration > 0) {
+      videoRef.current.currentTime = (safePosition / projectDuration) * videoRef.current.duration;
+    }
   }
 
   function togglePreviewPlayback() {
     const audio = audioRef.current;
-    if (!audio || !audioSnippet) return;
-    if (audio.paused) {
-      const startAt = audioSnippet.start + (position / projectDuration) * clipDuration;
-      audio.currentTime = Math.min(audioSnippet.end, Math.max(audioSnippet.start, startAt));
-      void audio.play().catch(() => setIsPlaying(false));
-    } else audio.pause();
+    const video = videoRef.current;
+    if (!audioSnippet && !video) return;
+    const shouldPlay = audioSnippet ? Boolean(audio?.paused) : Boolean(video?.paused);
+    if (shouldPlay) {
+      if (audioSnippet && audio) {
+        const startAt = audioSnippet.start + (position / projectDuration) * clipDuration;
+        audio.currentTime = Math.min(audioSnippet.end, Math.max(audioSnippet.start, startAt));
+        void audio.play().catch(() => setIsPlaying(false));
+      }
+      if (video) void video.play().catch(() => setIsPlaying(false));
+      setIsPlaying(true);
+    } else { audio?.pause(); video?.pause(); setIsPlaying(false); }
   }
 
   function updatePreviewPlayback(event: React.SyntheticEvent<HTMLAudioElement>) {
@@ -9615,17 +9684,18 @@ function StudioAudioVideoPreview({ audioSnippet, projectDuration }: { audioSnipp
       setPosition(0);
       return;
     }
-    setPosition(Math.min(projectDuration, Math.max(0, (elapsed / clipDuration) * projectDuration)));
+    const nextPosition = Math.min(projectDuration, Math.max(0, (elapsed / clipDuration) * projectDuration));
+    setPosition(nextPosition);
+    if (videoRef.current && Number.isFinite(videoRef.current.duration) && videoRef.current.duration > 0) videoRef.current.currentTime = (nextPosition / projectDuration) * videoRef.current.duration;
   }
 
   return <section className="studio-audio-video-preview" aria-labelledby="studio-audio-video-preview-heading">
     <div className="studio-panel-heading"><div><p className="eyebrow">Live composition</p><h3 id="studio-audio-video-preview-heading">Preview</h3></div><span>{formatStudioDuration(position)} / {formatStudioDuration(projectDuration)}</span></div>
     {audioSnippet ? <audio onPause={() => setIsPlaying(false)} onPlay={() => setIsPlaying(true)} onTimeUpdate={updatePreviewPlayback} preload="metadata" ref={audioRef} src={audioSnippet.sourceUrl} /> : null}
-    <div className={`studio-audio-preview-phone${isPlaying ? " is-playing" : ""}`}>
-      <span className="studio-audio-preview-platforms">Spotify · Apple · YouTube</span>
-      <strong>YOUR<br />STORY</strong>
-      <span className="studio-audio-preview-project">TEST PROJECT</span>
-      <button aria-label={audioSnippet ? isPlaying ? "Pause video preview" : "Play saved audio in video preview" : "Create an audio snippet to preview"} disabled={!audioSnippet} onClick={togglePreviewPlayback} type="button">{isPlaying ? <Pause size={19} /> : <Play size={19} />}</button>
+    <div className={`studio-audio-preview-phone${isPlaying ? " is-playing" : ""}${videoPreviewSource ? " has-video" : ""}`}>
+      {videoPreviewSource?.src ? <video aria-label={`${videoPreviewSource.title} video preview`} loop muted playsInline poster={videoPreviewSource.posterUrl} ref={videoRef} src={videoPreviewSource.src} /> : videoPreviewSource?.posterUrl ? <span aria-label={`${videoPreviewSource.title} video preview`} className="studio-audio-preview-video-poster" role="img" style={{ backgroundImage: `url(${videoPreviewSource.posterUrl})` }} /> : null}
+      {!videoPreviewSource ? <><span className="studio-audio-preview-platforms">Spotify · Apple · YouTube</span><strong>YOUR<br />STORY</strong><span className="studio-audio-preview-project">TEST PROJECT</span></> : null}
+      <button aria-label={audioSnippet || videoPreviewSource ? isPlaying ? "Pause video preview" : "Play audio and video preview" : "Create an audio snippet to preview"} disabled={!audioSnippet && !videoPreviewSource} onClick={togglePreviewPlayback} type="button">{isPlaying ? <Pause size={19} /> : <Play size={19} />}</button>
       <i aria-hidden style={{ left: `${projectDuration ? (position / projectDuration) * 100 : 0}%` }} />
     </div>
     <label className="studio-audio-preview-controls"><span>{formatStudioDuration(0)}</span><input aria-label="Video preview position" disabled={!audioSnippet} max={projectDuration} min="0" onChange={(event) => setPreviewPosition(Number(event.target.value))} step="1" type="range" value={position} /><span>{formatStudioDuration(projectDuration)}</span></label>
@@ -9639,7 +9709,8 @@ function StudioAudioEditor({
   onAudioSnippetsChange,
   productionSongs,
   projectDuration,
-  isCustomDuration
+  isCustomDuration,
+  videoPreviewSource
 }: {
   audioSnippets: StudioAudioSnippetRecord[];
   durationChoice: 15 | 30 | "custom";
@@ -9648,15 +9719,19 @@ function StudioAudioEditor({
   onDurationChoiceChange: (duration: 15 | 30) => void;
   productionSongs: ProductionSongConfig[];
   projectDuration: number;
+  videoPreviewSource?: StudioVideoPreviewSource;
 }) {
   const [selectedAudioId, setSelectedAudioId] = useState<string | null>(null);
   const [trimRange, setTrimRange] = useState({ end: projectDuration, start: 0 });
+  const [libraryPlaybackPosition, setLibraryPlaybackPosition] = useState(0);
+  const selectedLibraryAudioPlayerRef = useRef<AudioPlayerHandle>(null);
   const availableAudio = productionSongs.filter((song) => Boolean(song.audioUrl));
   const selectedAudio = availableAudio.find((song) => song.id === selectedAudioId) ?? availableAudio[0];
 
   function selectAudioForTrim(songId: string) {
     setSelectedAudioId(songId);
     setTrimRange({ end: projectDuration, start: 0 });
+    setLibraryPlaybackPosition(0);
   }
 
   return (
@@ -9670,9 +9745,9 @@ function StudioAudioEditor({
         <div className="studio-audio-libraries">
           <section className="studio-audio-library studio-audio-library-full" aria-label="Production audio library">
             <div className="studio-panel-heading"><p className="eyebrow">Production audio library</p><span>{availableAudio.length} shown</span></div>
-            {availableAudio.length ? <div className="studio-audio-player-list">{availableAudio.map((song) => <article className={`studio-library-audio-item${selectedAudio?.id === song.id ? " is-selected" : ""}`} key={song.id}><AudioPlayer artworkUrl={song.albumArtUrl} fileName={song.audioFileName || `${song.title}.mp3`} src={song.audioUrl!} title={song.title} /><button aria-pressed={selectedAudio?.id === song.id} onClick={() => selectAudioForTrim(song.id)} type="button">{selectedAudio?.id === song.id ? "Selected for trim" : "Select for trim"}</button></article>)}</div> : <div className="studio-audio-empty-state"><strong>No Production MP3 files yet</strong><span>Upload an MP3 in Production → Song options and it will appear here.</span></div>}
+            {availableAudio.length ? <div className="studio-audio-player-list">{availableAudio.map((song) => <article className={`studio-library-audio-item${selectedAudio?.id === song.id ? " is-selected" : ""}`} key={song.id}><AudioPlayer artworkUrl={song.albumArtUrl} fileName={song.audioFileName || `${song.title}.mp3`} onPlaybackPositionChange={selectedAudio?.id === song.id ? setLibraryPlaybackPosition : undefined} ref={selectedAudio?.id === song.id ? selectedLibraryAudioPlayerRef : undefined} src={song.audioUrl!} title={song.title} /><button aria-pressed={selectedAudio?.id === song.id} onClick={() => selectAudioForTrim(song.id)} type="button">{selectedAudio?.id === song.id ? "Selected for trim" : "Select for trim"}</button></article>)}</div> : <div className="studio-audio-empty-state"><strong>No Production MP3 files yet</strong><span>Upload an MP3 in Production → Song options and it will appear here.</span></div>}
           </section>
-          <StudioAudioVideoPreview audioSnippet={audioSnippets[0]} key={`${audioSnippets[0]?.id ?? "empty"}-${projectDuration}`} projectDuration={projectDuration} />
+          <StudioAudioVideoPreview audioSnippet={audioSnippets[0]} key={`${audioSnippets[0]?.id ?? "empty"}-${projectDuration}-${videoPreviewSource?.id ?? "no-video"}`} projectDuration={projectDuration} videoPreviewSource={videoPreviewSource} />
           <section className="studio-audio-snippet-library" aria-labelledby="studio-audio-snippet-library-heading">
             <div className="studio-panel-heading"><div><p className="eyebrow">Trimmed audio clips</p><h3 id="studio-audio-snippet-library-heading">Your audio snippets</h3></div><span>{audioSnippets.length} saved</span></div>
             {audioSnippets.length ? <div className="studio-audio-snippet-list">{audioSnippets.map((snippet) => <StudioAudioSnippet key={snippet.id} onDelete={() => onAudioSnippetsChange((current) => current.filter((candidate) => candidate.id !== snippet.id))} snippet={snippet} />)}</div> : <div className="studio-audio-empty-state studio-audio-snippet-empty"><strong>No trimmed clips yet</strong><span>Choose a part of a Production track, then use audio to add it here.</span></div>}
@@ -9681,56 +9756,299 @@ function StudioAudioEditor({
 
         <section className="studio-audio-trim" aria-labelledby="studio-audio-trim-heading">
           <div className="studio-panel-heading"><div><p className="eyebrow">Selected track</p><h3 id="studio-audio-trim-heading">{selectedAudio?.title ?? "Choose a Production MP3"}</h3></div><span className="studio-preview-status">MP3</span></div>
-          {selectedAudio ? <><MediaTrimmer artworkUrl={selectedAudio.albumArtUrl} isTrimEditable={isCustomDuration} key={`${selectedAudio.id}-${projectDuration}-${isCustomDuration}`} maxExcerptSeconds={projectDuration} onTrimChange={setTrimRange} playButtonPlacement="waveform" src={selectedAudio.audioUrl!} title={selectedAudio.title} /><button className="studio-primary-action" onClick={() => { const snippet = { artworkUrl: selectedAudio.albumArtUrl, end: trimRange.end, id: `${selectedAudio.id}:${trimRange.start.toFixed(2)}:${trimRange.end.toFixed(2)}`, songId: selectedAudio.id, sourceFileName: selectedAudio.audioFileName || `${selectedAudio.title}.mp3`, sourceUrl: selectedAudio.audioUrl!, start: trimRange.start, title: selectedAudio.title }; onAudioSnippetsChange((current) => [...current.filter((candidate) => candidate.id !== snippet.id), snippet]); }} type="button">Use audio</button></> : <div className="studio-audio-empty-state"><strong>Select an MP3 source</strong><span>When Production has an uploaded MP3, choose it here to prepare an excerpt up to {formatStudioDuration(projectDuration)}.</span></div>}
+          {selectedAudio ? <><MediaTrimmer artworkUrl={selectedAudio.albumArtUrl} isTrimEditable={isCustomDuration} key={`${selectedAudio.id}-${projectDuration}-${isCustomDuration}`} maxExcerptSeconds={projectDuration} onTrimChange={setTrimRange} onTrimSelectionCommit={(range) => selectedLibraryAudioPlayerRef.current?.playExcerpt(range)} playbackPosition={libraryPlaybackPosition} playButtonPlacement="waveform" src={selectedAudio.audioUrl!} title={selectedAudio.title} /><button className="studio-primary-action" onClick={() => { const snippet = { artworkUrl: selectedAudio.albumArtUrl, end: trimRange.end, id: `${selectedAudio.id}:${trimRange.start.toFixed(2)}:${trimRange.end.toFixed(2)}`, songId: selectedAudio.id, sourceFileName: selectedAudio.audioFileName || `${selectedAudio.title}.mp3`, sourceUrl: selectedAudio.audioUrl!, start: trimRange.start, title: selectedAudio.title }; onAudioSnippetsChange((current) => [...current.filter((candidate) => candidate.id !== snippet.id), snippet]); }} type="button">Use audio</button></> : <div className="studio-audio-empty-state"><strong>Select an MP3 source</strong><span>When Production has an uploaded MP3, choose it here to prepare an excerpt up to {formatStudioDuration(projectDuration)}.</span></div>}
         </section>
       </div>
     </section>
   );
 }
 
-function StudioVideoEditor({ onChooseProcess }: { onChooseProcess: (process: string) => void }) {
-  const clips = [
-    { duration: 12, id: "coast", label: "Coastline", tone: "coast" },
-    { duration: 15, id: "forest", label: "Golden forest", tone: "forest" },
-    { duration: 10, id: "city", label: "City afterglow", tone: "city" },
-    { duration: 8, id: "stage", label: "Stage lights", tone: "stage" },
-    { duration: 11, id: "road", label: "Night drive", tone: "road" },
-    { duration: 9, id: "ocean", label: "Open water", tone: "ocean" }
-  ];
-  const [selectedClipIds, setSelectedClipIds] = useState(["coast", "forest", "city"]);
-  const selectedClips = clips.filter((clip) => selectedClipIds.includes(clip.id));
-  const totalDuration = selectedClips.reduce((total, clip) => total + clip.duration, 0);
-  const toggleClip = (clipId: string) => setSelectedClipIds((current) => current.includes(clipId) ? current.filter((id) => id !== clipId) : [...current, clipId]);
+function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseProcess, onOrientationChange, orientation, projectDuration, workspaceId }: { audioSnippet?: StudioAudioSnippetRecord; onAudioPreviewSourceChange: (source: StudioVideoPreviewSource | undefined) => void; onChooseProcess: (process: string) => void; onOrientationChange: (orientation: StudioVideoOrientation) => void; orientation: StudioVideoOrientation; projectDuration: number; workspaceId: string }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<PixabayVideoResult[]>([]);
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const [localVideo, setLocalVideo] = useState<(Omit<RecentStudioVideo, "blob" | "savedAt"> & { thumbnailUrl?: string; url: string }) | null>(null);
+  const [recentVideos, setRecentVideos] = useState<RecentStudioVideo[]>([]);
+  const [areRecentVideosLoaded, setAreRecentVideosLoaded] = useState(false);
+  const [trimRange, setTrimRange] = useState({ end: 15, start: 0 });
+  const [confirmedLocalTrims, setConfirmedLocalTrims] = useState<Array<{ end: number; id: string; start: number }>>([]);
+  const [areConfirmedLocalTrimsHydrated, setAreConfirmedLocalTrimsHydrated] = useState(false);
+  const [confirmedPixabayClips, setConfirmedPixabayClips] = useState<PixabayVideoResult[]>([]);
+  const [areConfirmedPixabayClipsHydrated, setAreConfirmedPixabayClipsHydrated] = useState(false);
+  const [activeTrimVersion, setActiveTrimVersion] = useState(0);
+  const [localVideoThumbnails, setLocalVideoThumbnails] = useState<Record<string, string>>({});
+  const [previewingClipId, setPreviewingClipId] = useState<string | null>(null);
+  const [searchStatus, setSearchStatus] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+  const restoredVideoRef = useRef(false);
+  const restoredPixabayVideoRef = useRef(false);
+  const restoredConfirmedLocalTrimsRef = useRef(false);
+  const requestedLocalThumbnailIdsRef = useRef(new Set<string>());
+  const selectedClip = results.find((clip) => clip.id === selectedClipId) ?? null;
+  const selectedDuration = localVideo?.durationSeconds ?? selectedClip?.durationSeconds ?? null;
+  const needsVideoTrim = Boolean(localVideo && localVideo.durationSeconds > projectDuration);
+  const confirmedLocalVideos = confirmedLocalTrims.flatMap((trim) => {
+    const video = localVideo?.id === trim.id ? localVideo : recentVideos.find((candidate) => candidate.id === trim.id);
+    return video ? [{ trim, video }] : [];
+  });
+  const isSelectedPixabayClipAdded = Boolean(selectedClip && confirmedPixabayClips.some((clip) => clip.id === selectedClip.id));
+  const canAddSelectedClip = Boolean(selectedClip && !isSelectedPixabayClipAdded && confirmedLocalVideos.length + confirmedPixabayClips.length < 4);
+  const selectedVideoCount = confirmedLocalVideos.length + confirmedPixabayClips.length;
+  const firstConfirmedLocalTrim = confirmedLocalTrims[0];
+  const firstConfirmedLocalVideo = firstConfirmedLocalTrim ? (localVideo?.id === firstConfirmedLocalTrim.id ? localVideo : recentVideos.find((candidate) => candidate.id === firstConfirmedLocalTrim.id)) : undefined;
+  const firstAudioPreviewSource = useMemo<StudioVideoPreviewSource | undefined>(() => {
+    if (firstConfirmedLocalTrim && firstConfirmedLocalVideo) {
+      return { id: `local:${firstConfirmedLocalTrim.id}:${firstConfirmedLocalTrim.start}:${firstConfirmedLocalTrim.end}`, posterUrl: localVideoThumbnails[firstConfirmedLocalTrim.id] ?? ("thumbnailUrl" in firstConfirmedLocalVideo ? firstConfirmedLocalVideo.thumbnailUrl : undefined), title: firstConfirmedLocalVideo.fileName };
+    }
+    const firstPixabayClip = confirmedPixabayClips[0];
+    return firstPixabayClip ? { id: `pixabay:${firstPixabayClip.id}`, posterUrl: firstPixabayClip.previewUrl, src: firstPixabayClip.previewVideoUrl, title: firstPixabayClip.tags } : undefined;
+  }, [confirmedPixabayClips, firstConfirmedLocalTrim, firstConfirmedLocalVideo, localVideoThumbnails]);
+  const sourceDuration = localVideo ? trimRange.end - trimRange.start : selectedClip?.durationSeconds ?? 0;
+  const videoTimelineSegments = createVideoTimelineSegments(sourceDuration, projectDuration);
+  const timelineFrameUrl = localVideo?.thumbnailUrl ?? selectedClip?.previewUrl;
+
+  useEffect(() => () => { if (localVideo?.url) URL.revokeObjectURL(localVideo.url); }, [localVideo?.url]);
+  useEffect(() => { onAudioPreviewSourceChange(firstAudioPreviewSource); }, [firstAudioPreviewSource, onAudioPreviewSourceChange]);
+  useEffect(() => { void listRecentStudioVideos(workspaceId).then((videos) => { setRecentVideos(videos); setAreRecentVideosLoaded(true); }); }, [workspaceId]);
+  useEffect(() => {
+    let isCurrent = true;
+    const selectedIds = new Set(confirmedLocalTrims.map((trim) => trim.id));
+    recentVideos.filter((video) => selectedIds.has(video.id) && !requestedLocalThumbnailIdsRef.current.has(video.id)).forEach((video) => {
+      requestedLocalThumbnailIdsRef.current.add(video.id);
+      const url = URL.createObjectURL(video.blob);
+      void captureVideoFrameFromUrl(url).then((thumbnailUrl) => {
+        if (isCurrent && thumbnailUrl) setLocalVideoThumbnails((current) => ({ ...current, [video.id]: thumbnailUrl }));
+      }).finally(() => URL.revokeObjectURL(url));
+    });
+    return () => { isCurrent = false; };
+  }, [confirmedLocalTrims, recentVideos, workspaceId]);
+  useEffect(() => {
+    if (!areRecentVideosLoaded || restoredVideoRef.current) return;
+    restoredVideoRef.current = true;
+    try {
+        const saved = JSON.parse(window.localStorage.getItem(workspaceStorageKey(workspaceId, "studio-selected-local-video-v1")) ?? "null") as { end?: unknown; id?: unknown; start?: unknown } | null;
+      if (!saved || typeof saved.id !== "string") return;
+      const video = recentVideos.find((candidate) => candidate.id === saved.id);
+      if (!video) return;
+      const start = typeof saved.start === "number" ? saved.start : 0;
+      const end = typeof saved.end === "number" ? saved.end : Math.min(projectDuration, video.durationSeconds);
+      reuseRecentVideo(video, { end, start });
+    } catch { /* A missing local selection is non-blocking. */ }
+  // The restore should run once for the initial persisted selection only.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [areRecentVideosLoaded, projectDuration, recentVideos, workspaceId]);
+  useEffect(() => {
+    if (!areRecentVideosLoaded || restoredConfirmedLocalTrimsRef.current) return;
+    restoredConfirmedLocalTrimsRef.current = true;
+    queueMicrotask(() => {
+      try {
+        const saved = JSON.parse(window.localStorage.getItem(workspaceStorageKey(workspaceId, "studio-confirmed-local-trims-v1")) ?? "[]");
+        const candidates = Array.isArray(saved) ? saved : [saved];
+        const trims = candidates.flatMap((candidate) => candidate && typeof candidate === "object" && !Array.isArray(candidate) && typeof (candidate as Record<string, unknown>).id === "string" && typeof (candidate as Record<string, unknown>).start === "number" && typeof (candidate as Record<string, unknown>).end === "number" && recentVideos.some((video) => video.id === (candidate as Record<string, unknown>).id) ? [{ end: (candidate as Record<string, number | string>).end as number, id: (candidate as Record<string, number | string>).id as string, start: (candidate as Record<string, number | string>).start as number }] : []).slice(0, 4);
+        setConfirmedLocalTrims(trims);
+      } catch { /* A missing confirmed trim is non-blocking. */ }
+      setAreConfirmedLocalTrimsHydrated(true);
+    });
+  }, [areRecentVideosLoaded, recentVideos, workspaceId]);
+  useEffect(() => {
+    if (restoredPixabayVideoRef.current) return;
+    restoredPixabayVideoRef.current = true;
+    queueMicrotask(() => {
+      try {
+        const saved = JSON.parse(window.localStorage.getItem(workspaceStorageKey(workspaceId, "studio-selected-pixabay-video-v1")) ?? "null");
+        if (!isPixabayVideoResult(saved)) return;
+        setResults([saved]);
+        setSelectedClipId(saved.id);
+      } catch { /* A missing external selection is non-blocking. */ }
+    });
+  }, [workspaceId]);
+  useEffect(() => {
+    queueMicrotask(() => {
+      try {
+        const saved = JSON.parse(window.localStorage.getItem(workspaceStorageKey(workspaceId, "studio-confirmed-pixabay-videos-v1")) ?? "[]");
+        if (Array.isArray(saved)) setConfirmedPixabayClips(saved.filter(isPixabayVideoResult).slice(0, 4));
+      } catch { /* A missing confirmed Pixabay source is non-blocking. */ }
+      setAreConfirmedPixabayClipsHydrated(true);
+    });
+  }, [workspaceId]);
+  useEffect(() => {
+    if (!localVideo) return;
+    try { window.localStorage.setItem(workspaceStorageKey(workspaceId, "studio-selected-local-video-v1"), JSON.stringify({ end: trimRange.end, id: localVideo.id, start: trimRange.start })); } catch { /* Browser storage is an optional local convenience. */ }
+  }, [localVideo, trimRange, workspaceId]);
+  useEffect(() => {
+    if (!areConfirmedLocalTrimsHydrated) return;
+    try {
+      window.localStorage.setItem(workspaceStorageKey(workspaceId, "studio-confirmed-local-trims-v1"), JSON.stringify(confirmedLocalTrims));
+    } catch { /* Browser storage is an optional local convenience. */ }
+  }, [areConfirmedLocalTrimsHydrated, confirmedLocalTrims, workspaceId]);
+  useEffect(() => {
+    if (!areConfirmedPixabayClipsHydrated) return;
+    try { window.localStorage.setItem(workspaceStorageKey(workspaceId, "studio-confirmed-pixabay-videos-v1"), JSON.stringify(confirmedPixabayClips)); } catch { /* Browser storage is an optional local convenience. */ }
+  }, [areConfirmedPixabayClipsHydrated, confirmedPixabayClips, workspaceId]);
+  useEffect(() => {
+    if (!selectedClip) return;
+    try { window.localStorage.setItem(workspaceStorageKey(workspaceId, "studio-selected-pixabay-video-v1"), JSON.stringify(selectedClip)); } catch { /* Browser storage is an optional local convenience. */ }
+  }, [selectedClip, workspaceId]);
+
+  async function search(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!query.trim()) return;
+    setIsSearching(true); setSearchStatus("");
+    try {
+      const response = await fetch(`/api/studio/pixabay/search?${new URLSearchParams({ query, videoType: "film", order: "popular", orientation })}`);
+      const payload = await response.json() as { error?: string; results?: PixabayVideoResult[] };
+      if (!response.ok) throw new Error(payload.error ?? "Pixabay search failed.");
+      setResults(payload.results ?? []); setSelectedClipId(null); setLocalVideo(null); setPreviewingClipId(null);
+      window.localStorage.removeItem(workspaceStorageKey(workspaceId, "studio-selected-local-video-v1"));
+      window.localStorage.removeItem(workspaceStorageKey(workspaceId, "studio-selected-pixabay-video-v1"));
+      setSearchStatus(payload.results?.length ? "Vertical Pixabay footage" : "No vertical results found. Try a broader search.");
+    } catch (error) { setResults([]); setSearchStatus(error instanceof Error ? error.message : "Pixabay search failed."); }
+    finally { setIsSearching(false); }
+  }
+
+  function chooseLocalVideo(file: File) {
+    if (!/^video\/(mp4|quicktime|webm)$/i.test(file.type) || file.size > 500 * 1024 * 1024) {
+      setSearchStatus("Choose a vertical MP4, MOV, or WebM under 500 MB.");
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    const probe = document.createElement("video");
+    probe.preload = "metadata";
+    probe.onloadedmetadata = () => {
+      if (!Number.isFinite(probe.duration) || probe.duration <= 0 || !matchesVideoOrientation(probe.videoWidth, probe.videoHeight, orientation)) {
+        URL.revokeObjectURL(url);
+        setSearchStatus(`Choose ${orientation} footage so it fits this Studio project.`);
+        return;
+      }
+      const details = { blob: file, durationSeconds: probe.duration, fileName: file.name, height: probe.videoHeight, size: file.size, width: probe.videoWidth };
+      void saveRecentStudioVideo(workspaceId, details).then((record) => {
+        window.localStorage.removeItem(workspaceStorageKey(workspaceId, "studio-selected-pixabay-video-v1"));
+        setRecentVideos((current) => [record, ...current.filter((candidate) => candidate.id !== record.id)].slice(0, 5));
+        setLocalVideo({ durationSeconds: record.durationSeconds, fileName: record.fileName, height: record.height, id: record.id, size: record.size, url, width: record.width });
+        void captureVideoFrameFromUrl(url).then((thumbnailUrl) => { if (thumbnailUrl) { setLocalVideoThumbnails((current) => ({ ...current, [record.id]: thumbnailUrl })); setLocalVideo((current) => current?.id === record.id ? { ...current, thumbnailUrl } : current); } });
+        setSelectedClipId(null); setPreviewingClipId(null); setTrimRange({ end: Math.min(projectDuration, probe.duration), start: 0 }); setActiveTrimVersion((current) => current + 1);
+        if (record.durationSeconds <= projectDuration) confirmLocalTrim({ end: record.durationSeconds, id: record.id, start: 0 });
+        setSearchStatus("Local video ready to preview and trim. It is saved on this device for reuse.");
+      });
+    };
+    probe.onloadeddata = () => {
+      const thumbnailUrl = captureVideoFrame(probe);
+      if (thumbnailUrl) setLocalVideo((current) => current?.url === url ? { ...current, thumbnailUrl } : current);
+    };
+    probe.onerror = () => { URL.revokeObjectURL(url); setSearchStatus("This video could not be read in the browser. Try another MP4, MOV, or WebM."); };
+    probe.src = url;
+  }
+
+  function reuseRecentVideo(video: RecentStudioVideo, restoredRange?: { end: number; start: number }) {
+    if (!matchesVideoOrientation(video.width, video.height, orientation)) { setSearchStatus(`This recent video is not ${orientation}. Choose a matching project format first.`); return; }
+    const url = URL.createObjectURL(video.blob);
+    window.localStorage.removeItem(workspaceStorageKey(workspaceId, "studio-selected-pixabay-video-v1"));
+    setLocalVideo({ durationSeconds: video.durationSeconds, fileName: video.fileName, height: video.height, id: video.id, size: video.size, url, width: video.width });
+    void captureVideoFrameFromUrl(url).then((thumbnailUrl) => { if (thumbnailUrl) { setLocalVideoThumbnails((current) => ({ ...current, [video.id]: thumbnailUrl })); setLocalVideo((current) => current?.url === url ? { ...current, thumbnailUrl } : current); } });
+    const start = Math.min(Math.max(0, restoredRange?.start ?? 0), Math.max(0, video.durationSeconds - 0.1));
+    const end = Math.min(Math.max(start + 0.1, restoredRange?.end ?? Math.min(projectDuration, video.durationSeconds)), video.durationSeconds);
+    setSelectedClipId(null); setPreviewingClipId(null); setTrimRange({ end, start }); setActiveTrimVersion((current) => current + 1);
+    if (!restoredRange && video.durationSeconds <= projectDuration) confirmLocalTrim({ end, id: video.id, start });
+    setSearchStatus("Recent local video restored. It remains only on this device until private upload is enabled.");
+  }
+
+  function confirmLocalTrim(trim: { end: number; id: string; start: number }) {
+    setConfirmedLocalTrims((current) => current.some((candidate) => candidate.id === trim.id && Math.abs(candidate.start - trim.start) <= 0.01 && Math.abs(candidate.end - trim.end) <= 0.01) || current.length + confirmedPixabayClips.length >= 4 ? current : [...current, trim].slice(-4));
+  }
+
+  function confirmPixabayClip(clip: PixabayVideoResult) {
+    setConfirmedPixabayClips((current) => current.some((candidate) => candidate.id === clip.id) || confirmedLocalVideos.length + current.length >= 4 ? current : [...current, clip]);
+  }
+
+  function updateLocalTrim(nextRange: { end: number; start: number }) {
+    setTrimRange(nextRange);
+  }
 
   return (
     <section className="studio-video" aria-labelledby="studio-video-heading">
       <header className="studio-video-header">
-        <div><p className="eyebrow">Test Project · Video</p><h2 id="studio-video-heading">Select video clips</h2><p>Build the visual sequence for your 30-second vertical story.</p></div>
-        <div className="studio-format-badge"><span>Project format</span><strong>9:16</strong><small>Vertical</small></div>
+        <div><p className="eyebrow">Test Project · Video</p><h2 id="studio-video-heading">Find {orientation} footage</h2><p>Search Pixabay, then choose a source to ingest privately for this project.</p></div>
+        <div className="studio-project-spec"><div><span>Duration</span><strong>{projectDuration}s</strong><small>From Audio</small></div><div className="studio-orientation-selector" aria-label="Video format">{(["vertical", "horizontal", "square"] as const).map((value) => <button aria-label={`${value} video`} aria-pressed={orientation === value} className={`studio-orientation-icon is-${value}`} key={value} onClick={() => onOrientationChange(value)} type="button"><i aria-hidden /></button>)}</div></div>
       </header>
 
       <div className="studio-video-grid">
         <section className="studio-video-library" aria-labelledby="studio-video-library-heading">
-          <div className="studio-panel-heading"><div><p className="eyebrow">Pexels · Library</p><h3 id="studio-video-library-heading">Find vertical clips</h3></div><span>{clips.length} available</span></div>
-          <label className="studio-search"><span className="visually-hidden">Search video clips</span><input placeholder="Search vertical video" type="search" /></label>
+          <div className="studio-panel-heading"><div><p className="eyebrow">Pixabay · Library</p><h3 id="studio-video-library-heading">Select source video</h3></div><span>{results.length} found</span></div>
+          <form className="studio-search" onSubmit={search}><label><span className="visually-hidden">Search Pixabay video clips</span><input maxLength={100} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${orientation} video`} type="search" value={query} /></label><button disabled={isSearching || !query.trim()} type="submit">{isSearching ? "Searching…" : "Search"}</button></form>
+          <div className="studio-video-upload"><div><strong>Use your own video</strong><small>MP4, MOV, or WebM · {orientation} · up to 500 MB</small></div><input accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" aria-label={`Upload a ${orientation} video`} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) chooseLocalVideo(file); }} ref={uploadInputRef} type="file" /><button onClick={() => uploadInputRef.current?.click()} type="button"><Upload aria-hidden size={14} />Choose video</button></div>
+          {recentVideos.length ? <section className="studio-recent-videos" aria-label="Recent local uploads"><div><strong>Recent uploads</strong><small>Saved on this device</small></div>{recentVideos.map((video) => <button key={video.id} onClick={() => reuseRecentVideo(video)} type="button"><Video aria-hidden size={13} /><span>{video.fileName}</span><small>{formatStudioDuration(video.durationSeconds)}</small></button>)}</section> : null}
+          {searchStatus ? <p className="studio-export-notice" role="status">{searchStatus}</p> : null}
           <div className="studio-clip-grid">
-            {clips.map((clip) => {
-              const selected = selectedClipIds.includes(clip.id);
-              return <article className={`studio-clip-card studio-clip-${clip.tone}${selected ? " is-selected" : ""}`} key={clip.id}><div className="studio-clip-visual"><span>{`00:${String(clip.duration).padStart(2, "0")}`}</span></div><div><strong>{clip.label}</strong><button aria-pressed={selected} onClick={() => toggleClip(clip.id)} type="button">{selected ? "Added" : "Add clip"}</button></div></article>;
+            {results.map((clip) => {
+              const selected = selectedClipId === clip.id;
+              const isPreviewing = previewingClipId === clip.id;
+              return <article className={`studio-clip-card${selected ? " is-selected" : ""}`} key={clip.id}><div className="studio-clip-visual" style={{ backgroundImage: `url(${clip.previewUrl})` }}>{isPreviewing ? <video aria-label={`Preview ${clip.tags}`} autoPlay controls onEnded={() => setPreviewingClipId(null)} onError={() => { setPreviewingClipId(null); setSearchStatus("This Pixabay preview could not be played. Try another result."); }} playsInline src={clip.previewVideoUrl} /> : <button aria-label={`Play ${clip.tags} preview`} className="studio-clip-play" onClick={() => setPreviewingClipId(clip.id)} type="button"><Play aria-hidden fill="currentColor" size={18} /></button>}<span>{formatStudioDuration(clip.durationSeconds)}</span></div><div><strong>{clip.tags}</strong><small>by {clip.creator} · {clip.width}×{clip.height}</small><button aria-pressed={selected} onClick={() => { setSelectedClipId(selected ? null : clip.id); setLocalVideo(null); window.localStorage.removeItem(workspaceStorageKey(workspaceId, "studio-selected-local-video-v1")); if (selected) window.localStorage.removeItem(workspaceStorageKey(workspaceId, "studio-selected-pixabay-video-v1")); }} type="button">{selected ? "In preview" : "Add to preview"}</button></div></article>;
             })}
           </div>
         </section>
 
+        <section className="studio-video-preview" aria-labelledby="studio-video-preview-heading">
+          <div className="studio-panel-heading"><div><p className="eyebrow">Live composition</p><h3 id="studio-video-preview-heading">Preview player</h3></div><span>{selectedDuration ? formatStudioDuration(selectedDuration) : "—"}</span></div>
+          {localVideo ? <div className="studio-local-video"><video controls playsInline src={localVideo.url} /><div><strong>{localVideo.fileName}</strong><small>Local preview · {localVideo.width}×{localVideo.height} · {(localVideo.size / 1024 / 1024).toFixed(1)} MB</small></div>{needsVideoTrim ? <MediaTrimmer initialTrimRange={trimRange} key={`${localVideo.id}:${activeTrimVersion}`} maxExcerptSeconds={projectDuration} mediaType="video" onTrimChange={updateLocalTrim} playButtonPlacement="values" src={localVideo.url} title={localVideo.fileName} /> : null}</div> : selectedClip ? <div className="studio-pixabay-video-preview"><video controls playsInline poster={selectedClip.previewUrl} src={selectedClip.previewVideoUrl} /><button className="studio-primary-action" disabled={!canAddSelectedClip} onClick={() => { if (canAddSelectedClip) { confirmPixabayClip(selectedClip); setSearchStatus("Pixabay source added to Selected videos for this browser preview."); } }} type="button">{isSelectedPixabayClipAdded ? "Added to project" : selectedVideoCount >= 4 ? "Selected videos full" : "Add video"}</button></div> : <div className="studio-video-empty"><strong>Choose a source to preview</strong><span>Search Pixabay or use one of your recent uploads.</span></div>}
+          {needsVideoTrim ? <div className="studio-video-footer"><div><span>Next step</span><strong>Trim ready</strong><small>{formatStudioDuration(trimRange.start)}–{formatStudioDuration(trimRange.end)} is selected locally.</small></div><button className="studio-primary-action" onClick={() => { if (!localVideo) return; confirmLocalTrim({ end: trimRange.end, id: localVideo.id, start: trimRange.start }); setSearchStatus("Trim selection saved locally. Private bucket upload activates in the Vercel deployment."); }} type="button">Use local trim</button></div> : null}
+        </section>
+
         <section className="studio-selected-clips" aria-labelledby="studio-selected-clips-heading">
-          <div className="studio-panel-heading"><div><p className="eyebrow">Sequence</p><h3 id="studio-selected-clips-heading">Selected clips</h3></div><span className="studio-video-duration">{`00:${String(totalDuration).padStart(2, "0")}`}</span></div>
-          {selectedClips.length ? <ol className="studio-selected-list">{selectedClips.map((clip, index) => <li key={clip.id}><span className={`studio-selected-thumbnail studio-clip-${clip.tone}`} aria-hidden><b>{index + 1}</b></span><div><strong>{clip.label}</strong><small>{`Trim · 00:00 - 00:${String(clip.duration).padStart(2, "0")}`}</small></div><span>{`00:${String(clip.duration).padStart(2, "0")}`}</span><button onClick={() => toggleClip(clip.id)} type="button">Remove</button></li>)}</ol> : <div className="studio-video-empty"><strong>No clips selected</strong><span>Add one or more source clips to build the sequence.</span></div>}
-          <div className="studio-video-footer"><div><span>Total duration</span><strong>{`00:${String(totalDuration).padStart(2, "0")}`}</strong><small>{totalDuration === 30 ? "Matches your selected audio" : "Aim for 00:30 to match your audio"}</small></div><button className="studio-primary-action" disabled={!selectedClips.length} onClick={() => onChooseProcess("Overlay image")} type="button">Continue to overlays</button></div>
+          <div className="studio-panel-heading"><div><p className="eyebrow">Project sources</p><h3 id="studio-selected-clips-heading">Selected videos</h3></div><span>{selectedVideoCount} / 4</span></div>
+          <ol className="studio-selected-list">{confirmedLocalVideos.map(({ trim, video }, index) => { const isActive = localVideo?.id === video.id && Math.abs(trimRange.start - trim.start) <= 0.01 && Math.abs(trimRange.end - trim.end) <= 0.01; const record = recentVideos.find((candidate) => candidate.id === video.id); const thumbnailUrl = ("thumbnailUrl" in video ? video.thumbnailUrl : undefined) ?? localVideoThumbnails[video.id]; return <li className={isActive ? "is-active" : ""} key={`${video.id}:${trim.start}:${trim.end}`}><button aria-label={`Preview ${video.fileName}, ${formatStudioDuration(trim.start)} to ${formatStudioDuration(trim.end)}`} aria-pressed={isActive} className="studio-selected-video-card" disabled={!record} onClick={() => { if (record) reuseRecentVideo(record, trim); }} type="button"><span className="studio-selected-thumbnail" style={thumbnailUrl ? { backgroundImage: `url(${thumbnailUrl})` } : undefined} aria-hidden><b>{index + 1}</b></span><span><strong>{video.fileName}</strong><small>{formatStudioDuration(trim.start)}–{formatStudioDuration(trim.end)} · local</small></span><em>{formatStudioDuration(trim.end - trim.start)}</em></button><button aria-label={`Remove ${video.fileName} ${formatStudioDuration(trim.start)} to ${formatStudioDuration(trim.end)}`} onClick={() => { setConfirmedLocalTrims((current) => current.filter((candidate) => candidate.id !== trim.id || Math.abs(candidate.start - trim.start) > 0.01 || Math.abs(candidate.end - trim.end) > 0.01)); }} type="button">Remove</button></li>; })}{confirmedPixabayClips.map((clip, index) => { const isActive = selectedClip?.id === clip.id; return <li className={isActive ? "is-active" : ""} key={`pixabay:${clip.id}`}><button aria-label={`Preview ${clip.tags}`} aria-pressed={isActive} className="studio-selected-video-card" onClick={() => { setResults((current) => current.some((candidate) => candidate.id === clip.id) ? current : [...current, clip]); setSelectedClipId(clip.id); setLocalVideo(null); }} type="button"><span className="studio-selected-thumbnail" style={{ backgroundImage: `url(${clip.previewUrl})` }} aria-hidden><b>{confirmedLocalVideos.length + index + 1}</b></span><span><strong>{clip.tags}</strong><small>via Pixabay</small></span><em>{formatStudioDuration(clip.durationSeconds)}</em></button><button aria-label={`Remove ${clip.tags}`} onClick={() => setConfirmedPixabayClips((current) => current.filter((candidate) => candidate.id !== clip.id))} type="button">Remove</button></li>; })}{Array.from({ length: Math.max(0, 4 - selectedVideoCount) }, (_, index) => <li className="studio-add-source-card" key={`available-source-${selectedVideoCount + index}`}><span aria-hidden>+</span><strong>Available slot</strong><small>Add a video snippet</small></li>)}</ol>
         </section>
       </div>
 
-      <section className="studio-video-timeline" aria-label="Video assembly timeline"><div className="studio-timeline-heading"><div><p className="eyebrow">Video timeline</p><h3>Sequence preview</h3></div><span>{`00:00 / 00:${String(Math.max(totalDuration, 30)).padStart(2, "0")}`}</span></div><div className="studio-timeline-ruler"><span>00:00</span><span>00:10</span><span>00:20</span><span>00:30</span></div><div className="studio-video-track"><span>Video</span><div>{selectedClips.map((clip) => <i className={`studio-clip-${clip.tone}`} key={clip.id} style={{ flexGrow: clip.duration }}>{clip.label}</i>)}</div></div><div className="studio-video-audio-track"><span>Audio</span><div><i /></div></div></section>
+      <section className="studio-video-timeline" aria-label="Video assembly timeline"><div className="studio-timeline-heading"><div><p className="eyebrow">Video timeline</p><h3>Source preview</h3></div><span>{selectedDuration ? `${formatStudioDuration(0)} / ${formatStudioDuration(projectDuration)}` : "Select footage"}</span></div><div className="studio-timeline-ruler"><span>{formatStudioDuration(0)}</span><span>{formatStudioDuration(projectDuration / 3)}</span><span>{formatStudioDuration((projectDuration / 3) * 2)}</span><span>{formatStudioDuration(projectDuration)}</span></div><div className="studio-video-track"><span>Video</span><div>{videoTimelineSegments.map((segment, index) => <i key={`${segment.startSeconds}-${index}`} style={{ backgroundImage: timelineFrameUrl ? `linear-gradient(rgb(12 27 38 / .42), rgb(12 27 38 / .42)), url(${timelineFrameUrl})` : undefined, flexGrow: segment.durationSeconds }}><b>{localVideo?.fileName ?? selectedClip?.tags}</b><small>{formatStudioDuration(segment.startSeconds)}–{formatStudioDuration(segment.endSeconds)} · {formatStudioDuration(segment.durationSeconds)}</small></i>)}</div></div><div className="studio-video-audio-track"><span>Audio</span><div className="studio-timeline-waveform" aria-label={audioSnippet ? `${audioSnippet.title} waveform` : "No audio selected"}>{audioSnippet ? <><b>{audioSnippet.title}<small>{formatStudioDuration(audioSnippet.start)} – {formatStudioDuration(audioSnippet.end)}</small></b>{Array.from({ length: 96 }, (_, index) => <i aria-hidden key={index} style={{ height: `${24 + ((index * 37 + audioSnippet.title.length * 13) % 68)}%` }} />)}</> : null}</div></div></section>
     </section>
   );
+}
+
+function matchesVideoOrientation(width: number, height: number, orientation: StudioVideoOrientation) {
+  if (orientation === "vertical") return height > width;
+  if (orientation === "horizontal") return width > height;
+  return Math.abs(width - height) / Math.max(width, height) <= 0.08;
+}
+
+function isPixabayVideoResult(value: unknown): value is PixabayVideoResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.creator === "string" && typeof candidate.durationSeconds === "number" && typeof candidate.height === "number" && typeof candidate.id === "string" && typeof candidate.pageUrl === "string" && typeof candidate.previewUrl === "string" && typeof candidate.previewVideoUrl === "string" && typeof candidate.tags === "string" && typeof candidate.width === "number";
+}
+
+function createVideoTimelineSegments(sourceDuration: number, projectDuration: number) {
+  if (!Number.isFinite(sourceDuration) || sourceDuration <= 0 || !Number.isFinite(projectDuration) || projectDuration <= 0) return [];
+  const segments: Array<{ durationSeconds: number; endSeconds: number; startSeconds: number }> = [];
+  let startSeconds = 0;
+  while (startSeconds < projectDuration) {
+    const durationSeconds = Math.min(sourceDuration, projectDuration - startSeconds);
+    segments.push({ durationSeconds, endSeconds: startSeconds + durationSeconds, startSeconds });
+    startSeconds += durationSeconds;
+  }
+  return segments;
+}
+
+function captureVideoFrame(video: HTMLVideoElement) {
+  if (!video.videoWidth || !video.videoHeight) return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+  context.drawImage(video, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.72);
+}
+
+function captureVideoFrameFromUrl(url: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const video = document.createElement("video");
+    video.muted = true;
+    video.preload = "auto";
+    video.onloadeddata = () => resolve(captureVideoFrame(video));
+    video.onerror = () => resolve(null);
+    video.src = url;
+  });
 }
 
 function StudioImageOverlayEditor({ onChooseProcess }: { onChooseProcess: (process: string) => void }) {

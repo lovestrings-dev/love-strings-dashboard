@@ -3,7 +3,7 @@
 import type { CSSProperties } from "react";
 import Image from "next/image";
 import { Pause, Play } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 // A deliberate decorative waveform. Generating an amplitude-accurate waveform
 // belongs to the future Studio audio-analysis/rendering pipeline.
@@ -16,12 +16,16 @@ type AudioPlayerProps = {
   clipStartSeconds?: number;
   className?: string;
   fileName?: string;
+  onPlaybackPositionChange?: (position: number) => void;
   src: string;
   title: string;
 };
 
-export function AudioPlayer({ artworkAlt, artworkUrl, className = "", clipEndSeconds, clipStartSeconds = 0, fileName, src, title }: AudioPlayerProps) {
+export type AudioPlayerHandle = { playExcerpt: (range: { end: number; start: number }) => void };
+
+export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(function AudioPlayer({ artworkAlt, artworkUrl, className = "", clipEndSeconds, clipStartSeconds = 0, fileName, onPlaybackPositionChange, src, title }, ref) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const activeExcerptRef = useRef<{ end: number; start: number } | null>(null);
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [position, setPosition] = useState(0);
@@ -35,6 +39,7 @@ export function AudioPlayer({ artworkAlt, artworkUrl, className = "", clipEndSec
     const audio = audioRef.current;
     if (!audio) return;
     audio.pause();
+    activeExcerptRef.current = null;
     setDuration(0);
     setIsPlaying(false);
     setPosition(start);
@@ -51,6 +56,7 @@ export function AudioPlayer({ artworkAlt, artworkUrl, className = "", clipEndSec
     const audio = audioRef.current;
     if (!audio) return;
     if (audio.paused) {
+      activeExcerptRef.current = null;
       if (audio.currentTime < start || (end > start && audio.currentTime >= end)) audio.currentTime = start;
       void audio.play().catch(() => setIsPlaying(false));
     }
@@ -63,6 +69,20 @@ export function AudioPlayer({ artworkAlt, artworkUrl, className = "", clipEndSec
     setPosition(nextPosition);
   }
 
+  useImperativeHandle(ref, () => ({
+    playExcerpt(range) {
+      const audio = audioRef.current;
+      if (!audio) return;
+      const excerptStart = Math.max(start, range.start);
+      const excerptEnd = Math.max(excerptStart, range.end);
+      activeExcerptRef.current = { end: excerptEnd, start: excerptStart };
+      audio.currentTime = excerptStart;
+      setPosition(excerptStart);
+      onPlaybackPositionChange?.(excerptStart);
+      void audio.play().catch(() => setIsPlaying(false));
+    }
+  }), [onPlaybackPositionChange, start]);
+
   return (
     <div className={`audio-player ${className}`} style={playerStyle}>
       <audio
@@ -71,18 +91,24 @@ export function AudioPlayer({ artworkAlt, artworkUrl, className = "", clipEndSec
           setDuration(nextDuration);
           if (start > 0) { event.currentTarget.currentTime = start; setPosition(start); }
         }}
-        onEnded={() => { setIsPlaying(false); setPosition(start); }}
+        onEnded={() => { activeExcerptRef.current = null; setIsPlaying(false); setPosition(start); onPlaybackPositionChange?.(start); }}
         onPause={() => setIsPlaying(false)}
         onPlay={() => setIsPlaying(true)}
         onTimeUpdate={(event) => {
           const nextPosition = event.currentTarget.currentTime;
-          if (end > start && nextPosition >= end) {
+          const activeExcerpt = activeExcerptRef.current;
+          const playbackEnd = activeExcerpt?.end ?? end;
+          if (playbackEnd > start && nextPosition >= playbackEnd) {
             event.currentTarget.pause();
-            event.currentTarget.currentTime = start;
-            setPosition(start);
+            const restartPosition = activeExcerpt?.start ?? start;
+            event.currentTarget.currentTime = restartPosition;
+            setPosition(restartPosition);
+            onPlaybackPositionChange?.(restartPosition);
+            activeExcerptRef.current = null;
             return;
           }
           setPosition(nextPosition);
+          onPlaybackPositionChange?.(nextPosition);
         }}
         preload="metadata"
         ref={audioRef}
@@ -105,7 +131,7 @@ export function AudioPlayer({ artworkAlt, artworkUrl, className = "", clipEndSec
       <span className="audio-player-duration">{formatAudioTime(playableDuration || (clipEndSeconds === undefined ? duration : Math.max(0, clipEndSeconds - start)))}</span>
     </div>
   );
-}
+});
 
 function formatAudioTime(value: number) {
   if (!Number.isFinite(value) || value <= 0) return "0:00";
