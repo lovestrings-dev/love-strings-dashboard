@@ -9660,8 +9660,13 @@ async function uploadStudioVideoFile(file: File, details: Pick<StudioUploadedVid
   const signResponse = await fetch("/api/studio/video-uploads", { body: JSON.stringify(requestBody), headers: { "content-type": "application/json" }, method: "POST" });
   const signPayload = await signResponse.json() as { assetId?: string; error?: string; uploadUrl?: string };
   if (!signResponse.ok || !signPayload.assetId || !signPayload.uploadUrl) throw new Error(signPayload.error ?? "Private video upload could not start.");
-  const uploadResponse = await fetch(signPayload.uploadUrl, { body: file, headers: { "content-type": requestBody.mimeType }, method: "PUT" });
-  if (!uploadResponse.ok) throw new Error("Private video upload could not finish.");
+  let uploadResponse: Response;
+  try {
+    uploadResponse = await fetch(signPayload.uploadUrl, { body: file, headers: { "content-type": requestBody.mimeType }, method: "PUT" });
+  } catch {
+    throw new Error("Private video upload could not reach cloud storage. Check the connection and try again.");
+  }
+  if (!uploadResponse.ok) throw new Error(`Private video upload was rejected by cloud storage (HTTP ${uploadResponse.status}).`);
   const completeResponse = await fetch("/api/studio/video-uploads", { body: JSON.stringify({ ...requestBody, action: "complete", assetId: signPayload.assetId }), headers: { "content-type": "application/json" }, method: "POST" });
   const completePayload = await completeResponse.json() as { asset?: unknown; error?: string };
   if (!completeResponse.ok || !isStudioUploadedVideoAsset(completePayload.asset)) throw new Error(completePayload.error ?? "Private video could not be registered.");

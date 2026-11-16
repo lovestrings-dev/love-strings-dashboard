@@ -19,6 +19,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  let phase = "request";
   try {
     if (!isSameOrigin(request)) return reply({ error: "Unauthorized request." }, 401);
     const { role, serviceClient, user, workspaceId } = await requireWorkspaceAccess(request);
@@ -28,6 +29,7 @@ export async function POST(request: NextRequest) {
     if (validation.error) return reply({ error: validation.error }, 400);
 
     if (body.action === "sign") {
+      phase = "create-signed-upload-url";
       const assetId = randomUUID();
       const objectPath = workspaceVideoObjectPath(workspaceId, assetId, fileExtension(validation.value.fileName));
       const storage = await studioStorage();
@@ -38,6 +40,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.action === "complete") {
+      phase = "verify-upload";
       const assetId = typeof body.assetId === "string" && isUuid(body.assetId) ? body.assetId : "";
       if (!assetId) return reply({ error: "Invalid upload asset." }, 400);
       const objectPath = workspaceVideoObjectPath(workspaceId, assetId, fileExtension(validation.value.fileName));
@@ -59,7 +62,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ asset: toAsset(data) }, { status: 201 });
     }
     return reply({ error: "Choose an upload action." }, 400);
-  } catch (error) { return errorReply(error); }
+  } catch (error) { return errorReply(error, `POST ${phase}`); }
 }
 
 function validateUpload(body: UploadRequest) {
@@ -77,4 +80,13 @@ function toAsset(row: { id: string; original_file_name: string; mime_type: strin
 function isUuid(value: string) { return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value); }
 function isSameOrigin(request: NextRequest) { try { return Boolean(request.headers.get("origin") && request.headers.get("host") && new URL(request.headers.get("origin")!).host === request.headers.get("host")); } catch { return false; } }
 function reply(body: unknown, status = 200) { return NextResponse.json(body, { status }); }
-function errorReply(error: unknown) { return reply({ error: error instanceof Error ? error.message : "Studio upload request failed." }, error instanceof WorkspaceAccessError ? error.status : 500); }
+function errorReply(error: unknown, context = "request") {
+  // Keep cloud credentials, signed URLs and OIDC tokens out of logs. The error
+  // message and phase are enough to separate WIF/IAM failures from upload and
+  // database registration failures in the Vercel runtime logs.
+  console.error("Studio video upload failed", {
+    context,
+    error: error instanceof Error ? { message: error.message, name: error.name } : "Unknown error"
+  });
+  return reply({ error: error instanceof Error ? error.message : "Studio upload request failed." }, error instanceof WorkspaceAccessError ? error.status : 500);
+}
