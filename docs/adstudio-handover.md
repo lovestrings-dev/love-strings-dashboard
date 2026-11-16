@@ -73,10 +73,12 @@ can sign short-lived Cloud Storage upload, preview, and download URLs. No
 service-account key was created. IAM propagation can take a few minutes after
 the 2026-11-15 policy change.
 
-This completes the cloud access prerequisite. The Next.js server still needs
-to exchange Vercel's OIDC token through the existing workload-identity
-provider and expose a protected upload-signing route; do not proxy video bytes
-through Vercel and do not add browser credentials.
+This completes the cloud access prerequisite. The Next.js server exchanges
+Vercel's OIDC token through the existing workload-identity provider and
+exposes a protected direct-upload signing route; it never proxies video bytes
+through Vercel and never adds browser credentials. Vercel must provide
+`ADSTUDIO_GOOGLE_WORKLOAD_IDENTITY_AUDIENCE` and
+`ADSTUDIO_GOOGLE_SERVICE_ACCOUNT_EMAIL` as server-only environment variables.
 
 Cloud Run, Cloud Build, Artifact Registry, and Cloud Storage APIs are enabled.
 

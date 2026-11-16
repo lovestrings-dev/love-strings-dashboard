@@ -11937,7 +11937,7 @@ h2 {
 /* Keep Pixabay discovery compact: one complete row stays visible while further results scroll in place. */
 .studio-video-library .studio-clip-grid { grid-auto-rows: 280px; max-height: 280px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding-right: 5px; scrollbar-gutter: stable; }
 .studio-video-library .studio-clip-visual { aspect-ratio: auto; height: 205px; }
-@media (max-width: 700px) { .studio-video-library .studio-clip-grid { grid-auto-rows: 265px; max-height: 265px; }.studio-video-library .studio-clip-visual { height: 190px; } }
+@media (max-width: 700px) { .studio-video-library .studio-clip-grid { grid-auto-rows: 320px; max-height: 320px; }.studio-video-library .studio-clip-visual { height: 190px; } }
 /* Pixabay previews use the centre card as a balanced player stage. */
 .studio-pixabay-video-preview { align-items: center; display: flex; flex: 1; flex-direction: column; gap: 12px; justify-content: center; min-height: 0; }.studio-pixabay-video-preview > video { height: min(360px, 54vh); justify-self: auto; max-height: none; width: auto; }.studio-pixabay-video-preview .studio-primary-action { margin: 0; }
 @media (max-width: 700px) { .studio-pixabay-video-preview > video { height: min(310px, 54vh); } }

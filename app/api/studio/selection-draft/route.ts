@@ -1,20 +1,21 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireWorkspaceAccess, WorkspaceAccessError } from "@/lib/server/workspace-owner";
 
-type SelectionDraft = { audioSnippets: unknown[]; pixabayVideos: unknown[] };
+type SelectionDraft = { audioSnippets: unknown[]; pixabayVideos: unknown[]; uploadedVideoSnippets: unknown[] };
 
 export async function GET(request: NextRequest) {
   try {
     const { serviceClient, workspaceId } = await requireWorkspaceAccess(request);
     const { data, error } = await serviceClient
       .from("studio_workspace_selection_drafts")
-      .select("audio_snippets, pixabay_video_snippets")
+      .select("audio_snippets, pixabay_video_snippets, uploaded_video_snippets")
       .eq("workspace_id", workspaceId)
       .maybeSingle();
     if (error) throw error;
     return NextResponse.json({
       audioSnippets: Array.isArray(data?.audio_snippets) ? data.audio_snippets : [],
-      pixabayVideos: Array.isArray(data?.pixabay_video_snippets) ? data.pixabay_video_snippets : []
+      pixabayVideos: Array.isArray(data?.pixabay_video_snippets) ? data.pixabay_video_snippets : [],
+      uploadedVideoSnippets: Array.isArray(data?.uploaded_video_snippets) ? data.uploaded_video_snippets : []
     } satisfies SelectionDraft);
   } catch (error) {
     return errorReply(error);
@@ -29,13 +30,15 @@ export async function PATCH(request: NextRequest) {
     const body = await request.json() as Record<string, unknown>;
     const audioSnippets = body.audioSnippets;
     const pixabayVideos = body.pixabayVideos;
+    const uploadedVideoSnippets = body.uploadedVideoSnippets;
     if (audioSnippets !== undefined && !isAudioSnippets(audioSnippets)) return reply({ error: "Invalid audio selections." }, 400);
     if (pixabayVideos !== undefined && !isPixabayVideos(pixabayVideos)) return reply({ error: "Invalid video selections." }, 400);
-    if (audioSnippets === undefined && pixabayVideos === undefined) return reply({ error: "No Studio selections were supplied." }, 400);
+    if (uploadedVideoSnippets !== undefined && !isUploadedVideoSnippets(uploadedVideoSnippets)) return reply({ error: "Invalid uploaded-video selections." }, 400);
+    if (audioSnippets === undefined && pixabayVideos === undefined && uploadedVideoSnippets === undefined) return reply({ error: "No Studio selections were supplied." }, 400);
 
     const { data: current, error: currentError } = await serviceClient
       .from("studio_workspace_selection_drafts")
-      .select("audio_snippets, pixabay_video_snippets")
+      .select("audio_snippets, pixabay_video_snippets, uploaded_video_snippets")
       .eq("workspace_id", workspaceId)
       .maybeSingle();
     if (currentError) throw currentError;
@@ -43,6 +46,7 @@ export async function PATCH(request: NextRequest) {
       workspace_id: workspaceId,
       audio_snippets: audioSnippets ?? current?.audio_snippets ?? [],
       pixabay_video_snippets: pixabayVideos ?? current?.pixabay_video_snippets ?? [],
+      uploaded_video_snippets: uploadedVideoSnippets ?? current?.uploaded_video_snippets ?? [],
       updated_by: user.id
     });
     if (error) throw error;
@@ -63,6 +67,13 @@ function isPixabayVideos(value: unknown): value is unknown[] {
   return Array.isArray(value) && value.length <= 4 && value.every((item) => {
     if (!isRecord(item)) return false;
     return typeof item.creator === "string" && typeof item.durationSeconds === "number" && Number.isFinite(item.durationSeconds) && typeof item.height === "number" && Number.isInteger(item.height) && typeof item.id === "string" && typeof item.pageUrl === "string" && typeof item.previewUrl === "string" && typeof item.previewVideoUrl === "string" && typeof item.tags === "string" && typeof item.width === "number" && Number.isInteger(item.width);
+  });
+}
+
+function isUploadedVideoSnippets(value: unknown): value is unknown[] {
+  return Array.isArray(value) && value.length <= 4 && value.every((item) => {
+    if (!isRecord(item)) return false;
+    return typeof item.assetId === "string" && /^[0-9a-f-]{36}$/i.test(item.assetId) && typeof item.end === "number" && Number.isFinite(item.end) && typeof item.start === "number" && Number.isFinite(item.start) && item.end > item.start;
   });
 }
 

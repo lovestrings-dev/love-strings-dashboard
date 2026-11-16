@@ -94,8 +94,11 @@
     "test:studio-pixabay": "node --experimental-strip-types scripts/test-studio-pixabay.mjs"
   },
   "dependencies": {
+    "@google-cloud/storage": "7.19.0",
     "@supabase/ssr": "0.12.4",
     "@supabase/supabase-js": "2.108.2",
+    "@vercel/oidc": "3.1.0",
+    "google-auth-library": "10.6.1",
     "lucide-react": "1.21.0",
     "next": "16.2.9",
     "react": "19.2.7",
