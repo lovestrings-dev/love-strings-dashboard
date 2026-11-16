@@ -92,6 +92,7 @@
     "test:pull-to-refresh": "node scripts/test-pull-to-refresh.mjs",
     "test:studio-composition": "node --experimental-strip-types scripts/test-studio-composition.mjs",
     "test:studio-storage-signing": "node --experimental-strip-types scripts/test-studio-storage-signing.mjs",
+    "test:studio-video-thumbnail": "node --experimental-strip-types scripts/test-studio-video-thumbnail.mjs",
     "test:studio-pixabay": "node --experimental-strip-types scripts/test-studio-pixabay.mjs"
   },
   "dependencies": {

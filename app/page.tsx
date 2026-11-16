@@ -1,6 +1,8 @@
 "use client";
 
 import Image from "next/image";
+import { captureStudioVideoFrame, captureStudioVideoFrameFromUrl } from "@/lib/studio/video-thumbnail";
+import { studioVideoUploadMimeType } from "@/lib/studio/video-upload-type";
 import { PullToRefresh } from "./components/pull-to-refresh";
 import { AudioPlayer, type AudioPlayerHandle } from "./components/audio-player";
 import { MediaTrimmer } from "./components/media-trimmer";
@@ -9655,18 +9657,21 @@ function isStudioUploadedVideoSnippet(value: unknown): value is StudioUploadedVi
   return typeof candidate.assetId === "string" && typeof candidate.end === "number" && typeof candidate.start === "number" && candidate.end > candidate.start;
 }
 
-async function uploadStudioVideoFile(file: File, details: Pick<StudioUploadedVideoAsset, "durationSeconds" | "fileName" | "height" | "size" | "width">): Promise<StudioUploadedVideoAsset> {
-  const requestBody = { ...details, action: "sign" as const, mimeType: file.type || "video/mp4" };
+async function uploadStudioVideoFile(file: File, details: Pick<StudioUploadedVideoAsset, "durationSeconds" | "fileName" | "height" | "size" | "width">, onProgress: (message: string) => void): Promise<StudioUploadedVideoAsset> {
+  const requestBody = { ...details, action: "sign" as const, mimeType: studioVideoUploadMimeType(file) };
+  onProgress(`Preparing private upload for ${file.name}…`);
   const signResponse = await fetch("/api/studio/video-uploads", { body: JSON.stringify(requestBody), headers: { "content-type": "application/json" }, method: "POST" });
   const signPayload = await signResponse.json() as { assetId?: string; error?: string; uploadUrl?: string };
   if (!signResponse.ok || !signPayload.assetId || !signPayload.uploadUrl) throw new Error(signPayload.error ?? "Private video upload could not start.");
   let uploadResponse: Response;
+  onProgress(`Uploading ${file.name} to private storage. Keep this page open…`);
   try {
     uploadResponse = await fetch(signPayload.uploadUrl, { body: file, headers: { "content-type": requestBody.mimeType }, method: "PUT" });
   } catch {
     throw new Error("Private video upload could not reach cloud storage. Check the connection and try again.");
   }
   if (!uploadResponse.ok) throw new Error(`Private video upload was rejected by cloud storage (HTTP ${uploadResponse.status}).`);
+  onProgress(`Saving ${file.name} to Shared uploads…`);
   const completeResponse = await fetch("/api/studio/video-uploads", { body: JSON.stringify({ ...requestBody, action: "complete", assetId: signPayload.assetId }), headers: { "content-type": "application/json" }, method: "POST" });
   const completePayload = await completeResponse.json() as { asset?: unknown; error?: string };
   if (!completeResponse.ok || !isStudioUploadedVideoAsset(completePayload.asset)) throw new Error(completePayload.error ?? "Private video could not be registered.");
@@ -9825,6 +9830,8 @@ function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseP
   const [sharedVideo, setSharedVideo] = useState<StudioUploadedVideoAsset | null>(null);
   const [activeTrimVersion, setActiveTrimVersion] = useState(0);
   const [localVideoThumbnails, setLocalVideoThumbnails] = useState<Record<string, string>>({});
+  const [sharedThumbnailState, setSharedThumbnailState] = useState<{ workspaceId: string; frames: Record<string, string> }>({ workspaceId, frames: {} });
+  const sharedVideoThumbnails = sharedThumbnailState.workspaceId === workspaceId ? sharedThumbnailState.frames : {};
   const [previewingClipId, setPreviewingClipId] = useState<string | null>(null);
   const [searchStatus, setSearchStatus] = useState("");
   const [isSearching, setIsSearching] = useState(false);
@@ -9860,7 +9867,23 @@ function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseP
   }, [confirmedPixabayClips, confirmedUploadedVideos, firstConfirmedLocalTrim, firstConfirmedLocalVideo, localVideoThumbnails]);
   const sourceDuration = localVideo || sharedVideo ? trimRange.end - trimRange.start : selectedClip?.durationSeconds ?? 0;
   const videoTimelineSegments = createVideoTimelineSegments(sourceDuration, projectDuration);
-  const timelineFrameUrl = localVideo?.thumbnailUrl ?? selectedClip?.previewUrl;
+  const timelineFrameUrl = localVideo?.thumbnailUrl ?? (sharedVideo ? sharedVideoThumbnails[sharedVideo.id] : selectedClip?.previewUrl);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    // Sequential decoding bounds bandwidth and memory for large iPhone files.
+    // Cache within this effect, which only reruns when the library changes.
+    async function loadSharedFrames() {
+      for (const asset of sharedVideoAssets) {
+        if (controller.signal.aborted) return;
+        const frame = await captureStudioVideoFrameFromUrl(`/api/studio/video-uploads/${asset.id}/preview`, controller.signal);
+        if (controller.signal.aborted) return;
+        if (frame) setSharedThumbnailState((current) => ({ workspaceId, frames: { ...(current.workspaceId === workspaceId ? current.frames : {}), [asset.id]: frame } }));
+      }
+    }
+    void loadSharedFrames();
+    return () => controller.abort();
+  }, [sharedVideoAssets, workspaceId]);
 
   useEffect(() => () => { if (localVideo?.url) URL.revokeObjectURL(localVideo.url); }, [localVideo?.url]);
   useEffect(() => { onAudioPreviewSourceChange(firstAudioPreviewSource); }, [firstAudioPreviewSource, onAudioPreviewSourceChange]);
@@ -9994,8 +10017,23 @@ function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseP
     }
     const url = URL.createObjectURL(file);
     const probe = document.createElement("video");
+    setSearchStatus(`Reading ${file.name} from this device…`);
+    probe.muted = true;
+    probe.playsInline = true;
     probe.preload = "metadata";
+    let metadataHandled = false;
+    const metadataTimeout = window.setTimeout(() => {
+      if (metadataHandled) return;
+      metadataHandled = true;
+      probe.removeAttribute("src");
+      probe.load();
+      URL.revokeObjectURL(url);
+      setSearchStatus(`Could not read ${file.name}. If it is in iCloud Photos, download it to this device first, then try again. No private upload started.`);
+    }, 30000);
     probe.onloadedmetadata = () => {
+      if (metadataHandled) return;
+      metadataHandled = true;
+      window.clearTimeout(metadataTimeout);
       if (!Number.isFinite(probe.duration) || probe.duration <= 0 || !matchesVideoOrientation(probe.videoWidth, probe.videoHeight, orientation)) {
         URL.revokeObjectURL(url);
         setSearchStatus(`Choose ${orientation} footage so it fits this Studio project.`);
@@ -10016,7 +10054,7 @@ function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseP
       // in the background instead of making the preview appear to fail.
       const temporaryRecord = { ...details, id: `temporary-${Date.now()}-${Math.random().toString(36).slice(2)}` };
       showLocalVideo(temporaryRecord, false);
-      void uploadStudioVideoFile(file, details).then((asset) => {
+      void uploadStudioVideoFile(file, details, setSearchStatus).then((asset) => {
         setSharedVideoAssets((current) => [asset, ...current.filter((candidate) => candidate.id !== asset.id)]);
         setSharedAssetIdsByLocalId((current) => ({ ...current, [temporaryRecord.id]: asset.id }));
         if (asset.durationSeconds <= projectDuration) {
@@ -10037,7 +10075,6 @@ function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseP
           const { [temporaryRecord.id]: _temporaryThumbnail, ...remaining } = current;
           return { ...remaining, [record.id]: thumbnailUrl };
         });
-        setSearchStatus("Local video ready to preview and trim. It is saved on this device for reuse.");
       }).catch(() => {
         // The preview remains usable for this browser session even if the local cache is unavailable.
       });
@@ -10046,8 +10083,9 @@ function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseP
       const thumbnailUrl = captureVideoFrame(probe);
       if (thumbnailUrl) setLocalVideo((current) => current?.url === url ? { ...current, thumbnailUrl } : current);
     };
-    probe.onerror = () => { URL.revokeObjectURL(url); setSearchStatus("This video could not be read in the browser. Try another MP4, MOV, or WebM."); };
+    probe.onerror = () => { if (metadataHandled) return; metadataHandled = true; window.clearTimeout(metadataTimeout); URL.revokeObjectURL(url); setSearchStatus(`This browser could not read ${file.name}. Try a locally downloaded MP4 or MOV. No private upload started.`); };
     probe.src = url;
+    probe.load();
   }
 
   function reuseRecentVideo(video: RecentStudioVideo, restoredRange?: { end: number; start: number }) {
@@ -10060,7 +10098,7 @@ function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseP
     const end = Math.min(Math.max(start + 0.1, restoredRange?.end ?? Math.min(projectDuration, video.durationSeconds)), video.durationSeconds);
     setSelectedClipId(null); setSharedVideo(null); setPreviewingClipId(null); setTrimRange({ end, start }); setActiveTrimVersion((current) => current + 1);
     if (!restoredRange && video.durationSeconds <= projectDuration) confirmLocalTrim({ end, id: video.id, start });
-    setSearchStatus("Recent local video restored. It remains only on this device until private upload is enabled.");
+    setSearchStatus("Device copy restored. Shared copies are listed in Shared uploads.");
   }
 
   function confirmLocalTrim(trim: { end: number; id: string; start: number }) {
@@ -10097,7 +10135,7 @@ function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseP
           <form className="studio-search" onSubmit={search}><label><span className="visually-hidden">Search Pixabay video clips</span><input maxLength={100} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${orientation} video`} type="search" value={query} /></label><button disabled={isSearching || !query.trim()} type="submit">{isSearching ? "Searching…" : "Search"}</button></form>
           <div className="studio-video-upload"><div><strong>Use your own video</strong><small>MP4, MOV, or WebM · {orientation} · up to 500 MB</small></div><input accept="video/*,.mp4,.mov,.m4v,.webm" aria-label={`Upload a ${orientation} video`} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) chooseLocalVideo(file); }} ref={uploadInputRef} type="file" /><button onClick={() => uploadInputRef.current?.click()} type="button"><Upload aria-hidden size={14} />Choose video</button></div>
           {recentVideos.length ? <section className="studio-recent-videos" aria-label="Recent local uploads"><div><strong>Recent uploads</strong><small>Saved on this device</small></div>{recentVideos.map((video) => <button key={video.id} onClick={() => reuseRecentVideo(video)} type="button"><Video aria-hidden size={13} /><span>{video.fileName}</span><small>{formatStudioDuration(video.durationSeconds)}</small></button>)}</section> : null}
-          {sharedVideoAssets.length ? <section className="studio-recent-videos" aria-label="Shared workspace uploads"><div><strong>Shared uploads</strong><small>Available on every device</small></div>{sharedVideoAssets.map((asset) => <button key={asset.id} onClick={() => { setLocalVideo(null); setSelectedClipId(null); setSharedVideo(asset); setTrimRange({ end: Math.min(projectDuration, asset.durationSeconds), start: 0 }); setActiveTrimVersion((current) => current + 1); }} type="button"><Video aria-hidden size={13} /><span>{asset.fileName}</span><small>{formatStudioDuration(asset.durationSeconds)}</small></button>)}</section> : null}
+          {sharedVideoAssets.length ? <section className="studio-recent-videos" aria-label="Shared workspace uploads"><div><strong>Shared uploads</strong><small>Available on every device</small></div>{sharedVideoAssets.map((asset) => <button key={asset.id} onClick={() => { setLocalVideo(null); setSelectedClipId(null); setSharedVideo(asset); setTrimRange({ end: Math.min(projectDuration, asset.durationSeconds), start: 0 }); setActiveTrimVersion((current) => current + 1); }} type="button"><span className="studio-shared-upload-thumbnail" aria-hidden style={sharedVideoThumbnails[asset.id] ? { backgroundImage: `url(${sharedVideoThumbnails[asset.id]})` } : undefined}><Video size={13} /></span><span>{asset.fileName}</span><small>{formatStudioDuration(asset.durationSeconds)}</small></button>)}</section> : null}
           {searchStatus ? <p className="studio-export-notice" role="status">{searchStatus}</p> : null}
           <div className="studio-clip-grid">
             {results.map((clip) => {
@@ -10116,11 +10154,11 @@ function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseP
 
         <section className="studio-selected-clips" aria-labelledby="studio-selected-clips-heading">
           <div className="studio-panel-heading"><div><p className="eyebrow">Project sources</p><h3 id="studio-selected-clips-heading">Selected videos</h3></div><span>{selectedVideoCount} / 4</span></div>
-          <ol className="studio-selected-list">{confirmedLocalVideos.map(({ trim, video }, index) => { const isActive = localVideo?.id === video.id && Math.abs(trimRange.start - trim.start) <= 0.01 && Math.abs(trimRange.end - trim.end) <= 0.01; const record = recentVideos.find((candidate) => candidate.id === video.id); const thumbnailUrl = ("thumbnailUrl" in video ? video.thumbnailUrl : undefined) ?? localVideoThumbnails[video.id]; return <li className={isActive ? "is-active" : ""} key={`${video.id}:${trim.start}:${trim.end}`}><button aria-label={`Preview ${video.fileName}, ${formatStudioDuration(trim.start)} to ${formatStudioDuration(trim.end)}`} aria-pressed={isActive} className="studio-selected-video-card" disabled={!record} onClick={() => { if (record) reuseRecentVideo(record, trim); }} type="button"><span className="studio-selected-thumbnail" style={thumbnailUrl ? { backgroundImage: `url(${thumbnailUrl})` } : undefined} aria-hidden><b>{index + 1}</b></span><span><strong>{video.fileName}</strong><small>{formatStudioDuration(trim.start)}–{formatStudioDuration(trim.end)} · local</small></span><em>{formatStudioDuration(trim.end - trim.start)}</em></button><button aria-label={`Remove ${video.fileName} ${formatStudioDuration(trim.start)} to ${formatStudioDuration(trim.end)}`} onClick={() => { setConfirmedLocalTrims((current) => current.filter((candidate) => candidate.id !== trim.id || Math.abs(candidate.start - trim.start) > 0.01 || Math.abs(candidate.end - trim.end) > 0.01)); }} type="button">Remove</button></li>; })}{confirmedUploadedVideos.map(({ asset, snippet }, index) => { const isActive = sharedVideo?.id === asset.id && Math.abs(trimRange.start - snippet.start) <= 0.01 && Math.abs(trimRange.end - snippet.end) <= 0.01; return <li className={isActive ? "is-active" : ""} key={`upload:${asset.id}:${snippet.start}:${snippet.end}`}><button aria-label={`Preview ${asset.fileName}`} aria-pressed={isActive} className="studio-selected-video-card" onClick={() => { setLocalVideo(null); setSelectedClipId(null); setSharedVideo(asset); setTrimRange({ end: snippet.end, start: snippet.start }); setActiveTrimVersion((current) => current + 1); }} type="button"><span className="studio-selected-thumbnail" aria-hidden><b>{confirmedLocalVideos.length + index + 1}</b></span><span><strong>{asset.fileName}</strong><small>{formatStudioDuration(snippet.start)}–{formatStudioDuration(snippet.end)} · shared</small></span><em>{formatStudioDuration(snippet.end - snippet.start)}</em></button><button aria-label={`Remove ${asset.fileName}`} onClick={() => setConfirmedUploadedVideoSnippets((current) => current.filter((candidate) => candidate.assetId !== asset.id || Math.abs(candidate.start - snippet.start) > 0.01 || Math.abs(candidate.end - snippet.end) > 0.01))} type="button">Remove</button></li>; })}{confirmedPixabayClips.map((clip, index) => { const isActive = selectedClip?.id === clip.id; return <li className={isActive ? "is-active" : ""} key={`pixabay:${clip.id}`}><button aria-label={`Preview ${clip.tags}`} aria-pressed={isActive} className="studio-selected-video-card" onClick={() => { setResults((current) => current.some((candidate) => candidate.id === clip.id) ? current : [...current, clip]); setSelectedClipId(clip.id); setLocalVideo(null); setSharedVideo(null); }} type="button"><span className="studio-selected-thumbnail" style={{ backgroundImage: `url(${clip.previewUrl})` }} aria-hidden><b>{confirmedLocalVideos.length + confirmedUploadedVideos.length + index + 1}</b></span><span><strong>{clip.tags}</strong><small>via Pixabay</small></span><em>{formatStudioDuration(clip.durationSeconds)}</em></button><button aria-label={`Remove ${clip.tags}`} onClick={() => setConfirmedPixabayClips((current) => current.filter((candidate) => candidate.id !== clip.id))} type="button">Remove</button></li>; })}{Array.from({ length: Math.max(0, 4 - selectedVideoCount) }, (_, index) => <li className="studio-add-source-card" key={`available-source-${selectedVideoCount + index}`}><span aria-hidden>+</span><strong>Available slot</strong><small>Add a video snippet</small></li>)}</ol>
+          <ol className="studio-selected-list">{confirmedLocalVideos.map(({ trim, video }, index) => { const isActive = localVideo?.id === video.id && Math.abs(trimRange.start - trim.start) <= 0.01 && Math.abs(trimRange.end - trim.end) <= 0.01; const record = recentVideos.find((candidate) => candidate.id === video.id); const thumbnailUrl = ("thumbnailUrl" in video ? video.thumbnailUrl : undefined) ?? localVideoThumbnails[video.id]; return <li className={isActive ? "is-active" : ""} key={`${video.id}:${trim.start}:${trim.end}`}><button aria-label={`Preview ${video.fileName}, ${formatStudioDuration(trim.start)} to ${formatStudioDuration(trim.end)}`} aria-pressed={isActive} className="studio-selected-video-card" disabled={!record} onClick={() => { if (record) reuseRecentVideo(record, trim); }} type="button"><span className="studio-selected-thumbnail" style={thumbnailUrl ? { backgroundImage: `url(${thumbnailUrl})` } : undefined} aria-hidden><b>{index + 1}</b></span><span><strong>{video.fileName}</strong><small>{formatStudioDuration(trim.start)}–{formatStudioDuration(trim.end)} · local</small></span><em>{formatStudioDuration(trim.end - trim.start)}</em></button><button aria-label={`Remove ${video.fileName} ${formatStudioDuration(trim.start)} to ${formatStudioDuration(trim.end)}`} onClick={() => { setConfirmedLocalTrims((current) => current.filter((candidate) => candidate.id !== trim.id || Math.abs(candidate.start - trim.start) > 0.01 || Math.abs(candidate.end - trim.end) > 0.01)); }} type="button">Remove</button></li>; })}{confirmedUploadedVideos.map(({ asset, snippet }, index) => { const isActive = sharedVideo?.id === asset.id && Math.abs(trimRange.start - snippet.start) <= 0.01 && Math.abs(trimRange.end - snippet.end) <= 0.01; return <li className={isActive ? "is-active" : ""} key={`upload:${asset.id}:${snippet.start}:${snippet.end}`}><button aria-label={`Preview ${asset.fileName}`} aria-pressed={isActive} className="studio-selected-video-card" onClick={() => { setLocalVideo(null); setSelectedClipId(null); setSharedVideo(asset); setTrimRange({ end: snippet.end, start: snippet.start }); setActiveTrimVersion((current) => current + 1); }} type="button"><span className="studio-selected-thumbnail" style={sharedVideoThumbnails[asset.id] ? { backgroundImage: `url(${sharedVideoThumbnails[asset.id]})` } : undefined} aria-hidden><b>{confirmedLocalVideos.length + index + 1}</b></span><span><strong>{asset.fileName}</strong><small>{formatStudioDuration(snippet.start)}–{formatStudioDuration(snippet.end)} · shared</small></span><em>{formatStudioDuration(snippet.end - snippet.start)}</em></button><button aria-label={`Remove ${asset.fileName}`} onClick={() => setConfirmedUploadedVideoSnippets((current) => current.filter((candidate) => candidate.assetId !== asset.id || Math.abs(candidate.start - snippet.start) > 0.01 || Math.abs(candidate.end - snippet.end) > 0.01))} type="button">Remove</button></li>; })}{confirmedPixabayClips.map((clip, index) => { const isActive = selectedClip?.id === clip.id; return <li className={isActive ? "is-active" : ""} key={`pixabay:${clip.id}`}><button aria-label={`Preview ${clip.tags}`} aria-pressed={isActive} className="studio-selected-video-card" onClick={() => { setResults((current) => current.some((candidate) => candidate.id === clip.id) ? current : [...current, clip]); setSelectedClipId(clip.id); setLocalVideo(null); setSharedVideo(null); }} type="button"><span className="studio-selected-thumbnail" style={{ backgroundImage: `url(${clip.previewUrl})` }} aria-hidden><b>{confirmedLocalVideos.length + confirmedUploadedVideos.length + index + 1}</b></span><span><strong>{clip.tags}</strong><small>via Pixabay</small></span><em>{formatStudioDuration(clip.durationSeconds)}</em></button><button aria-label={`Remove ${clip.tags}`} onClick={() => setConfirmedPixabayClips((current) => current.filter((candidate) => candidate.id !== clip.id))} type="button">Remove</button></li>; })}{Array.from({ length: Math.max(0, 4 - selectedVideoCount) }, (_, index) => <li className="studio-add-source-card" key={`available-source-${selectedVideoCount + index}`}><span aria-hidden>+</span><strong>Available slot</strong><small>Add a video snippet</small></li>)}</ol>
         </section>
       </div>
 
-      <section className="studio-video-timeline" aria-label="Video assembly timeline"><div className="studio-timeline-heading"><div><p className="eyebrow">Video timeline</p><h3>Source preview</h3></div><span>{selectedDuration ? `${formatStudioDuration(0)} / ${formatStudioDuration(projectDuration)}` : "Select footage"}</span></div><div className="studio-timeline-ruler"><span>{formatStudioDuration(0)}</span><span>{formatStudioDuration(projectDuration / 3)}</span><span>{formatStudioDuration((projectDuration / 3) * 2)}</span><span>{formatStudioDuration(projectDuration)}</span></div><div className="studio-video-track"><span>Video</span><div>{videoTimelineSegments.map((segment, index) => <i key={`${segment.startSeconds}-${index}`} style={{ backgroundImage: timelineFrameUrl ? `linear-gradient(rgb(12 27 38 / .42), rgb(12 27 38 / .42)), url(${timelineFrameUrl})` : undefined, flexGrow: segment.durationSeconds }}><b>{localVideo?.fileName ?? selectedClip?.tags}</b><small>{formatStudioDuration(segment.startSeconds)}–{formatStudioDuration(segment.endSeconds)} · {formatStudioDuration(segment.durationSeconds)}</small></i>)}</div></div><div className="studio-video-audio-track"><span>Audio</span><div className="studio-timeline-waveform" aria-label={audioSnippet ? `${audioSnippet.title} waveform` : "No audio selected"}>{audioSnippet ? <><b>{audioSnippet.title}<small>{formatStudioDuration(audioSnippet.start)} – {formatStudioDuration(audioSnippet.end)}</small></b>{Array.from({ length: 96 }, (_, index) => <i aria-hidden key={index} style={{ height: `${24 + ((index * 37 + audioSnippet.title.length * 13) % 68)}%` }} />)}</> : null}</div></div></section>
+      <section className="studio-video-timeline" aria-label="Video assembly timeline"><div className="studio-timeline-heading"><div><p className="eyebrow">Video timeline</p><h3>Source preview</h3></div><span>{selectedDuration ? `${formatStudioDuration(0)} / ${formatStudioDuration(projectDuration)}` : "Select footage"}</span></div><div className="studio-timeline-ruler"><span>{formatStudioDuration(0)}</span><span>{formatStudioDuration(projectDuration / 3)}</span><span>{formatStudioDuration((projectDuration / 3) * 2)}</span><span>{formatStudioDuration(projectDuration)}</span></div><div className="studio-video-track"><span>Video</span><div>{videoTimelineSegments.map((segment, index) => <i key={`${segment.startSeconds}-${index}`} style={{ backgroundImage: timelineFrameUrl ? `linear-gradient(rgb(12 27 38 / .42), rgb(12 27 38 / .42)), url(${timelineFrameUrl})` : undefined, flexGrow: segment.durationSeconds }}><b>{localVideo?.fileName ?? sharedVideo?.fileName ?? selectedClip?.tags}</b><small>{formatStudioDuration(segment.startSeconds)}–{formatStudioDuration(segment.endSeconds)} · {formatStudioDuration(segment.durationSeconds)}</small></i>)}</div></div><div className="studio-video-audio-track"><span>Audio</span><div className="studio-timeline-waveform" aria-label={audioSnippet ? `${audioSnippet.title} waveform` : "No audio selected"}>{audioSnippet ? <><b>{audioSnippet.title}<small>{formatStudioDuration(audioSnippet.start)} – {formatStudioDuration(audioSnippet.end)}</small></b>{Array.from({ length: 96 }, (_, index) => <i aria-hidden key={index} style={{ height: `${24 + ((index * 37 + audioSnippet.title.length * 13) % 68)}%` }} />)}</> : null}</div></div></section>
     </section>
   );
 }
@@ -10154,25 +10192,11 @@ function createVideoTimelineSegments(sourceDuration: number, projectDuration: nu
 }
 
 function captureVideoFrame(video: HTMLVideoElement) {
-  if (!video.videoWidth || !video.videoHeight) return null;
-  const canvas = document.createElement("canvas");
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  const context = canvas.getContext("2d");
-  if (!context) return null;
-  context.drawImage(video, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.72);
+  return captureStudioVideoFrame(video);
 }
 
 function captureVideoFrameFromUrl(url: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    const video = document.createElement("video");
-    video.muted = true;
-    video.preload = "auto";
-    video.onloadeddata = () => resolve(captureVideoFrame(video));
-    video.onerror = () => resolve(null);
-    video.src = url;
-  });
+  return captureStudioVideoFrameFromUrl(url);
 }
 
 function StudioImageOverlayEditor({ onChooseProcess }: { onChooseProcess: (process: string) => void }) {
