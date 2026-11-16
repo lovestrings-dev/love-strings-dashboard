@@ -9,7 +9,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ job
     const { serviceClient, workspaceId } = await requireWorkspaceAccess(request);
     const { jobId } = await context.params;
     if (!isStudioUuid(jobId)) return NextResponse.json({ error: "Invalid render." }, { status: 400 });
-    const { data: job, error } = await serviceClient.from("studio_render_jobs").select("status").eq("workspace_id", workspaceId).eq("id", jobId).maybeSingle();
+    const { data: job, error } = await serviceClient.from("studio_render_jobs").select("status").eq("workspace_id", workspaceId).eq("id", jobId).is("deleted_at", null).maybeSingle();
     if (error) throw error;
     if (!job || job.status !== "succeeded") return NextResponse.json({ error: "Rendered video is not available." }, { status: 404 });
     const { data: asset, error: assetError } = await serviceClient.from("studio_rendered_assets").select("object_path").eq("workspace_id", workspaceId).eq("render_job_id", jobId).maybeSingle();

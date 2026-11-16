@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { studioGoogleAuthClient, studioRenderBucketName, studioStorage } from "./adstudio-storage";
 
 type Operation = { name?: string; done?: boolean; error?: { message?: string }; response?: { succeededCount?: number; conditions?: Array<{ type?: string; state?: string }> } };
-export type StudioRenderJob = { id: string; workspace_id: string; studio_project_id: string; status: string; provider_execution_id: string | null; output_object_path: string; failure_message: string | null; created_at: string };
+export type StudioRenderJob = { id: string; workspace_id: string; studio_project_id: string; status: string; provider_execution_id: string | null; output_object_path: string; failure_message: string | null; created_at: string; result_details?: { audioTitle: string; audioStart: number; audioEnd: number; videoName: string; videoStart: number; videoEnd: number; durationSeconds: number }; deleted_at?: string | null };
 
 function cloudRunConfig() {
   const project = process.env.ADSTUDIO_GCP_PROJECT_ID;
@@ -56,5 +56,5 @@ export async function refreshStudioRenderJob(client: SupabaseClient, job: Studio
 }
 
 export function toStudioRenderReply(job: StudioRenderJob) {
-  return { id: job.id, status: job.status, error: job.failure_message, createdAt: job.created_at, previewUrl: job.status === "succeeded" ? `/api/studio/render-jobs/${job.id}/preview` : null };
+  return { id: job.id, status: job.status, error: job.failure_message, createdAt: job.created_at, details: job.result_details ?? null, previewUrl: job.status === "succeeded" && !job.deleted_at ? `/api/studio/render-jobs/${job.id}/preview` : null };
 }

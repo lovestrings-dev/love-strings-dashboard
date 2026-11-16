@@ -26,12 +26,12 @@ const client = { from(table) {
   const filters = [];
   let operation = "read", payload;
   const query = {
-    select() { return query; }, order() { return query; }, limit() { return query; },
+    select() { return query; }, is(k, v) { filters.push((r) => (r[k] ?? null) === v); return query; }, order() { return query; }, limit() { return query; },
     eq(k, v) { filters.push((r) => r[k] === v); return query; }, in(k, vs) { filters.push((r) => vs.includes(r[k])); return query; },
     insert(value) { operation = "insert"; payload = value; return query; },
     update(value) { operation = "update"; payload = value; return query; },
     async result(single) {
-      let records = table === "studio_projects" ? [{ id, workspace_id: workspaceId, production_song_id: id }] : table === "studio_audio_assets" ? [{ id, studio_project_id: id, workspace_id: workspaceId, asset_kind: "song-source", is_current: true, cloudinary_url: "https://res.cloudinary.com/test-cloud/video/upload/test.mp3" }] : table === "studio_workspace_video_assets" && videoAvailable ? [{ id: videoId, workspace_id: workspaceId, object_path: `workspaces/${workspaceId}/studio/uploads/${videoId}.mov`, duration_seconds: 2.733 }] : table === "studio_render_jobs" ? rows : [];
+      let records = table === "studio_projects" ? [{ id, title: "Intro", workspace_id: workspaceId, production_song_id: id }] : table === "studio_audio_assets" ? [{ id, studio_project_id: id, workspace_id: workspaceId, asset_kind: "song-source", is_current: true, cloudinary_url: "https://res.cloudinary.com/test-cloud/video/upload/test.mp3" }] : table === "studio_workspace_video_assets" && videoAvailable ? [{ id: videoId, workspace_id: workspaceId, object_path: `workspaces/${workspaceId}/studio/uploads/${videoId}.mov`, original_file_name: "video.mov", duration_seconds: 2.733 }] : table === "studio_render_jobs" ? rows : [];
       records = records.filter((r) => filters.every((filter) => filter(r)));
       if (operation === "insert") { const r = { ...payload, created_at: new Date().toISOString(), failure_message: null }; rows.push(r); records = [r]; }
       if (operation === "update") records.forEach((r) => Object.assign(r, payload));
@@ -53,6 +53,12 @@ const stubs = {
 const compiled = ts.transpileModule(fs.readFileSync(new URL("../app/api/studio/render-jobs/route.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
 const exports = {};
 new Function("require", "exports", compiled)((name) => stubs[name] ?? require(name), exports);
+const deleteExports = {};
+const deleteCompiled = ts.transpileModule(fs.readFileSync(new URL("../app/api/studio/render-jobs/[jobId]/route.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+new Function("require", "exports", deleteCompiled)((name) => stubs[name] ?? require(name), deleteExports);
+const previewExports = {};
+const previewCompiled = ts.transpileModule(fs.readFileSync(new URL("../app/api/studio/render-jobs/[jobId]/preview/route.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+new Function("require", "exports", previewCompiled)((name) => stubs[name] ?? require(name), previewExports);
 const originalFetch = globalThis.fetch;
 const oldEnabled = process.env.ADSTUDIO_RENDER_ENABLED;
 const oldCloud = process.env.CLOUDINARY_CLOUD_NAME;
@@ -88,6 +94,28 @@ try {
   assert.equal((await exports.POST(request())).status, 200);
   assert.equal(dispatched, 1, "Same request ID must not launch a second render");
   assert.equal((await exports.POST(request(undefined, { ...body, requestId: videoId }))).status, 409);
+  assert.equal(rows[0].result_details.audioTitle, "Intro");
+  assert.equal(rows[0].result_details.videoName, "video.mov");
+  const context = { params: Promise.resolve({ jobId: id }) };
+  assert.equal((await deleteExports.DELETE(request("https://other.test"), context)).status, 401);
+  role = "viewer";
+  assert.equal((await deleteExports.DELETE(request(), context)).status, 403);
+  role = "admin";
+  assert.equal((await deleteExports.DELETE(request(), context)).status, 409, "Running jobs cannot be deleted");
+  rows[0].status = "succeeded";
+  const originalWorkspace = rows[0].workspace_id;
+  rows[0].workspace_id = videoId;
+  assert.equal((await deleteExports.DELETE(request(), context)).status, 404, "Other workspace is inaccessible");
+  rows[0].workspace_id = originalWorkspace;
+  assert.equal((await deleteExports.DELETE(request(), context)).status, 200);
+  assert.ok(rows[0].deleted_at);
+  assert.equal(rows.length, 1, "Soft delete preserves audit row");
+  assert.equal((await deleteExports.DELETE(request(), context)).status, 200, "Delete is idempotent");
+  assert.equal((await previewExports.GET(request(), context)).status, 404, "Deleted result cannot mint preview links");
+  assert.equal((await exports.POST(request())).status, 410, "Deleted request must not relaunch");
+  assert.equal(dispatched, 1);
+  const history = await exports.GET({ nextUrl: new URL("https://artistdeck.test/api/studio/render-jobs") });
+  assert.deepEqual((await history.json()).jobs, [], "Deleted results are absent from history");
   rows = []; saves = [];
   console.log("Render authorization, activation, workspace resolution, manifest and idempotency tests passed.");
 } finally {

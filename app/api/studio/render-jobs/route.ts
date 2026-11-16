@@ -6,16 +6,16 @@ import { isStudioUuid, renderObjectPaths, validateRenderRequest } from "@/lib/st
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
-const jobColumns = "id,workspace_id,studio_project_id,status,provider_execution_id,output_object_path,failure_message,created_at";
+const jobColumns = "id,workspace_id,studio_project_id,status,provider_execution_id,output_object_path,failure_message,created_at,result_details,deleted_at";
 
 export async function GET(request: NextRequest) {
   try {
     const { serviceClient, workspaceId, role } = await requireWorkspaceAccess(request);
     const id = request.nextUrl.searchParams.get("id");
     if (id && !isStudioUuid(id)) return NextResponse.json({ error: "Invalid render job." }, { status: 400 });
-    let query = serviceClient.from("studio_render_jobs").select(jobColumns).eq("workspace_id", workspaceId);
+    let query = serviceClient.from("studio_render_jobs").select(jobColumns).eq("workspace_id", workspaceId).is("deleted_at", null);
     if (id) query = query.eq("id", id);
-    const { data, error } = await query.order("created_at", { ascending: false }).limit(id ? 1 : 8);
+    const { data, error } = await query.order("created_at", { ascending: false }).limit(id ? 1 : 40);
     if (error) throw error;
     // Refresh at most one active operation, including after a browser reload.
     const jobs = [];
@@ -38,16 +38,17 @@ export async function POST(request: NextRequest) {
     if (!input) return NextResponse.json({ error: "Choose one audio snippet covering the output duration and one shared video snippet." }, { status: 400 });
     const { data: previous, error: previousError } = await serviceClient.from("studio_render_jobs").select(jobColumns).eq("workspace_id", workspaceId).eq("id", input.requestId).maybeSingle();
     if (previousError) throw previousError;
+    if (previous?.deleted_at) return NextResponse.json({ error: "This render was deleted. Start a new batch." }, { status: 410 });
     if (previous) return NextResponse.json({ job: toStudioRenderReply(previous as StudioRenderJob) });
     const { data: active, error: activeError } = await serviceClient.from("studio_render_jobs").select("id").eq("workspace_id", workspaceId).in("status", ["queued", "running"]).limit(1);
     if (activeError) throw activeError;
     if (active?.length) return NextResponse.json({ error: "A video is already being generated in this workspace. Refresh its status first." }, { status: 409 });
-    const { data: project, error: projectError } = await serviceClient.from("studio_projects").select("id").eq("workspace_id", workspaceId).eq("production_song_id", input.songId).maybeSingle();
+    const { data: project, error: projectError } = await serviceClient.from("studio_projects").select("id,title").eq("workspace_id", workspaceId).eq("production_song_id", input.songId).maybeSingle();
     if (projectError) throw projectError;
     if (!project) return NextResponse.json({ error: "The chosen audio is not available in this workspace." }, { status: 404 });
     const [{ data: audio, error: audioError }, { data: video, error: videoError }] = await Promise.all([
       serviceClient.from("studio_audio_assets").select("id,cloudinary_url").eq("workspace_id", workspaceId).eq("studio_project_id", project.id).eq("asset_kind", "song-source").eq("is_current", true).maybeSingle(),
-      serviceClient.from("studio_workspace_video_assets").select("id,object_path,duration_seconds").eq("workspace_id", workspaceId).eq("id", input.videoAssetId).maybeSingle()
+      serviceClient.from("studio_workspace_video_assets").select("id,object_path,duration_seconds,original_file_name").eq("workspace_id", workspaceId).eq("id", input.videoAssetId).maybeSingle()
     ]);
     if (audioError || videoError) throw audioError ?? videoError;
     if (!audio || !video || input.videoEnd > Number(video.duration_seconds) + 0.05 || !video.object_path.startsWith(`workspaces/${workspaceId}/studio/uploads/`)) return NextResponse.json({ error: "The chosen source or trim is unavailable." }, { status: 400 });
@@ -55,7 +56,8 @@ export async function POST(request: NextRequest) {
     const audioUrl = new URL(audio.cloudinary_url);
     if (audioUrl.protocol !== "https:" || audioUrl.hostname !== "res.cloudinary.com" || audioUrl.username || audioUrl.password || audioUrl.port || !process.env.CLOUDINARY_CLOUD_NAME || audioUrl.pathname.split("/")[1] !== process.env.CLOUDINARY_CLOUD_NAME) throw new Error("Audio source is not managed by this Studio.");
     const paths = renderObjectPaths(workspaceId, input.requestId);
-    const { data: reserved, error: reserveError } = await serviceClient.from("studio_render_jobs").insert({ id: input.requestId, workspace_id: workspaceId, studio_project_id: project.id, requested_by: user.id, status: "queued", manifest_object_path: paths.manifest, output_object_path: paths.output }).select(jobColumns).single();
+    const resultDetails = { audioTitle: project.title, audioStart: input.audioStart, audioEnd: input.audioEnd, videoName: video.original_file_name, videoStart: input.videoStart, videoEnd: input.videoEnd, durationSeconds: input.durationSeconds };
+    const { data: reserved, error: reserveError } = await serviceClient.from("studio_render_jobs").insert({ id: input.requestId, workspace_id: workspaceId, studio_project_id: project.id, requested_by: user.id, status: "queued", manifest_object_path: paths.manifest, output_object_path: paths.output, result_details: resultDetails }).select(jobColumns).single();
     if (reserveError?.code === "23505") return NextResponse.json({ error: "A render request already exists. Refresh the render list." }, { status: 409 });
     if (reserveError) throw reserveError;
     reservedId = input.requestId;
