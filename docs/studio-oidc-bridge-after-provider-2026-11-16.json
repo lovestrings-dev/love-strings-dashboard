@@ -1,0 +1,18 @@
+{
+  "attributeCondition": "assertion.sub == 'owner:love-strings-dashboard:project:love-strings-dashboard:environment:production'",
+  "attributeMapping": {
+    "attribute.environment": "assertion.environment",
+    "attribute.owner": "assertion.owner",
+    "attribute.project": "assertion.project",
+    "google.subject": "assertion.sub"
+  },
+  "displayName": "ArtistDeck production Vercel",
+  "name": "projects/1023633877337/locations/global/workloadIdentityPools/adstudio-vercel/providers/vercel",
+  "oidc": {
+    "allowedAudiences": [
+      "https://vercel.com/love-strings-dashboard"
+    ],
+    "issuerUri": "https://oidc.vercel.com"
+  },
+  "state": "ACTIVE"
+}

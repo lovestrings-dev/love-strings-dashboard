@@ -1,0 +1,18 @@
+{
+  "bindings": [
+    {
+      "members": [
+        "serviceAccount:adstudio-service@project-eda6605c-73e6-4361-9ad.iam.gserviceaccount.com"
+      ],
+      "role": "roles/iam.serviceAccountTokenCreator"
+    },
+    {
+      "members": [
+        "principal://iam.googleapis.com/projects/1023633877337/locations/global/workloadIdentityPools/adstudio-vercel/subject/owner:love-strings-dashboard:project:love-strings-dashboard:environment:production"
+      ],
+      "role": "roles/iam.workloadIdentityUser"
+    }
+  ],
+  "etag": "BwZgZ33uOrw=",
+  "version": 1
+}
