@@ -91,6 +91,7 @@
     "test:production-snapshot-reconciliation": "node --experimental-strip-types scripts/test-production-snapshot-reconciliation.mjs",
     "test:pull-to-refresh": "node scripts/test-pull-to-refresh.mjs",
     "test:studio-composition": "node --experimental-strip-types scripts/test-studio-composition.mjs",
+    "test:studio-storage-signing": "node --experimental-strip-types scripts/test-studio-storage-signing.mjs",
     "test:studio-pixabay": "node --experimental-strip-types scripts/test-studio-pixabay.mjs"
   },
   "dependencies": {

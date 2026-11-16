@@ -3,6 +3,7 @@ import { ExternalAccountClient } from "google-auth-library";
 import { getVercelOidcToken } from "@vercel/oidc";
 
 const storageScope = "https://www.googleapis.com/auth/devstorage.read_write";
+const signingScope = "https://www.googleapis.com/auth/iam";
 
 export function studioStagingBucketName() {
   const bucket = process.env.ADSTUDIO_STAGING_BUCKET;
@@ -25,7 +26,9 @@ export async function studioStorage() {
     subject_token_supplier: { getSubjectToken: () => getVercelOidcToken() },
     subject_token_type: "urn:ietf:params:oauth:token-type:jwt",
     service_account_impersonation_url: `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${serviceAccount}:generateAccessToken`,
-    scopes: [storageScope],
+    // Storage calls IAM signBlob with the impersonated token for V4 URLs.
+    // A storage-only token cannot sign, even with the Token Creator IAM role.
+    scopes: [storageScope, signingScope],
     token_url: "https://sts.googleapis.com/v1/token",
     type: "external_account"
   });
