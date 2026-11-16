@@ -119,7 +119,7 @@ function Mixer({ audioSnippets, durationSeconds, orientation, workspaceId }: Pro
         // Persist before the network call, so closing this page cannot lose the
         // idempotency key of a request that reached the server.
         localStorage.setItem(storageKey, JSON.stringify(batch));
-        const response = await fetch("/api/studio/render-jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(pair.request) });
+        const response = await fetch("/api/studio/render-jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...pair.request, batchId: batch!.id, startBatch: batch!.next === 0 }) });
         const payload = await response.json() as { job?: RenderJob; error?: string };
         if (!response.ok || !payload.job) throw new Error(payload.error ?? "This pair could not start.");
         if (!mounted.current) return;
@@ -140,10 +140,11 @@ function Mixer({ audioSnippets, durationSeconds, orientation, workspaceId }: Pro
 
   function generate() {
     if (!canSubmit) return;
+    if (!window.confirm("Generate a new batch? Previous cloud outputs in this workspace will be permanently deleted. Download any results you want to keep first. Your source audio and videos stay available.")) return;
     try {
       const plan = createRenderBatch(selectedAudio, selectedVideos, durationSeconds, () => crypto.randomUUID());
       localStorage.setItem(storageKey, JSON.stringify(plan));
-      setBatch(plan); setNotice(""); setDeletedIds([]);
+      setBatch(plan); setNotice("Starting this batch removes previous cloud outputs from this workspace. Download any results you want to keep first."); setDeletedIds([]);
     } catch (error) { setNotice(error instanceof Error ? error.message : "The batch could not be prepared."); }
   }
 
@@ -185,6 +186,6 @@ function Mixer({ audioSnippets, durationSeconds, orientation, workspaceId }: Pro
       {notice ? <p className="studio-mixer-notice" role="status">{notice}</p> : null}
     </div><div className="studio-mixer-result"><div className="studio-mixer-section-heading"><div><p className="eyebrow">Generated combinations</p><h3>Preview</h3></div><span>{completedCount} ready</span></div><div className="studio-batch-previews">{slots.map((slot, index) => <article className="studio-batch-preview" key={slot.id}><header><strong>Video {index + 1}</strong><span className={`studio-render-status is-${slot.job?.status ?? "queued"}`}>{slot.job?.status ?? "Waiting"}</span></header><p>{slot.title}</p>{slot.job?.previewUrl ? <><video controls playsInline preload="metadata" src={`${slot.job.previewUrl}#t=0.01`} aria-label={`Generated video ${index + 1}: ${slot.title}`} /><div className="studio-result-actions"><a href={slot.job.previewUrl}>Open</a><a href={`${slot.job.previewUrl}?download=1`}>Download MP4</a></div></> : <div className="studio-batch-placeholder">{slot.job?.error ?? (active(slot.job ?? { status: "" } as RenderJob) ? "Rendering this pair…" : "Waiting for this pair")}</div>}{slot.job && !active(slot.job) && canDelete ? <button className="studio-render-delete" type="button" onClick={() => setDeleteId(slot.id)}>Delete result</button> : null}</article>)}</div>{!slots.length ? <div className="studio-mixer-empty"><strong>Your generated videos will appear here</strong><small>Select up to two audio excerpts and two videos to create four combinations.</small></div> : null}</div></div>
     <section className="studio-render-history" aria-label="Render history"><div className="studio-mixer-section-heading"><div><p className="eyebrow">Queue activity</p><h3>Render history</h3></div><span>{jobs.length} renders</span></div>{jobs.length ? <ul>{jobs.map((job) => <li key={job.id}><div><strong className={`studio-render-status is-${job.status}`}>{job.status}</strong><span>{job.details ? `${job.details.audioTitle} ${times(job.details.audioStart, job.details.audioEnd)} × ${job.details.videoName}` : new Date(job.createdAt).toLocaleString()}</span></div>{job.error ? <p>{job.error}</p> : null}<div>{job.previewUrl ? <a href={`${job.previewUrl}?download=1`}>Download MP4</a> : null}{!active(job) && canDelete ? <button className="studio-render-delete" type="button" aria-label={`Delete render ${job.id}`} onClick={() => setDeleteId(job.id)}>Delete</button> : null}</div></li>)}</ul> : <div className="studio-history-empty">No generated results yet.</div>}</section>
-    {deleteId ? <div className="studio-delete-confirm" role="alertdialog" aria-modal="true" aria-labelledby="studio-delete-title"><div><h3 id="studio-delete-title">Delete generated result?</h3><p>This removes the result from Preview and history. Your audio and source videos stay available.</p><button type="button" disabled={deleting} onClick={() => void deleteResult()}>{deleting ? "Deleting…" : "Delete result"}</button><button type="button" disabled={deleting} autoFocus onClick={() => setDeleteId(null)}>Keep result</button></div></div> : null}
+    {deleteId ? <div className="studio-delete-confirm" role="alertdialog" aria-modal="true" aria-labelledby="studio-delete-title"><div><h3 id="studio-delete-title">Delete generated result?</h3><p>This permanently deletes the generated cloud video and removes it from Preview and history. Your audio and source videos stay available.</p><button type="button" disabled={deleting} onClick={() => void deleteResult()}>{deleting ? "Deleting…" : "Delete result"}</button><button type="button" disabled={deleting} autoFocus onClick={() => setDeleteId(null)}>Keep result</button></div></div> : null}
   </section>;
 }

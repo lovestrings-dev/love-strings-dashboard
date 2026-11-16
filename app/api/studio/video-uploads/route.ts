@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { studioStagingBucketName, studioStorage, workspaceVideoObjectPath } from "@/lib/server/adstudio-storage";
 import { requireWorkspaceAccess, WorkspaceAccessError } from "@/lib/server/workspace-owner";
+import { canManageStudioRenders } from "@/lib/server/studio-render-access";
 
 export const runtime = "nodejs";
 
@@ -9,12 +10,12 @@ type UploadRequest = { action?: "complete" | "sign"; assetId?: unknown; duration
 
 export async function GET(request: NextRequest) {
   try {
-    const { serviceClient, workspaceId } = await requireWorkspaceAccess(request);
+    const { serviceClient, workspaceId, user, role } = await requireWorkspaceAccess(request);
     const { data, error } = await serviceClient.from("studio_workspace_video_assets")
       .select("id, original_file_name, mime_type, byte_size, duration_seconds, width, height, created_at")
-      .eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(12);
+      .eq("workspace_id", workspaceId).is("deleted_at", null).order("created_at", { ascending: false }).limit(100);
     if (error) throw error;
-    return NextResponse.json({ assets: (data ?? []).map(toAsset) });
+    return NextResponse.json({ assets: (data ?? []).map(toAsset), canDelete: canManageStudioRenders(user, role) }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) { return errorReply(error); }
 }
 

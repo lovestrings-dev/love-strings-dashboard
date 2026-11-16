@@ -1,4 +1,6 @@
 export type StudioRenderRequest = {
+  batchId?: string;
+  startBatch?: boolean;
   requestId: string;
   songId: string;
   audioSourceUrl: string;
@@ -15,6 +17,7 @@ export function isStudioUuid(value: unknown): value is string {
 export function validateRenderRequest(value: unknown): StudioRenderRequest | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const v = value as Record<string, unknown>;
+  if (v.batchId !== undefined && (!isStudioUuid(v.batchId) || typeof v.startBatch !== "boolean")) return null;
   if (![v.requestId, v.songId, v.videoAssetId].every(isStudioUuid)) return null;
   if (typeof v.audioSourceUrl !== "string" || v.audioSourceUrl.length > 2048 || !v.audioSourceUrl.startsWith("https://")) return null;
   for (const field of ["audioStart", "audioEnd", "videoStart", "videoEnd", "durationSeconds"]) {
@@ -22,7 +25,8 @@ export function validateRenderRequest(value: unknown): StudioRenderRequest | nul
   }
   const r = v as unknown as StudioRenderRequest;
   if (!Number.isInteger(r.durationSeconds) || r.durationSeconds < 1 || r.durationSeconds > 180 || r.audioEnd <= r.audioStart || r.videoEnd <= r.videoStart || r.audioEnd - r.audioStart < r.durationSeconds - 0.05) return null;
-  return Object.fromEntries(Object.keys({ requestId: 0, songId: 0, audioSourceUrl: 0, audioStart: 0, audioEnd: 0, videoAssetId: 0, videoStart: 0, videoEnd: 0, durationSeconds: 0 }).map((key) => [key, v[key]])) as StudioRenderRequest;
+  const result = Object.fromEntries(Object.keys({ requestId: 0, songId: 0, audioSourceUrl: 0, audioStart: 0, audioEnd: 0, videoAssetId: 0, videoStart: 0, videoEnd: 0, durationSeconds: 0 }).map((key) => [key, v[key]])) as StudioRenderRequest;
+  return v.batchId === undefined ? result : { ...result, batchId: v.batchId as string, startBatch: v.startBatch as boolean };
 }
 
 export function renderObjectPaths(workspaceId: string, renderId: string) {

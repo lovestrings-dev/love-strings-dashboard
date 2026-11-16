@@ -8,7 +8,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ass
   try {
     const { assetId } = await context.params;
     const { serviceClient, workspaceId } = await requireWorkspaceAccess(request);
-    const { data, error } = await serviceClient.from("studio_workspace_video_assets").select("object_path, mime_type").eq("workspace_id", workspaceId).eq("id", assetId).maybeSingle();
+    const { data, error } = await serviceClient.from("studio_workspace_video_assets").select("object_path, mime_type").eq("workspace_id", workspaceId).eq("id", assetId).is("deleted_at", null).maybeSingle();
     if (error) throw error;
     if (!data) return NextResponse.json({ error: "Studio video was not found." }, { status: 404 });
     const storage = await studioStorage();

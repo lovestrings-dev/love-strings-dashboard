@@ -11984,3 +11984,7 @@ h2 {
 .studio-delete-confirm button { margin: 12px 12px 0 0; padding: 9px 12px; }
 @media (max-width: 900px) { .studio-batch-layout { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 420px) { .studio-batch-sources { grid-template-columns: minmax(0, 1fr); } .studio-batch-previews { gap: 7px; } .studio-batch-preview { padding: 7px; } .studio-batch-preview header { flex-wrap: wrap; } }
+.studio-shared-upload-row { display: flex; align-items: center; gap: 8px; }
+.studio-recent-videos .studio-shared-upload-row > button:first-child { display: flex; align-items: center; flex: 1; min-width: 0; gap: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--preview-inset); color: var(--text); text-align: left; }
+.studio-shared-upload-row > button:first-child > span:nth-child(2) { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.studio-shared-upload-row .studio-render-delete { flex: 0 0 auto; margin: 0; }

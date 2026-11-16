@@ -11,7 +11,7 @@ const id = "11111111-1111-4111-8111-111111111111";
 // Existing Love Strings workspace uses a PostgreSQL UUID with legacy version bits.
 const workspaceId = "00000000-0000-0000-0000-000000000001";
 const videoId = "33333333-3333-4333-8333-333333333333";
-const body = { requestId: id, songId: id, audioSourceUrl: "https://res.cloudinary.com/test-cloud/video/upload/test.mp3", audioStart: 5, audioEnd: 20, videoAssetId: videoId, videoStart: 0, videoEnd: 2.733, durationSeconds: 15 };
+const body = { batchId: "44444444-4444-4444-8444-444444444444", startBatch: true, requestId: id, songId: id, audioSourceUrl: "https://res.cloudinary.com/test-cloud/video/upload/test.mp3", audioStart: 5, audioEnd: 20, videoAssetId: videoId, videoStart: 0, videoEnd: 2.733, durationSeconds: 15 };
 assert.deepEqual(validateRenderRequest(body), body);
 for (const invalid of [{ audioStart: NaN }, { videoEnd: Infinity }, { durationSeconds: 181 }, { audioEnd: 6 }, { videoEnd: 0 }, { videoAssetId: "../other" }]) assert.equal(validateRenderRequest({ ...body, ...invalid }), null);
 assert.throws(() => renderObjectPaths("../other", id));
@@ -49,7 +49,10 @@ const client = { from(table) {
 } };
 class AccessError extends Error { status = 401; }
 const storage = { bucket(bucket) { return { file(path) { return { getMetadata: async () => [{ size: 10 }], getSignedUrl: async () => ["https://example.test/private-output.mp4"], save: async (value) => saves.push({ bucket, path, value: String(value) }) }; } }; } };
+let purgeFailure = false;
+let purges = 0;
 const stubs = {
+  "@/lib/server/studio-media-retention": { purgePreviousStudioOutputs: async () => { purges++; if (purgeFailure) throw new Error("Cleanup failed"); }, deleteStudioRenderObject: async () => {} },
   "@/lib/server/studio-render-access": { canManageStudioRenders },
   "@/lib/server/workspace-owner": { WorkspaceAccessError: AccessError, requireWorkspaceAccess: async () => { if (!authenticated) throw new AccessError("Sign in required"); return { serviceClient: client, workspaceId, role, user: { id, email, email_confirmed_at: confirmed } }; } },
   "@/lib/server/adstudio-storage": { studioStagingBucketName: () => "stage", studioRenderBucketName: () => "renders", studioStorage: async () => storage },
@@ -144,6 +147,12 @@ try {
   assert.equal((await previewExports.GET(request(), context)).status, 404, "Deleted result cannot mint preview links");
   assert.equal((await exports.POST(request())).status, 410, "Deleted request must not relaunch");
   assert.equal(dispatched, 1);
+  assert.equal(purges, 1);
+  rows = []; purgeFailure = true;
+  assert.equal((await exports.POST(request(undefined, { ...body, requestId: videoId }))).status, 503);
+  assert.equal(dispatched, 1, "Cleanup failure must prevent another cloud execution");
+  assert.equal(rows[0].status, "failed");
+  rows = [];
   const history = await exports.GET({ nextUrl: new URL("https://artistdeck.test/api/studio/render-jobs") });
   assert.deepEqual((await history.json()).jobs, [], "Deleted results are absent from history");
   rows = []; saves = [];
