@@ -1,5 +1,5 @@
 import { Storage } from "@google-cloud/storage";
-import { Impersonated, IdentityPoolClient } from "google-auth-library";
+import { ExternalAccountClient } from "google-auth-library";
 import { getVercelOidcToken } from "@vercel/oidc";
 
 const storageScope = "https://www.googleapis.com/auth/devstorage.read_write";
@@ -16,22 +16,21 @@ export async function studioStorage() {
   const serviceAccount = process.env.ADSTUDIO_GOOGLE_SERVICE_ACCOUNT_EMAIL ?? "adstudio-service@project-eda6605c-73e6-4361-9ad.iam.gserviceaccount.com";
   if (!projectId || !audience) throw new Error("Private Studio storage is not configured. Add ADSTUDIO_GCP_PROJECT_ID and ADSTUDIO_GOOGLE_WORKLOAD_IDENTITY_AUDIENCE to the server environment.");
 
-  const sourceClient = new IdentityPoolClient({
+  // Keep this configuration in the documented external-account shape. The
+  // Storage client needs the impersonated service account identity in order to
+  // create V4 signed upload URLs; a separately constructed `Impersonated`
+  // client loses that identity when Storage wraps it in GoogleAuth.
+  const authClient = ExternalAccountClient.fromJSON({
     audience,
     subject_token_supplier: { getSubjectToken: () => getVercelOidcToken() },
     subject_token_type: "urn:ietf:params:oauth:token-type:jwt",
+    service_account_impersonation_url: `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${serviceAccount}:generateAccessToken`,
+    scopes: [storageScope],
+    token_url: "https://sts.googleapis.com/v1/token",
     type: "external_account"
   });
-  const authClient = new Impersonated({
-    lifetime: 600,
-    sourceClient,
-    targetPrincipal: serviceAccount,
-    targetScopes: [storageScope]
-  });
-  // @google-cloud/storage currently exposes a narrower AuthClient type than
-  // google-auth-library's Impersonated client, although both implement the
-  // token and signBlob contract used by Storage's V4 signer.
-  return new Storage({ authClient: authClient as never, projectId });
+  if (!authClient) throw new Error("Unable to initialize private Studio storage credentials.");
+  return new Storage({ authClient, projectId });
 }
 
 export function workspaceVideoObjectPath(workspaceId: string, assetId: string, extension: string) {
