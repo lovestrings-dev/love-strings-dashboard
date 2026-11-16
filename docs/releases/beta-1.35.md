@@ -1,5 +1,4 @@
 # Beta 1.35 release candidate — Video editor prototype
-
 Prepared 16 November 2026. Version `1.35.0-beta.1`; UI **Beta 1.35**.
 Status: release candidate prepared locally; workspace-isolation repair is included and requires browser acceptance before deployment.
 
@@ -14,13 +13,14 @@ Status: release candidate prepared locally; workspace-isolation repair is includ
 ## Explicit limits
 
 - This is a prototype editor: waveform graphics are decorative and no media files are cut, rendered, or exported.
-- Local uploaded-video reuse, selected video trims, Pixabay selections, and Audio snippets are browser-local prototype records. They are not yet persisted as Studio project assets.
+- Audio snippets and selected Pixabay sources now have a protected, workspace-scoped Studio draft record once migration `202611160001` is applied. The browser-local copy remains a resilience fallback during loading or offline use.
+- Local uploaded-video reuse and selected local-video trims remain device-local prototype records. Private Cloud Storage ingest is still required before an uploaded video can be reopened on another device.
 - Studio local records are now namespaced by workspace in browser storage and IndexedDB. The previous global prototype records are intentionally not read, so they cannot cross into another workspace.
 - The private FFmpeg/render worker remains out of scope and must not be invoked.
 
 ## Release gate
 
-Before deployment, verify the workspace-isolation acceptance scenario below. The local prototype records are now workspace-scoped; project-level persistence and migration of the old unscoped prototype records remain follow-up work.
+Before deployment, apply migration `202611160001`, then verify the workspace-isolation and cross-device selection scenarios below. Old unscoped prototype records intentionally remain excluded.
 
 ## Local validation
 

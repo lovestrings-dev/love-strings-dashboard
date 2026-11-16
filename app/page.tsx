@@ -5593,28 +5593,39 @@ export default function Home() {
 
   useEffect(() => {
     let isCurrent = true;
-    queueMicrotask(() => {
-      if (!isCurrent) return;
+    async function hydrateStudioAudioSelections() {
       setIsStudioAudioHydrated(false);
       setStudioAudioHydratedWorkspaceId("");
       setStudioAudioSnippets([]);
       if (!activeWorkspaceId) return;
+      let localSnippets: StudioAudioSnippetRecord[] = [];
       try {
         const stored = window.localStorage.getItem(workspaceStorageKey(activeWorkspaceId, "studio-audio-snippets-v1"));
         const parsed = stored ? JSON.parse(stored) : [];
-        if (isCurrent && Array.isArray(parsed)) setStudioAudioSnippets(parsed.filter(isStudioAudioSnippetRecord));
+        if (Array.isArray(parsed)) localSnippets = parsed.filter(isStudioAudioSnippetRecord);
       } catch { /* Browser storage is an optional local convenience. */ }
+      if (isCurrent) setStudioAudioSnippets(localSnippets);
+      try {
+        const response = await fetch("/api/studio/selection-draft");
+        const draft = await response.json() as { audioSnippets?: unknown[] };
+        if (response.ok && isCurrent && Array.isArray(draft.audioSnippets)) {
+          const remoteSnippets = draft.audioSnippets.filter(isStudioAudioSnippetRecord);
+          setStudioAudioSnippets(remoteSnippets.length || !localSnippets.length ? remoteSnippets : localSnippets);
+        }
+      } catch { /* The local cache remains available while the server draft is unavailable. */ }
       if (isCurrent) {
         setStudioAudioHydratedWorkspaceId(activeWorkspaceId);
         setIsStudioAudioHydrated(true);
       }
-    });
+    }
+    void hydrateStudioAudioSelections();
     return () => { isCurrent = false; };
   }, [activeWorkspaceId]);
 
   useEffect(() => {
     if (!activeWorkspaceId || !isStudioAudioHydrated || studioAudioHydratedWorkspaceId !== activeWorkspaceId) return;
     try { window.localStorage.setItem(workspaceStorageKey(activeWorkspaceId, "studio-audio-snippets-v1"), JSON.stringify(studioAudioSnippets)); } catch { /* Preserve the active editor even if browser storage is unavailable. */ }
+    void fetch("/api/studio/selection-draft", { body: JSON.stringify({ audioSnippets: studioAudioSnippets }), headers: { "content-type": "application/json" }, method: "PATCH" });
   }, [activeWorkspaceId, isStudioAudioHydrated, studioAudioHydratedWorkspaceId, studioAudioSnippets]);
   const [activeWorkspaceSetupState, setActiveWorkspaceSetupState] = useState<"active" | "pending_setup" | "">("");
   const [profileDisplayName, setProfileDisplayName] = useState("");
@@ -9864,13 +9875,26 @@ function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseP
     });
   }, [workspaceId]);
   useEffect(() => {
-    queueMicrotask(() => {
+    async function hydratePixabaySelections() {
+      let localClips: PixabayVideoResult[] = [];
       try {
         const saved = JSON.parse(window.localStorage.getItem(workspaceStorageKey(workspaceId, "studio-confirmed-pixabay-videos-v1")) ?? "[]");
-        if (Array.isArray(saved)) setConfirmedPixabayClips(saved.filter(isPixabayVideoResult).slice(0, 4));
+        if (Array.isArray(saved)) localClips = saved.filter(isPixabayVideoResult).slice(0, 4);
       } catch { /* A missing confirmed Pixabay source is non-blocking. */ }
+      setConfirmedPixabayClips(localClips);
+      try {
+        const response = await fetch("/api/studio/selection-draft");
+        const draft = await response.json() as { pixabayVideos?: unknown[] };
+        if (response.ok && Array.isArray(draft.pixabayVideos)) {
+          const remoteClips = draft.pixabayVideos.filter(isPixabayVideoResult).slice(0, 4);
+          const chosenClips = remoteClips.length || !localClips.length ? remoteClips : localClips;
+          setConfirmedPixabayClips(chosenClips);
+          setResults((current) => [...current, ...chosenClips.filter((clip) => !current.some((candidate) => candidate.id === clip.id))]);
+        }
+      } catch { /* Device-local selections remain available while the server draft is unavailable. */ }
       setAreConfirmedPixabayClipsHydrated(true);
-    });
+    }
+    void hydratePixabaySelections();
   }, [workspaceId]);
   useEffect(() => {
     if (!localVideo) return;
@@ -9885,6 +9909,7 @@ function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseP
   useEffect(() => {
     if (!areConfirmedPixabayClipsHydrated) return;
     try { window.localStorage.setItem(workspaceStorageKey(workspaceId, "studio-confirmed-pixabay-videos-v1"), JSON.stringify(confirmedPixabayClips)); } catch { /* Browser storage is an optional local convenience. */ }
+    void fetch("/api/studio/selection-draft", { body: JSON.stringify({ pixabayVideos: confirmedPixabayClips }), headers: { "content-type": "application/json" }, method: "PATCH" });
   }, [areConfirmedPixabayClipsHydrated, confirmedPixabayClips, workspaceId]);
   useEffect(() => {
     if (!selectedClip) return;
@@ -9908,7 +9933,7 @@ function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseP
   }
 
   function chooseLocalVideo(file: File) {
-    if (!/^video\/(mp4|quicktime|webm)$/i.test(file.type) || file.size > 500 * 1024 * 1024) {
+    if (!isSupportedStudioVideoFile(file) || file.size > 500 * 1024 * 1024) {
       setSearchStatus("Choose a vertical MP4, MOV, or WebM under 500 MB.");
       return;
     }
@@ -9922,14 +9947,17 @@ function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseP
         return;
       }
       const details = { blob: file, durationSeconds: probe.duration, fileName: file.name, height: probe.videoHeight, size: file.size, width: probe.videoWidth };
-      void saveRecentStudioVideo(workspaceId, details).then((record) => {
+      const showLocalVideo = (record: Pick<RecentStudioVideo, "durationSeconds" | "fileName" | "height" | "id" | "size" | "width">, savedOnDevice: boolean) => {
         window.localStorage.removeItem(workspaceStorageKey(workspaceId, "studio-selected-pixabay-video-v1"));
-        setRecentVideos((current) => [record, ...current.filter((candidate) => candidate.id !== record.id)].slice(0, 5));
+        if (savedOnDevice) setRecentVideos((current) => [record as RecentStudioVideo, ...current.filter((candidate) => candidate.id !== record.id)].slice(0, 5));
         setLocalVideo({ durationSeconds: record.durationSeconds, fileName: record.fileName, height: record.height, id: record.id, size: record.size, url, width: record.width });
         void captureVideoFrameFromUrl(url).then((thumbnailUrl) => { if (thumbnailUrl) { setLocalVideoThumbnails((current) => ({ ...current, [record.id]: thumbnailUrl })); setLocalVideo((current) => current?.id === record.id ? { ...current, thumbnailUrl } : current); } });
         setSelectedClipId(null); setPreviewingClipId(null); setTrimRange({ end: Math.min(projectDuration, probe.duration), start: 0 }); setActiveTrimVersion((current) => current + 1);
         if (record.durationSeconds <= projectDuration) confirmLocalTrim({ end: record.durationSeconds, id: record.id, start: 0 });
-        setSearchStatus("Local video ready to preview and trim. It is saved on this device for reuse.");
+        setSearchStatus(savedOnDevice ? "Local video ready to preview and trim. It is saved on this device for reuse." : "Local video ready to preview and trim. This browser could not save a reusable device copy.");
+      };
+      void saveRecentStudioVideo(workspaceId, details).then((record) => showLocalVideo(record, true)).catch(() => {
+        showLocalVideo({ ...details, id: `temporary-${Date.now()}-${Math.random().toString(36).slice(2)}` }, false);
       });
     };
     probe.onloadeddata = () => {
@@ -9968,7 +9996,7 @@ function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseP
   return (
     <section className="studio-video" aria-labelledby="studio-video-heading">
       <header className="studio-video-header">
-        <div><p className="eyebrow">Test Project · Video</p><h2 id="studio-video-heading">Find {orientation} footage</h2><p>Search Pixabay, then choose a source to ingest privately for this project.</p></div>
+        <div><p className="eyebrow">Test Project · Video</p><span className="visually-hidden" id="studio-video-heading">Video sources</span></div>
         <div className="studio-project-spec"><div><span>Duration</span><strong>{projectDuration}s</strong><small>From Audio</small></div><div className="studio-orientation-selector" aria-label="Video format">{(["vertical", "horizontal", "square"] as const).map((value) => <button aria-label={`${value} video`} aria-pressed={orientation === value} className={`studio-orientation-icon is-${value}`} key={value} onClick={() => onOrientationChange(value)} type="button"><i aria-hidden /></button>)}</div></div>
       </header>
 
@@ -9976,7 +10004,7 @@ function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseP
         <section className="studio-video-library" aria-labelledby="studio-video-library-heading">
           <div className="studio-panel-heading"><div><p className="eyebrow">Pixabay · Library</p><h3 id="studio-video-library-heading">Select source video</h3></div><span>{results.length} found</span></div>
           <form className="studio-search" onSubmit={search}><label><span className="visually-hidden">Search Pixabay video clips</span><input maxLength={100} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${orientation} video`} type="search" value={query} /></label><button disabled={isSearching || !query.trim()} type="submit">{isSearching ? "Searching…" : "Search"}</button></form>
-          <div className="studio-video-upload"><div><strong>Use your own video</strong><small>MP4, MOV, or WebM · {orientation} · up to 500 MB</small></div><input accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" aria-label={`Upload a ${orientation} video`} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) chooseLocalVideo(file); }} ref={uploadInputRef} type="file" /><button onClick={() => uploadInputRef.current?.click()} type="button"><Upload aria-hidden size={14} />Choose video</button></div>
+          <div className="studio-video-upload"><div><strong>Use your own video</strong><small>MP4, MOV, or WebM · {orientation} · up to 500 MB</small></div><input accept="video/*,.mp4,.mov,.m4v,.webm" aria-label={`Upload a ${orientation} video`} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) chooseLocalVideo(file); }} ref={uploadInputRef} type="file" /><button onClick={() => uploadInputRef.current?.click()} type="button"><Upload aria-hidden size={14} />Choose video</button></div>
           {recentVideos.length ? <section className="studio-recent-videos" aria-label="Recent local uploads"><div><strong>Recent uploads</strong><small>Saved on this device</small></div>{recentVideos.map((video) => <button key={video.id} onClick={() => reuseRecentVideo(video)} type="button"><Video aria-hidden size={13} /><span>{video.fileName}</span><small>{formatStudioDuration(video.durationSeconds)}</small></button>)}</section> : null}
           {searchStatus ? <p className="studio-export-notice" role="status">{searchStatus}</p> : null}
           <div className="studio-clip-grid">
@@ -10015,6 +10043,10 @@ function isPixabayVideoResult(value: unknown): value is PixabayVideoResult {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const candidate = value as Record<string, unknown>;
   return typeof candidate.creator === "string" && typeof candidate.durationSeconds === "number" && typeof candidate.height === "number" && typeof candidate.id === "string" && typeof candidate.pageUrl === "string" && typeof candidate.previewUrl === "string" && typeof candidate.previewVideoUrl === "string" && typeof candidate.tags === "string" && typeof candidate.width === "number";
+}
+
+function isSupportedStudioVideoFile(file: File) {
+  return file.type.startsWith("video/") || /\.(mp4|mov|m4v|webm)$/i.test(file.name);
 }
 
 function createVideoTimelineSegments(sourceDuration: number, projectDuration: number) {

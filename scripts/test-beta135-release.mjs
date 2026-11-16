@@ -11,6 +11,8 @@ const trimmer = await readFile(new URL("../app/components/media-trimmer.tsx", im
 const pixabayRoute = await readFile(new URL("../app/api/studio/pixabay/search/route.ts", import.meta.url), "utf8");
 const composition = await readFile(new URL("../lib/studio/composition.ts", import.meta.url), "utf8");
 const localVideoLibrary = await readFile(new URL("../lib/studio/local-video-library.ts", import.meta.url), "utf8");
+const selectionDraftRoute = await readFile(new URL("../app/api/studio/selection-draft/route.ts", import.meta.url), "utf8");
+const selectionDraftMigration = await readFile(new URL("../supabase/migrations/202611160001_create_studio_workspace_selection_drafts.sql", import.meta.url), "utf8");
 
 assert.equal(manifest.version, "1.35.0-beta.1");
 assert.match(page, /const appVersionLabel = "Beta 1\.35";/);
@@ -29,6 +31,10 @@ assert.match(page, /workspaceStorageKey\(workspaceId, "studio-confirmed-pixabay-
 assert.doesNotMatch(page, /artistdeck-studio-audio-snippets-v1/);
 assert.match(localVideoLibrary, /artistdeck-studio-workspace/);
 assert.match(localVideoLibrary, /listRecentStudioVideos\(workspaceId: string\)/);
+assert.match(page, /api\/studio\/selection-draft/);
+assert.match(selectionDraftRoute, /requireWorkspaceAccess/);
+assert.match(selectionDraftRoute, /pixabayVideos/);
+assert.match(selectionDraftMigration, /studio_workspace_selection_drafts/);
 
 const scripts = ["test-studio-composition.mjs", "test-studio-pixabay.mjs"];
 let failed = 0;
