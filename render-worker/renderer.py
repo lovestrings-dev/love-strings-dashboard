@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -69,6 +70,10 @@ class RenderManifest:
     output_uri: str
     duration_seconds: int
     overlay: Overlay
+    audio_start_seconds: float = 0
+    audio_end_seconds: float | None = None
+    video_start_seconds: float = 0
+    video_end_seconds: float | None = None
 
     @classmethod
     def from_json(cls, payload: dict[str, Any], staging_bucket: str, render_bucket: str) -> "RenderManifest":
@@ -80,7 +85,10 @@ class RenderManifest:
         render_id = str(payload["render_id"])
         if not re.fullmatch(r"[a-zA-Z0-9_-]{1,96}", render_id):
             raise RenderError("render_id must contain only letters, numbers, _ or -")
-        duration = int(payload["duration_seconds"])
+        raw_duration = payload["duration_seconds"]
+        if isinstance(raw_duration, bool) or not isinstance(raw_duration, (int, float)) or not math.isfinite(raw_duration) or int(raw_duration) != raw_duration:
+            raise RenderError("duration_seconds must be a finite integer")
+        duration = int(raw_duration)
         if duration < 1 or duration > MAX_DURATION_SECONDS:
             raise RenderError(f"duration_seconds must be between 1 and {MAX_DURATION_SECONDS}")
 
@@ -115,7 +123,21 @@ class RenderManifest:
         if position not in {"top", "center", "bottom"}:
             raise RenderError("overlay.position must be top, center, or bottom")
 
-        return cls(render_id, video_uri, audio_uri, output_uri, duration, Overlay(image_uri, text, text_color, font_size, position))
+        def trim(label: str) -> tuple[float, float | None]:
+            start = payload.get(f"{label}_start_seconds", 0)
+            end = payload.get(f"{label}_end_seconds")
+            for value in (start, end):
+                if value is not None and (isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or value < 0 or value > 1800):
+                    raise RenderError(f"Invalid {label} trim")
+            if start is None or (end is not None and end <= start):
+                raise RenderError(f"Invalid {label} trim")
+            return float(start), float(end) if end is not None else None
+
+        audio_start, audio_end = trim("audio")
+        video_start, video_end = trim("video")
+        if audio_end is not None and audio_end - audio_start < duration - 0.05:
+            raise RenderError("Audio snippet must cover the output duration")
+        return cls(render_id, video_uri, audio_uri, output_uri, duration, Overlay(image_uri, text, text_color, font_size, position), audio_start, audio_end, video_start, video_end)
 
 
 def download(client: storage.Client, uri: str, destination: Path) -> None:
@@ -151,6 +173,38 @@ def build_filter(overlay: Overlay) -> tuple[list[str], str]:
     return input_args, ";".join(filters) + f";{current}null[outv]"
 
 
+def media_duration(path: Path) -> float:
+    result = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(path)], check=True, capture_output=True, text=True)
+    try:
+        duration = float(result.stdout.strip())
+    except ValueError as error:
+        raise RenderError("Source media has no readable duration") from error
+    if not math.isfinite(duration) or duration <= 0:
+        raise RenderError("Source media has no readable duration")
+    return duration
+
+
+def build_render_commands(manifest: RenderManifest, work_dir: Path, video_duration: float, audio_duration: float) -> list[list[str]]:
+    video_end = manifest.video_end_seconds if manifest.video_end_seconds is not None else video_duration
+    audio_end = manifest.audio_end_seconds if manifest.audio_end_seconds is not None else audio_duration
+    if video_end > video_duration + 0.05 or audio_end > audio_duration + 0.05 or manifest.video_start_seconds >= video_end or manifest.audio_start_seconds >= audio_end:
+        raise RenderError("A selected trim exceeds its source media")
+    if audio_end - manifest.audio_start_seconds < manifest.duration_seconds - 0.05:
+        raise RenderError("Audio source cannot cover the output duration")
+    # Normalize only the selected video segment, then loop that segment. Looping
+    # the raw source would incorrectly reintroduce frames outside the trim.
+    clip = work_dir / "video-snippet.mp4"
+    base = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
+    normalize = base + ["-ss", str(manifest.video_start_seconds), "-i", str(work_dir / "source-video"), "-t", str(video_end - manifest.video_start_seconds), "-an", "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1", "-r", "30", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast", str(clip)]
+    _, filter_complex = build_filter(manifest.overlay)
+    command = base + ["-stream_loop", "-1", "-i", str(clip)]
+    if manifest.overlay.image_uri:
+        command += ["-loop", "1", "-i", str(work_dir / "overlay-image")]
+    command += ["-ss", str(manifest.audio_start_seconds), "-i", str(work_dir / "source-audio"), "-filter_complex", filter_complex, "-map", "[outv]", "-map", f"{2 if manifest.overlay.image_uri else 1}:a:0", "-af", f"atrim=duration={min(manifest.duration_seconds, audio_end - manifest.audio_start_seconds)},apad=whole_dur={manifest.duration_seconds}"]
+    command += ["-t", str(manifest.duration_seconds), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "medium", "-crf", "20", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(work_dir / "render.mp4")]
+    return [normalize, command]
+
+
 def render(manifest: RenderManifest, work_dir: Path) -> Path:
     video = work_dir / "source-video"
     audio = work_dir / "source-audio"
@@ -162,14 +216,9 @@ def render(manifest: RenderManifest, work_dir: Path) -> Path:
     if manifest.overlay.image_uri:
         download(client, manifest.overlay.image_uri, overlay_image)
 
-    _, filter_complex = build_filter(manifest.overlay)
-    command = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(video)]
-    if manifest.overlay.image_uri:
-        command += ["-loop", "1", "-i", str(overlay_image)]
-    command += ["-i", str(audio), "-filter_complex", filter_complex, "-map", "[outv]", "-map", f"{2 if manifest.overlay.image_uri else 1}:a:0"]
-    command += ["-t", str(manifest.duration_seconds), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "medium", "-crf", "20", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", str(output)]
     LOG.info("Starting render %s", manifest.render_id)
-    subprocess.run(command, check=True)
+    for command in build_render_commands(manifest, work_dir, media_duration(video), media_duration(audio)):
+        subprocess.run(command, check=True)
     if not output.exists() or output.stat().st_size == 0:
         raise RuntimeError("ffmpeg completed without producing an MP4")
     upload(client, output, manifest.output_uri, manifest.render_id)

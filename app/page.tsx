@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { StudioExportMixer } from "./components/studio-export-mixer";
 import { captureStudioVideoFrame, captureStudioVideoFrameFromUrl } from "@/lib/studio/video-thumbnail";
 import { studioVideoUploadMimeType } from "@/lib/studio/video-upload-type";
 import { PullToRefresh } from "./components/pull-to-refresh";
@@ -5524,7 +5525,7 @@ export default function Home() {
   const studioSidebarNavRef = useRef<HTMLDivElement>(null);
   const [activeSection, setActiveSection] = useState<Section>("Dashboard");
   const [isStudioMenuOpen, setIsStudioMenuOpen] = useState(true);
-  const [studioProcess, setStudioProcess] = useState<"Audio" | "Video">("Audio");
+  const [studioProcess, setStudioProcess] = useState<"Audio" | "Video" | "Export">("Audio");
   const [studioAudioSnippets, setStudioAudioSnippets] = useState<StudioAudioSnippetRecord[]>([]);
   const [isStudioAudioHydrated, setIsStudioAudioHydrated] = useState(false);
   const [studioAudioHydratedWorkspaceId, setStudioAudioHydratedWorkspaceId] = useState("");
@@ -9410,9 +9411,9 @@ function StudioSidebarMenu({
   isMobileClosed,
   onChooseProcess
 }: {
-  activeProcess: "Audio" | "Video";
+  activeProcess: "Audio" | "Video" | "Export";
   isMobileClosed: boolean;
-  onChooseProcess: (process: "Audio" | "Video") => void;
+  onChooseProcess: (process: "Audio" | "Video" | "Export") => void;
 }) {
   const [projectsOpen, setProjectsOpen] = useState(true);
   const [testProjectOpen, setTestProjectOpen] = useState(true);
@@ -9431,7 +9432,7 @@ function StudioSidebarMenu({
           <strong>Test Project</strong>
         </button>
         {testProjectOpen ? <div aria-label="Test Project process" className="studio-sidebar-process-list">
-          {steps.map((step) => <button aria-current={step === activeProcess ? "step" : undefined} className={step === activeProcess ? "is-active" : undefined} disabled={step !== "Audio" && step !== "Video"} key={step} onClick={() => { if (step === "Audio" || step === "Video") onChooseProcess(step); }} type="button">
+          {steps.map((step) => <button aria-current={step === activeProcess ? "step" : undefined} className={step === activeProcess ? "is-active" : undefined} disabled={step !== "Audio" && step !== "Video" && step !== "Export"} key={step} onClick={() => { if (step === "Audio" || step === "Video" || step === "Export") onChooseProcess(step); }} type="button">
             <span aria-hidden />{step}
           </button>)}
         </div> : null}
@@ -9448,10 +9449,10 @@ function StudioView({
   productionSongs,
   workspaceId
 }: {
-  activeProcess: "Audio" | "Video";
+  activeProcess: "Audio" | "Video" | "Export";
   audioSnippets: StudioAudioSnippetRecord[];
   onAudioSnippetsChange: Dispatch<SetStateAction<StudioAudioSnippetRecord[]>>;
-  onProcessChange: (process: "Audio" | "Video") => void;
+  onProcessChange: (process: "Audio" | "Video" | "Export") => void;
   productionSongs: ProductionSongConfig[];
   workspaceId: string;
 }) {
@@ -9473,8 +9474,8 @@ function StudioView({
         </div>
       </header>
 
-      {activeProcess === "Audio" ? <StudioAudioEditor audioSnippets={audioSnippets} durationChoice={projectDurationChoice} isCustomDuration={projectDurationChoice === "custom"} onAudioSnippetsChange={onAudioSnippetsChange} onDurationChoiceChange={setProjectDurationChoice} productionSongs={productionSongs} projectDuration={projectDuration} videoPreviewSource={audioPreviewVideo} /> : <StudioVideoEditor audioSnippet={audioSnippets[0]} key={workspaceId} onAudioPreviewSourceChange={setAudioPreviewVideo} onChooseProcess={() => undefined} onOrientationChange={setVideoOrientation} orientation={videoOrientation} projectDuration={projectDuration} workspaceId={workspaceId} />}
-      <StudioWorkflowProgress activeProcess={activeProcess} availableProcesses={["Audio", "Video"]} onChooseProcess={onProcessChange} />
+      {activeProcess === "Audio" ? <StudioAudioEditor audioSnippets={audioSnippets} durationChoice={projectDurationChoice} isCustomDuration={projectDurationChoice === "custom"} onAudioSnippetsChange={onAudioSnippetsChange} onDurationChoiceChange={setProjectDurationChoice} productionSongs={productionSongs} projectDuration={projectDuration} videoPreviewSource={audioPreviewVideo} /> : activeProcess === "Export" ? <StudioExportMixer key={workspaceId} workspaceId={workspaceId} audioSnippets={audioSnippets.map((snippet) => ({ ...snippet, songId: productionSongs.find((song) => song.id === snippet.songId || song.dbId === snippet.songId)?.dbId ?? snippet.songId }))} durationSeconds={projectDuration} orientation={videoOrientation} /> : <StudioVideoEditor audioSnippet={audioSnippets[0]} key={workspaceId} onAudioPreviewSourceChange={setAudioPreviewVideo} onChooseProcess={() => undefined} onOrientationChange={setVideoOrientation} orientation={videoOrientation} projectDuration={projectDuration} workspaceId={workspaceId} />}
+      <StudioWorkflowProgress activeProcess={activeProcess} availableProcesses={["Audio", "Video", "Export"]} onChooseProcess={onProcessChange} />
     </section>
   );
 }
@@ -9486,7 +9487,7 @@ function StudioWorkflowProgress({
 }: {
   activeProcess: string;
   availableProcesses: readonly string[];
-  onChooseProcess: (process: "Audio" | "Video") => void;
+  onChooseProcess: (process: "Audio" | "Video" | "Export") => void;
 }) {
   const steps = [
     { description: "Project overview", label: "Compose" },
@@ -9517,7 +9518,7 @@ function StudioWorkflowStep({
   activeIndex: number;
   available: boolean;
   index: number;
-  onChooseProcess: (process: "Audio" | "Video") => void;
+  onChooseProcess: (process: "Audio" | "Video" | "Export") => void;
   step: { description: string; label: string };
 }) {
   const isActive = available && index === activeIndex;
@@ -9529,7 +9530,7 @@ function StudioWorkflowStep({
         aria-current={isActive ? "step" : undefined}
         className={isComplete ? "is-complete" : isActive ? "is-active" : "is-locked"}
         disabled={!available}
-        onClick={() => { if (step.label === "Audio" || step.label === "Video") onChooseProcess(step.label); }}
+        onClick={() => { if (step.label === "Audio" || step.label === "Video" || step.label === "Export") onChooseProcess(step.label); }}
         type="button"
       >
         <span className="studio-workflow-number">{index + 1}</span>

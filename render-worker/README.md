@@ -46,3 +46,14 @@ python3 -m unittest render-worker/tests/test_renderer.py
 
 Local rendering needs Application Default Credentials that can read/write the
 same buckets. The worker itself never needs a downloaded key file.
+
+## One-pair export extension (local, awaiting deployment)
+
+The worker accepts optional `audio_start_seconds`, `audio_end_seconds`,
+`video_start_seconds` and `video_end_seconds`. It verifies source durations with
+ffprobe, normalizes the selected video segment, then loops that segment to cover
+the output. Audio must cover the duration (up to 50 ms rounding tolerance).
+
+The app bridge and pending activation steps are recorded in
+`docs/studio-mobile-trace-and-first-render-2026-11-16.md`.
+Do not enable `ADSTUDIO_RENDER_ENABLED` against the older worker image.
