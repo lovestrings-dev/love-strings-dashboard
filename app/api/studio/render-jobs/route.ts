@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
     const audioUrl = new URL(audio.cloudinary_url);
     if (audioUrl.protocol !== "https:" || audioUrl.hostname !== "res.cloudinary.com" || audioUrl.username || audioUrl.password || audioUrl.port || !process.env.CLOUDINARY_CLOUD_NAME || audioUrl.pathname.split("/")[1] !== process.env.CLOUDINARY_CLOUD_NAME) throw new Error("Audio source is not managed by this Studio.");
     const paths = renderObjectPaths(workspaceId, input.requestId);
-    const resultDetails = { audioTitle: project.title, audioStart: input.audioStart, audioEnd: input.audioEnd, videoName: video.original_file_name, videoStart: input.videoStart, videoEnd: input.videoEnd, durationSeconds: input.durationSeconds };
+    const resultDetails = { songId: input.songId, videoAssetId: input.videoAssetId, audioTitle: project.title, audioStart: input.audioStart, audioEnd: input.audioEnd, videoName: video.original_file_name, videoStart: input.videoStart, videoEnd: input.videoEnd, durationSeconds: input.durationSeconds };
     const { data: reserved, error: reserveError } = await serviceClient.from("studio_render_jobs").insert({ id: input.requestId, workspace_id: workspaceId, studio_project_id: project.id, requested_by: user.id, status: "queued", manifest_object_path: paths.manifest, output_object_path: paths.output, result_details: resultDetails }).select(jobColumns).single();
     if (reserveError?.code === "23505") return NextResponse.json({ error: "A render request already exists. Refresh the render list." }, { status: 409 });
     if (reserveError) throw reserveError;

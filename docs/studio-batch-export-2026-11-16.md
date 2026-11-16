@@ -53,3 +53,28 @@ The local migration filename matches the remote version.
 
 Next: push the prepared local commit through GitHub Desktop, then verify the
 actual four selected combinations after Vercel reaches READY.
+
+## Cross-device preview follow-up
+
+The actual four-pair batch completed successfully, with distinct canvas_1.mp4
+and IMG_2929.MOV manifests for both Intro excerpts (25.8199–40.8199 and 0–15).
+All four Production preview elements loaded 15 seconds with no media error.
+
+The non-initiating browser had no local batch plan. Its fallback displayed the
+latest four arbitrary historical jobs, including two older one-pair exports,
+and stopped polling whenever it initially saw no active job. This made new
+results appear missing or duplicated even though rendering was correct.
+
+Fixed fallback previews to match each selected Cartesian pair by exact trims,
+duration and source identity. Unmatched pairs keep their waiting slot; legacy
+exports without pair metadata stay in history. Export now polls while open even
+when initially idle, so another browser's submitted results appear automatically.
+New result metadata includes stable song and video-asset IDs; earlier labeled
+results match title/filename plus exact trims. No migration or worker change.
+
+Regression tests cover mixed historical/current rows, four pair positions,
+missing fourth slot, trim/duration mismatch and stable-ID precedence. Passive
+local browser test picked up a later fourth result without submitting work or
+refreshing. API/batch tests, strict lint and production build/TypeScript passed.
+An initial standalone typecheck encountered duplicate generated .next type files;
+the clean production build regenerated types and passed.

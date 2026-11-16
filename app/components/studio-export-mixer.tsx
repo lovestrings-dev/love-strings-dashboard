@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createRenderBatch, type BatchAudio, type BatchVideo, type RenderBatch } from "@/lib/studio/render-batch";
+import { createRenderBatch, findRenderForPair, type BatchAudio, type BatchVideo, type RenderBatch } from "@/lib/studio/render-batch";
 import { validateRenderRequest } from "@/lib/studio/render-request";
 
 type Asset = { id: string; fileName: string; durationSeconds: number };
-type Details = { audioTitle: string; audioStart: number; audioEnd: number; videoName: string; videoStart: number; videoEnd: number; durationSeconds: number };
+type Details = { audioTitle: string; audioStart: number; audioEnd: number; videoName: string; videoStart: number; videoEnd: number; durationSeconds: number; songId?: string; videoAssetId?: string };
 type RenderJob = { id: string; status: string; error: string | null; createdAt: string; previewUrl: string | null; details?: Details | null };
 type Props = { audioSnippets: BatchAudio[]; durationSeconds: number; orientation: string; workspaceId: string };
 const active = (job: RenderJob) => ["queued", "running"].includes(job.status);
@@ -40,9 +40,12 @@ function Mixer({ audioSnippets, durationSeconds, orientation, workspaceId }: Pro
   const coversDuration = selectedAudio.length > 0 && selectedAudio.every((a) => a.end - a.start >= durationSeconds - 0.05);
   const canSubmit = loaded && canGenerate && selectedVideos.length > 0 && coversDuration && orientation === "vertical" && !locked;
   const total = selectedAudio.length * selectedVideos.length;
-  const completedCount = batch ? batch.pairs.filter((p) => jobs.some((j) => j.id === p.request.requestId && j.status === "succeeded")).length : jobs.filter((j) => j.status === "succeeded").length;
   const jobMap = new Map(jobs.map((j) => [j.id, j]));
-  const slots = batch ? batch.pairs.filter((p) => !deletedIds.includes(p.request.requestId)).map((p) => ({ id: p.request.requestId, job: jobMap.get(p.request.requestId), title: `${p.audioTitle} · ${times(p.request.audioStart, p.request.audioEnd)} × ${p.videoName} · ${times(p.request.videoStart, p.request.videoEnd)}` })) : jobs.slice(0, 4).map((j) => ({ id: j.id, job: j, title: j.details ? `${j.details.audioTitle} · ${times(j.details.audioStart, j.details.audioEnd)} × ${j.details.videoName} · ${times(j.details.videoStart, j.details.videoEnd)}` : "Previous export" }));
+  const slots = batch ? batch.pairs.filter((p) => !deletedIds.includes(p.request.requestId)).map((p) => ({ id: p.request.requestId, job: jobMap.get(p.request.requestId), title: `${p.audioTitle} · ${times(p.request.audioStart, p.request.audioEnd)} × ${p.videoName} · ${times(p.request.videoStart, p.request.videoEnd)}` })) : selectedAudio.flatMap((a) => selectedVideos.map((v) => {
+    const job = findRenderForPair(a, v, durationSeconds, jobs);
+    return { id: job?.id ?? `${a.id}:${v.key}`, job, title: `${a.title} · ${times(a.start, a.end)} × ${v.fileName} · ${times(v.start, v.end)}` };
+  }));
+  const completedCount = slots.filter((slot) => slot.job?.status === "succeeded").length;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -80,7 +83,8 @@ function Mixer({ audioSnippets, durationSeconds, orientation, workspaceId }: Pro
   }, [batch, loaded, storageKey]);
 
   useEffect(() => {
-    if (!busy && !pending) return;
+    // Other devices can submit work while this Export screen is idle.
+    if (!loaded) return;
     const controller = new AbortController();
     let checking = false;
     const interval = window.setInterval(async () => {
@@ -95,7 +99,7 @@ function Mixer({ audioSnippets, durationSeconds, orientation, workspaceId }: Pro
       finally { checking = false; }
     }, 5000);
     return () => { controller.abort(); window.clearInterval(interval); };
-  }, [busy, pending]);
+  }, [loaded]);
 
   // Each pair keeps its request ID across retries and reloads. Server-side
   // idempotency and the one-active-job index prevent duplicate executions.
