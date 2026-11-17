@@ -14,5 +14,9 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY renderer.py ./
+COPY tests ./tests
+# Exercise actual FFmpeg alpha, stacking, timing and trim behavior before this
+# image can be deployed. Synthetic fixtures never access Cloud Storage.
+RUN FFMPEG_TEST_BINARY=/usr/bin/ffmpeg python -m unittest discover -s tests -v
 
 ENTRYPOINT ["python", "/app/renderer.py"]

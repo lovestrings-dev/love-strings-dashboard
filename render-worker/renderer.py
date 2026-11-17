@@ -63,6 +63,15 @@ class Overlay:
 
 
 @dataclass(frozen=True)
+class OverlayLayer:
+    image_uri: str
+    x: float
+    y: float
+    start_seconds: float
+    end_seconds: float
+
+
+@dataclass(frozen=True)
 class RenderManifest:
     render_id: str
     video_uri: str
@@ -74,6 +83,7 @@ class RenderManifest:
     audio_end_seconds: float | None = None
     video_start_seconds: float = 0
     video_end_seconds: float | None = None
+    layers: tuple[OverlayLayer, ...] = ()
 
     @classmethod
     def from_json(cls, payload: dict[str, Any], staging_bucket: str, render_bucket: str) -> "RenderManifest":
@@ -133,11 +143,30 @@ class RenderManifest:
                 raise RenderError(f"Invalid {label} trim")
             return float(start), float(end) if end is not None else None
 
+        raw_layers = payload.get("overlay_layers", [])
+        if not isinstance(raw_layers, list) or len(raw_layers) > 8 or (raw_layers and payload.get("overlay_schema_version") != 2):
+            raise RenderError("Invalid overlay layer schema")
+        layers = []
+        for raw in raw_layers:
+            if not isinstance(raw, dict):
+                raise RenderError("Invalid overlay layer")
+            uri = raw.get("image_uri")
+            if not isinstance(uri, str):
+                raise RenderError("Invalid overlay image")
+            ensure_bucket(uri, staging_bucket, "overlay_layers.image_uri")
+            for key, maximum in (("x", 1), ("y", 1), ("start_seconds", duration), ("end_seconds", duration)):
+                v = raw.get(key)
+                if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0 or v > maximum:
+                    raise RenderError("Invalid overlay geometry or timing")
+            if raw["end_seconds"] <= raw["start_seconds"]:
+                raise RenderError("Invalid overlay interval")
+            layers.append(OverlayLayer(uri, float(raw["x"]), float(raw["y"]), float(raw["start_seconds"]), float(raw["end_seconds"])))
+
         audio_start, audio_end = trim("audio")
         video_start, video_end = trim("video")
         if audio_end is not None and audio_end - audio_start < duration - 0.05:
             raise RenderError("Audio snippet must cover the output duration")
-        return cls(render_id, video_uri, audio_uri, output_uri, duration, Overlay(image_uri, text, text_color, font_size, position), audio_start, audio_end, video_start, video_end)
+        return cls(render_id, video_uri, audio_uri, output_uri, duration, Overlay(image_uri, text, text_color, font_size, position), audio_start, audio_end, video_start, video_end, tuple(layers))
 
 
 def download(client: storage.Client, uri: str, destination: Path) -> None:
@@ -154,7 +183,7 @@ def upload(client: storage.Client, source: Path, uri: str, render_id: str) -> No
     LOG.info("Uploaded gs://%s/%s", bucket_name, object_name)
 
 
-def build_filter(overlay: Overlay) -> tuple[list[str], str]:
+def build_filter(overlay: Overlay, layers: tuple[OverlayLayer, ...] = ()) -> tuple[list[str], str]:
     # H.264 1080x1920 output works in Meta, Reels, TikTok, and browser preview.
     filters = ["[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1[base]"]
     current = "[base]"
@@ -170,6 +199,11 @@ def build_filter(overlay: Overlay) -> tuple[list[str], str]:
             f"fontsize={overlay.font_size}:x=(w-text_w)/2:y={y}:expansion=none:box=1:boxcolor=black@0.42:boxborderw=22[text]"
         )
         current = "[text]"
+    for index, layer in enumerate(layers):
+        source_index = index + (2 if overlay.image_uri else 1)
+        output = f"[layer{index}]"
+        filters.append(f"{current}[{source_index}:v]overlay=x=W*{layer.x}-w/2:y=H*{layer.y}-h/2:format=auto:enable='gte(t,{layer.start_seconds})*lt(t,{layer.end_seconds})'{output}")
+        current = output
     return input_args, ";".join(filters) + f";{current}null[outv]"
 
 
@@ -196,11 +230,13 @@ def build_render_commands(manifest: RenderManifest, work_dir: Path, video_durati
     clip = work_dir / "video-snippet.mp4"
     base = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
     normalize = base + ["-ss", str(manifest.video_start_seconds), "-i", str(work_dir / "source-video"), "-t", str(video_end - manifest.video_start_seconds), "-an", "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1", "-r", "30", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast", str(clip)]
-    _, filter_complex = build_filter(manifest.overlay)
+    _, filter_complex = build_filter(manifest.overlay, manifest.layers)
     command = base + ["-stream_loop", "-1", "-i", str(clip)]
     if manifest.overlay.image_uri:
         command += ["-loop", "1", "-i", str(work_dir / "overlay-image")]
-    command += ["-ss", str(manifest.audio_start_seconds), "-i", str(work_dir / "source-audio"), "-filter_complex", filter_complex, "-map", "[outv]", "-map", f"{2 if manifest.overlay.image_uri else 1}:a:0", "-af", f"atrim=duration={min(manifest.duration_seconds, audio_end - manifest.audio_start_seconds)},apad=whole_dur={manifest.duration_seconds}"]
+    for index, _ in enumerate(manifest.layers):
+        command += ["-loop", "1", "-i", str(work_dir / f"overlay-layer-{index}.png")]
+    command += ["-ss", str(manifest.audio_start_seconds), "-i", str(work_dir / "source-audio"), "-filter_complex_threads", "1", "-filter_complex", filter_complex, "-map", "[outv]", "-map", f"{(2 if manifest.overlay.image_uri else 1) + len(manifest.layers)}:a:0", "-af", f"atrim=duration={min(manifest.duration_seconds, audio_end - manifest.audio_start_seconds)},apad=whole_dur={manifest.duration_seconds}"]
     command += ["-t", str(manifest.duration_seconds), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "medium", "-crf", "20", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(work_dir / "render.mp4")]
     return [normalize, command]
 
@@ -215,6 +251,9 @@ def render(manifest: RenderManifest, work_dir: Path) -> Path:
     download(client, manifest.audio_uri, audio)
     if manifest.overlay.image_uri:
         download(client, manifest.overlay.image_uri, overlay_image)
+
+    for index, layer in enumerate(manifest.layers):
+        download(client, layer.image_uri, work_dir / f"overlay-layer-{index}.png")
 
     LOG.info("Starting render %s", manifest.render_id)
     for command in build_render_commands(manifest, work_dir, media_duration(video), media_duration(audio)):

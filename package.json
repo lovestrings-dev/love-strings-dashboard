@@ -1,6 +1,6 @@
 {
   "name": "artistdeck",
-  "version": "1.35.0-beta.1",
+  "version": "1.36.0-beta.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -96,7 +96,8 @@
     "test:studio-render-jobs": "node --experimental-strip-types scripts/test-studio-render-jobs.mjs",
     "test:studio-render-batch": "node --experimental-strip-types scripts/test-studio-render-batch.mjs",
     "test:studio-media-retention": "node --experimental-strip-types scripts/test-studio-media-retention.mjs",
-    "test:studio-pixabay": "node --experimental-strip-types scripts/test-studio-pixabay.mjs"
+    "test:studio-pixabay": "node --experimental-strip-types scripts/test-studio-pixabay.mjs",
+    "test:beta136-release": "node scripts/test-beta136-release.mjs"
   },
   "dependencies": {
     "@google-cloud/storage": "7.19.0",
@@ -107,7 +108,8 @@
     "lucide-react": "1.21.0",
     "next": "16.2.9",
     "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "react-dom": "19.2.7",
+    "sharp": "0.34.5"
   },
   "devDependencies": {
     "@types/node": "26.0.1",

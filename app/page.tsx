@@ -1,4 +1,5 @@
 "use client";
+import { StudioOverlayComposer } from "./components/studio-overlay-composer";
 
 import Image from "next/image";
 import { StudioExportMixer } from "./components/studio-export-mixer";
@@ -9,7 +10,7 @@ import { AudioPlayer, type AudioPlayerHandle } from "./components/audio-player";
 import { MediaTrimmer } from "./components/media-trimmer";
 import { AppearanceSettings } from "./components/appearance-provider";
 import { DarkModeFeature } from "./components/dark-mode-feature";
-import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, SetStateAction } from "react";
+import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from "react";
 import { Fragment } from "react";
 import { createPortal } from "react-dom";
 import { forwardRef } from "react";
@@ -777,7 +778,7 @@ const platformStats = [
   }
 ];
 
-const appVersionLabel = "Beta 1.35";
+const appVersionLabel = "Beta 1.36";
 const defaultAppLogoUrl = "/artistdeck-logo.png";
 
 const sections = [
@@ -5525,7 +5526,7 @@ export default function Home() {
   const studioSidebarNavRef = useRef<HTMLDivElement>(null);
   const [activeSection, setActiveSection] = useState<Section>("Dashboard");
   const [isStudioMenuOpen, setIsStudioMenuOpen] = useState(true);
-  const [studioProcess, setStudioProcess] = useState<"Audio" | "Video" | "Export">("Audio");
+  const [studioProcess, setStudioProcess] = useState<StudioProcess>("Audio");
   const [studioAudioSnippets, setStudioAudioSnippets] = useState<StudioAudioSnippetRecord[]>([]);
   const [isStudioAudioHydrated, setIsStudioAudioHydrated] = useState(false);
   const [studioAudioHydratedWorkspaceId, setStudioAudioHydratedWorkspaceId] = useState("");
@@ -9084,7 +9085,7 @@ export default function Home() {
                   }}
                   type="button"
                 >
-                  Studio
+                  Studio Demo
                 </button>
                 {activeSection === "Studio" ? <StudioSidebarMenu activeProcess={studioProcess} isMobileClosed={!isStudioMenuOpen} onChooseProcess={setStudioProcess} /> : null}
               </div>
@@ -9411,13 +9412,13 @@ function StudioSidebarMenu({
   isMobileClosed,
   onChooseProcess
 }: {
-  activeProcess: "Audio" | "Video" | "Export";
+  activeProcess: StudioProcess;
   isMobileClosed: boolean;
-  onChooseProcess: (process: "Audio" | "Video" | "Export") => void;
+  onChooseProcess: (process: StudioProcess) => void;
 }) {
   const [projectsOpen, setProjectsOpen] = useState(true);
   const [testProjectOpen, setTestProjectOpen] = useState(true);
-  const steps = ["Compose", "Audio", "Video", "Overlay image", "Overlay Text", "Export"];
+  const steps = ["Audio", "Video", "Overlays", "Export"];
 
   return (
     <section aria-label="Studio projects" className={isMobileClosed ? "studio-sidebar-menu is-mobile-closed" : "studio-sidebar-menu"}>
@@ -9432,7 +9433,7 @@ function StudioSidebarMenu({
           <strong>Test Project</strong>
         </button>
         {testProjectOpen ? <div aria-label="Test Project process" className="studio-sidebar-process-list">
-          {steps.map((step) => <button aria-current={step === activeProcess ? "step" : undefined} className={step === activeProcess ? "is-active" : undefined} disabled={step !== "Audio" && step !== "Video" && step !== "Export"} key={step} onClick={() => { if (step === "Audio" || step === "Video" || step === "Export") onChooseProcess(step); }} type="button">
+          {steps.map((step) => <button aria-current={step === activeProcess ? "step" : undefined} className={step === activeProcess ? "is-active" : undefined} key={step} onClick={() => onChooseProcess(step as StudioProcess)} type="button">
             <span aria-hidden />{step}
           </button>)}
         </div> : null}
@@ -9449,33 +9450,30 @@ function StudioView({
   productionSongs,
   workspaceId
 }: {
-  activeProcess: "Audio" | "Video" | "Export";
+  activeProcess: StudioProcess;
   audioSnippets: StudioAudioSnippetRecord[];
   onAudioSnippetsChange: Dispatch<SetStateAction<StudioAudioSnippetRecord[]>>;
-  onProcessChange: (process: "Audio" | "Video" | "Export") => void;
+  onProcessChange: (process: StudioProcess) => void;
   productionSongs: ProductionSongConfig[];
   workspaceId: string;
 }) {
-  const [projectDurationChoice, setProjectDurationChoice] = useState<15 | 30 | "custom">(15);
-  const [customProjectDuration, setCustomProjectDuration] = useState("30");
+  const [projectDurationChoice, setProjectDurationChoice] = useState<15 | 30>(15);
   const [videoOrientation, setVideoOrientation] = useState<StudioVideoOrientation>("vertical");
   const [audioPreviewVideo, setAudioPreviewVideo] = useState<StudioVideoPreviewSource | undefined>();
-  const parsedCustomProjectDuration = Number.parseInt(customProjectDuration, 10);
-  const projectDuration = projectDurationChoice === "custom"
-    ? Math.min(180, Math.max(1, Number.isFinite(parsedCustomProjectDuration) ? parsedCustomProjectDuration : 30))
-    : projectDurationChoice;
+  const projectDuration = projectDurationChoice;
 
   return (
     <section className="studio-view" aria-labelledby="studio-heading">
-      <header className="page-heading studio-heading">
+      {activeProcess !== "Export" ? <header className="page-heading studio-heading">
         <div>
-          <p className="eyebrow">Creative workspace</p>
+          <p className="eyebrow">{activeProcess === "Overlays" ? "Test Project · Overlays" : activeProcess === "Audio" ? "Test Project · Audio" : activeProcess === "Video" ? "Test Project · Video" : "Creative workspace"}</p>
           <h1 id="studio-heading">{activeProcess}</h1>
         </div>
-      </header>
+        {activeProcess === "Audio" ? <StudioDurationBadge durationChoice={projectDurationChoice} onDurationChoiceChange={setProjectDurationChoice} projectDuration={projectDuration} /> : activeProcess === "Video" ? <div className="studio-project-spec"><div><span>Duration</span><strong>{projectDuration}s</strong><small>From Audio</small></div><div className="studio-orientation-selector" aria-label="Video format">{(["vertical", "horizontal", "square"] as const).map((value) => <button aria-label={`${value} video`} aria-pressed={videoOrientation === value} className={`studio-orientation-icon is-${value}`} key={value} onClick={() => setVideoOrientation(value)} type="button"><i aria-hidden /></button>)}</div></div> : activeProcess === "Overlays" ? <div className="studio-project-spec studio-overlay-project-spec" aria-label={`${projectDuration} second ${videoOrientation} video`}><div><span>Duration</span><strong>{projectDuration}s</strong><small>From Audio</small></div><span className={`studio-orientation-icon is-${videoOrientation} is-readonly`} role="img" aria-label={`${videoOrientation} video format`}><i aria-hidden /></span></div> : null}
+      </header> : null}
 
-      {activeProcess === "Audio" ? <StudioAudioEditor audioSnippets={audioSnippets} durationChoice={projectDurationChoice} isCustomDuration={projectDurationChoice === "custom"} onAudioSnippetsChange={onAudioSnippetsChange} onDurationChoiceChange={setProjectDurationChoice} productionSongs={productionSongs} projectDuration={projectDuration} videoPreviewSource={audioPreviewVideo} /> : activeProcess === "Export" ? <StudioExportMixer key={workspaceId} workspaceId={workspaceId} audioSnippets={audioSnippets.map((snippet) => ({ ...snippet, songId: productionSongs.find((song) => song.id === snippet.songId || song.dbId === snippet.songId)?.dbId ?? snippet.songId }))} durationSeconds={projectDuration} orientation={videoOrientation} /> : <StudioVideoEditor audioSnippet={audioSnippets[0]} key={workspaceId} onAudioPreviewSourceChange={setAudioPreviewVideo} onChooseProcess={() => undefined} onOrientationChange={setVideoOrientation} orientation={videoOrientation} projectDuration={projectDuration} workspaceId={workspaceId} />}
-      <StudioWorkflowProgress activeProcess={activeProcess} availableProcesses={["Audio", "Video", "Export"]} onChooseProcess={onProcessChange} />
+      {activeProcess === "Audio" ? <StudioAudioEditor audioSnippets={audioSnippets} durationChoice={projectDurationChoice} isCustomDuration={false} onAudioSnippetsChange={onAudioSnippetsChange} onChooseVideo={() => onProcessChange("Video")} onDurationChoiceChange={setProjectDurationChoice} productionSongs={productionSongs} projectDuration={projectDuration} videoPreviewSource={audioPreviewVideo} /> : activeProcess === "Overlays" ? <StudioOverlaysEditor audioSnippets={audioSnippets} key={workspaceId} onChooseProcess={onProcessChange} productionSongs={productionSongs} projectDuration={projectDuration} videoPreviewSource={audioPreviewVideo} workspaceId={workspaceId} /> : activeProcess === "Export" ? <StudioExportMixer artworks={productionSongs.filter((song) => song.albumArtUrl.trim()).map((song) => ({ id: song.dbId ?? song.id, legacyId: song.id, title: song.title, url: song.albumArtUrl.trim() }))} key={workspaceId} workspaceId={workspaceId} audioSnippets={audioSnippets.map((snippet) => ({ ...snippet, songId: productionSongs.find((song) => song.id === snippet.songId || song.dbId === snippet.songId)?.dbId ?? snippet.songId }))} durationSeconds={projectDuration} orientation={videoOrientation} /> : <StudioVideoEditor audioSnippet={audioSnippets[0]} key={workspaceId} onAudioPreviewSourceChange={setAudioPreviewVideo} onChooseProcess={() => undefined} orientation={videoOrientation} projectDuration={projectDuration} workspaceId={workspaceId} />}
+      <StudioWorkflowProgress activeProcess={activeProcess} availableProcesses={["Audio", "Video", "Overlays", "Export"]} onChooseProcess={onProcessChange} />
     </section>
   );
 }
@@ -9487,14 +9485,12 @@ function StudioWorkflowProgress({
 }: {
   activeProcess: string;
   availableProcesses: readonly string[];
-  onChooseProcess: (process: "Audio" | "Video" | "Export") => void;
+  onChooseProcess: (process: StudioProcess) => void;
 }) {
   const steps = [
-    { description: "Project overview", label: "Compose" },
     { description: "Track selected", label: "Audio" },
     { description: "Select clips", label: "Video" },
-    { description: "Add media", label: "Overlay image" },
-    { description: "Add message", label: "Overlay Text" },
+    { description: "Media and text", label: "Overlays" },
     { description: "Generate video", label: "Export" }
   ];
   const activeIndex = Math.max(0, steps.findIndex((step) => step.label === activeProcess));
@@ -9518,7 +9514,7 @@ function StudioWorkflowStep({
   activeIndex: number;
   available: boolean;
   index: number;
-  onChooseProcess: (process: "Audio" | "Video" | "Export") => void;
+  onChooseProcess: (process: StudioProcess) => void;
   step: { description: string; label: string };
 }) {
   const isActive = available && index === activeIndex;
@@ -9530,92 +9526,14 @@ function StudioWorkflowStep({
         aria-current={isActive ? "step" : undefined}
         className={isComplete ? "is-complete" : isActive ? "is-active" : "is-locked"}
         disabled={!available}
-        onClick={() => { if (step.label === "Audio" || step.label === "Video" || step.label === "Export") onChooseProcess(step.label); }}
+        onClick={() => onChooseProcess(step.label as StudioProcess)}
         type="button"
       >
         <span className="studio-workflow-number">{index + 1}</span>
         <span><strong>{step.label}</strong><small>{step.description}</small></span>
       </button>
-      {index < 5 ? <i aria-hidden className={isComplete ? "is-complete" : undefined} /> : null}
+      {index < 3 ? <i aria-hidden className={isComplete ? "is-complete" : undefined} /> : null}
     </Fragment>
-  );
-}
-
-function StudioComposeOverview({
-  customDuration,
-  durationChoice,
-  onChooseProcess,
-  onCustomDurationChange,
-  onDurationChoiceChange,
-  projectDuration
-}: {
-  customDuration: string;
-  durationChoice: 15 | 30 | "custom";
-  onChooseProcess: (process: string) => void;
-  onCustomDurationChange: (duration: string) => void;
-  onDurationChoiceChange: (duration: 15 | 30 | "custom") => void;
-  projectDuration: number;
-}) {
-  const sources = [
-    { detail: "No track selected", label: "Audio", process: "Audio", tone: "blue" },
-    { detail: "0 clips selected", label: "Video clips", process: "Video", tone: "violet" },
-    { detail: "0 visual layers", label: "Overlay image", process: "Overlay image", tone: "orange" },
-    { detail: "0 text layers", label: "Overlay Text", process: "Overlay Text", tone: "pink" }
-  ];
-  const timelineMarkers = [0, Math.round(projectDuration / 3), Math.round((projectDuration * 2) / 3), projectDuration];
-  const durationLabel = `${projectDuration}s`;
-  const durationTime = formatStudioDuration(projectDuration);
-
-  return (
-    <section className="studio-compose" aria-labelledby="studio-compose-heading">
-      <header className="studio-compose-header">
-        <div>
-          <p className="eyebrow">Test Project · Start screen</p>
-          <h2 id="studio-compose-heading">Compose your first variant</h2>
-          <p>Gather the building blocks, then shape one vertical creative before generating variants.</p>
-        </div>
-        <StudioDurationBadge durationChoice={durationChoice} onDurationChoiceChange={onDurationChoiceChange} projectDuration={projectDuration} />
-      </header>
-
-      <div className="studio-compose-grid">
-        <section className="studio-source-panel" aria-labelledby="studio-sources-heading">
-          <div className="studio-panel-heading"><div><p className="eyebrow">Project assets</p><h3 id="studio-sources-heading">Start with your sources</h3></div><span>0 / 4 ready</span></div>
-          <div className="studio-source-list">
-            {sources.map((source, index) => (
-              <button className={`studio-source-card studio-source-${source.tone}`} key={source.process} onClick={() => onChooseProcess(source.process)} type="button">
-                <span className="studio-source-index">{String(index + 1).padStart(2, "0")}</span>
-                <span><strong>{source.label}</strong><small>{source.detail}</small></span>
-                <span className="studio-source-action">Add</span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="studio-preview-panel" aria-labelledby="studio-preview-heading">
-          <div className="studio-panel-heading"><div><p className="eyebrow">Live composition</p><h3 id="studio-preview-heading">Preview</h3></div><span className="studio-preview-status">Draft</span></div>
-          <div className="studio-phone-preview">
-            <div className="studio-preview-glow" />
-            <p>YOUR STORY<br />STARTS HERE</p>
-            <span>Test Project</span>
-            <div className="studio-preview-scrim" />
-          </div>
-          <div className="studio-preview-controls"><span>00:00</span><div><i /></div><span>{durationTime}</span></div>
-        </section>
-
-        <section className="studio-inspector" aria-labelledby="studio-inspector-heading">
-          <div className="studio-panel-heading"><div><p className="eyebrow">Selected layer</p><h3 id="studio-inspector-heading">Project settings</h3></div></div>
-          <dl className="studio-inspector-list"><div><dt>Duration</dt><dd><span className="studio-duration-picker" role="radiogroup" aria-label="Project duration"><button aria-checked={durationChoice === 15} onClick={() => onDurationChoiceChange(15)} role="radio" type="button">15s</button><button aria-checked={durationChoice === 30} onClick={() => onDurationChoiceChange(30)} role="radio" type="button">30s</button><button aria-checked={durationChoice === "custom"} onClick={() => onDurationChoiceChange("custom")} role="radio" type="button">Custom</button>{durationChoice === "custom" ? <label><span className="visually-hidden">Custom project duration in seconds</span><input max="180" min="1" onChange={(event) => onCustomDurationChange(event.target.value)} type="number" value={customDuration} /><small>s</small></label> : null}</span></dd></div><div><dt>Layers</dt><dd>2</dd></div></dl>
-          <p>Every project starts with a text overlay and GIF overlay. Add audio or video when you are ready.</p>
-          <button className="studio-primary-action" onClick={() => onChooseProcess("Audio")} type="button">Start with audio</button>
-        </section>
-      </div>
-
-      <section className="studio-timeline" aria-label="Test Project timeline">
-        <div className="studio-timeline-heading"><div><p className="eyebrow">Project timeline</p><h3>Ready for your first layer</h3></div><span>00:00 / {durationTime}</span></div>
-        <div className="studio-timeline-ruler">{timelineMarkers.map((marker, index) => <span key={`${marker}-${index}`}>{formatStudioDuration(marker)}</span>)}</div>
-        <div className="studio-timeline-lanes"><div><span>Audio</span><i /></div><div><span>Video</span><i /></div><div><span>Image</span><i /></div><div><span>Text</span><i /></div></div>
-      </section>
-    </section>
   );
 }
 
@@ -9635,6 +9553,7 @@ function formatStudioDuration(seconds: number) {
   return `00:${String(Math.max(0, Math.floor(seconds))).padStart(2, "0")}`;
 }
 
+type StudioProcess = "Audio" | "Video" | "Overlays" | "Export";
 type StudioAudioSnippetRecord = { artworkUrl: string; end: number; id: string; songId: string; sourceFileName: string; sourceUrl: string; start: number; title: string };
 type StudioVideoPreviewSource = { id: string; posterUrl?: string; src?: string; title: string };
 type StudioUploadedVideoAsset = { createdAt: string; durationSeconds: number; fileName: string; height: number; id: string; mimeType: string; size: number; width: number };
@@ -9756,6 +9675,7 @@ function StudioAudioEditor({
   durationChoice,
   onDurationChoiceChange,
   onAudioSnippetsChange,
+  onChooseVideo,
   productionSongs,
   projectDuration,
   isCustomDuration,
@@ -9765,6 +9685,7 @@ function StudioAudioEditor({
   durationChoice: 15 | 30 | "custom";
   isCustomDuration: boolean;
   onAudioSnippetsChange: Dispatch<SetStateAction<StudioAudioSnippetRecord[]>>;
+  onChooseVideo: () => void;
   onDurationChoiceChange: (duration: 15 | 30) => void;
   productionSongs: ProductionSongConfig[];
   projectDuration: number;
@@ -9785,11 +9706,6 @@ function StudioAudioEditor({
 
   return (
     <section className="studio-audio" aria-label="Test Project audio">
-      <header className="studio-audio-header">
-        <p className="eyebrow">Test Project · Audio</p>
-        <StudioDurationBadge durationChoice={durationChoice} onDurationChoiceChange={onDurationChoiceChange} projectDuration={projectDuration} />
-      </header>
-
       <div className="studio-audio-workspace">
         <div className="studio-audio-libraries">
           <section className="studio-audio-library studio-audio-library-full" aria-label="Production audio library">
@@ -9800,6 +9716,7 @@ function StudioAudioEditor({
           <section className="studio-audio-snippet-library" aria-labelledby="studio-audio-snippet-library-heading">
             <div className="studio-panel-heading"><div><p className="eyebrow">Trimmed audio clips</p><h3 id="studio-audio-snippet-library-heading">Your audio snippets</h3></div><span>{audioSnippets.length} saved</span></div>
             {audioSnippets.length ? <div className="studio-audio-snippet-list">{audioSnippets.map((snippet) => <StudioAudioSnippet key={snippet.id} onDelete={() => onAudioSnippetsChange((current) => current.filter((candidate) => candidate.id !== snippet.id))} snippet={snippet} />)}</div> : <div className="studio-audio-empty-state studio-audio-snippet-empty"><strong>No trimmed clips yet</strong><span>Choose a part of a Production track, then use audio to add it here.</span></div>}
+            <button className="studio-primary-action studio-audio-continue" disabled={!audioSnippets.length} onClick={onChooseVideo} type="button">Continue to Video</button>
           </section>
         </div>
 
@@ -9812,7 +9729,7 @@ function StudioAudioEditor({
   );
 }
 
-function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseProcess, onOrientationChange, orientation, projectDuration, workspaceId }: { audioSnippet?: StudioAudioSnippetRecord; onAudioPreviewSourceChange: (source: StudioVideoPreviewSource | undefined) => void; onChooseProcess: (process: string) => void; onOrientationChange: (orientation: StudioVideoOrientation) => void; orientation: StudioVideoOrientation; projectDuration: number; workspaceId: string }) {
+function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseProcess, orientation, projectDuration, workspaceId }: { audioSnippet?: StudioAudioSnippetRecord; onAudioPreviewSourceChange: (source: StudioVideoPreviewSource | undefined) => void; onChooseProcess: (process: string) => void; orientation: StudioVideoOrientation; projectDuration: number; workspaceId: string }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PixabayVideoResult[]>([]);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
@@ -10049,19 +9966,16 @@ function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseP
 
   return (
     <section className="studio-video" aria-labelledby="studio-video-heading">
-      <header className="studio-video-header">
-        <div><p className="eyebrow">Test Project · Video</p><span className="visually-hidden" id="studio-video-heading">Video sources</span></div>
-        <div className="studio-project-spec"><div><span>Duration</span><strong>{projectDuration}s</strong><small>From Audio</small></div><div className="studio-orientation-selector" aria-label="Video format">{(["vertical", "horizontal", "square"] as const).map((value) => <button aria-label={`${value} video`} aria-pressed={orientation === value} className={`studio-orientation-icon is-${value}`} key={value} onClick={() => onOrientationChange(value)} type="button"><i aria-hidden /></button>)}</div></div>
-      </header>
+      <span className="visually-hidden" id="studio-video-heading">Video sources</span>
 
       {deletingSharedAsset ? <div className="studio-delete-confirm" role="alertdialog" aria-modal="true" aria-labelledby="studio-delete-source-title"><div><h3 id="studio-delete-source-title">Delete shared video?</h3><p>This permanently deletes {deletingSharedAsset.fileName} from cloud storage and removes its selected snippets on every device. Existing generated videos are independent.</p><button disabled={isDeletingSharedAsset} onClick={() => void deleteSharedAsset()} type="button">{isDeletingSharedAsset ? "Deleting…" : "Delete from cloud"}</button><button autoFocus disabled={isDeletingSharedAsset} onClick={() => setDeletingSharedAsset(null)} type="button">Keep video</button></div></div> : null}
 
       <div className="studio-video-grid">
         <section className="studio-video-library" aria-labelledby="studio-video-library-heading">
-          <div className="studio-panel-heading"><div><p className="eyebrow">Pixabay · Library</p><h3 id="studio-video-library-heading">Select source video</h3></div><span>{results.length} found</span></div>
-          <form className="studio-search" onSubmit={search}><label><span className="visually-hidden">Search Pixabay video clips</span><input maxLength={100} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${orientation} video`} type="search" value={query} /></label><button disabled={isSearching || !query.trim()} type="submit">{isSearching ? "Searching…" : "Search"}</button></form>
+          <div className="studio-panel-heading"><div><p className="eyebrow">Video library</p><h3 id="studio-video-library-heading">Select source video</h3></div><span>{results.length} found</span></div>
+          <form className="studio-search" onSubmit={search}><label><span className="visually-hidden">Search videos on Pixabay</span><input maxLength={100} onChange={(event) => setQuery(event.target.value)} placeholder="Search videos on Pixabay" type="search" value={query} /></label><button disabled={isSearching || !query.trim()} type="submit">{isSearching ? "Searching…" : "Search"}</button></form>
           <div className="studio-video-upload"><div><strong>Use your own video</strong><small>MP4, MOV, or WebM · {orientation} · up to 500 MB</small></div><input accept="video/*,.mp4,.mov,.m4v,.webm" aria-label={`Upload a ${orientation} video`} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) chooseLocalVideo(file); }} ref={uploadInputRef} type="file" /><button onClick={() => uploadInputRef.current?.click()} type="button"><Upload aria-hidden size={14} />Choose video</button></div>
-          {sharedVideoAssets.length ? <section className="studio-recent-videos" aria-label="Shared workspace uploads"><div><strong>Shared uploads</strong><small>Available on every device</small></div>{sharedVideoAssets.map((asset) => <article className="studio-shared-upload-row" key={asset.id}><button onClick={() => { setLocalVideo(null); setSelectedClipId(null); setSharedVideo(asset); setTrimRange({ end: Math.min(projectDuration, asset.durationSeconds), start: 0 }); setActiveTrimVersion((current) => current + 1); }} type="button"><span className="studio-shared-upload-thumbnail" aria-hidden style={sharedVideoThumbnails[asset.id] ? { backgroundImage: `url(${sharedVideoThumbnails[asset.id]})` } : undefined}><Video size={13} /></span><span>{asset.fileName}</span><small>{formatStudioDuration(asset.durationSeconds)}</small></button>{canDeleteSharedVideos ? <button aria-label={`Delete shared video ${asset.fileName}`} className="studio-render-delete" onClick={() => setDeletingSharedAsset(asset)} type="button">Delete</button> : null}</article>)}</section> : null}
+          {sharedVideoAssets.length ? <details className="studio-shared-video-history"><summary><span><strong>Shared uploads</strong><small>Available on every device</small></span><b>See history <ChevronDown aria-hidden size={14} /></b></summary><div className="studio-shared-video-history-list">{sharedVideoAssets.map((asset) => <article className="studio-shared-upload-row" key={asset.id}><button onClick={() => { setLocalVideo(null); setSelectedClipId(null); setSharedVideo(asset); setTrimRange({ end: Math.min(projectDuration, asset.durationSeconds), start: 0 }); setActiveTrimVersion((current) => current + 1); }} type="button"><span className="studio-shared-upload-thumbnail" aria-hidden style={sharedVideoThumbnails[asset.id] ? { backgroundImage: `url(${sharedVideoThumbnails[asset.id]})` } : undefined}><Video size={13} /></span><span>{asset.fileName}</span><small>{formatStudioDuration(asset.durationSeconds)}</small></button>{canDeleteSharedVideos ? <button aria-label={`Delete shared video ${asset.fileName}`} className="studio-render-delete" onClick={() => setDeletingSharedAsset(asset)} type="button">Delete</button> : null}</article>)}</div></details> : null}
           {searchStatus ? <p className="studio-export-notice" role="status">{searchStatus}</p> : null}
           <div className="studio-clip-grid">
             {results.map((clip) => {
@@ -10074,7 +9988,7 @@ function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseP
 
         <section className="studio-video-preview" aria-labelledby="studio-video-preview-heading">
           <div className="studio-panel-heading"><div><p className="eyebrow">Live composition</p><h3 id="studio-video-preview-heading">Preview player</h3></div><span>{selectedDuration ? formatStudioDuration(selectedDuration) : "—"}</span></div>
-          {localVideo ? <div className="studio-local-video"><video controls playsInline src={localVideo.url} /><div><strong>{localVideo.fileName}</strong><small>Local preview · {localVideo.width}×{localVideo.height} · {(localVideo.size / 1024 / 1024).toFixed(1)} MB</small></div>{needsVideoTrim ? <MediaTrimmer initialTrimRange={trimRange} key={`${localVideo.id}:${activeTrimVersion}`} maxExcerptSeconds={projectDuration} mediaType="video" onTrimChange={updateLocalTrim} playButtonPlacement="values" src={localVideo.url} title={localVideo.fileName} /> : null}</div> : sharedVideo ? <div className="studio-local-video"><video controls playsInline src={`/api/studio/video-uploads/${sharedVideo.id}/preview`} /><div><strong>{sharedVideo.fileName}</strong><small>Private workspace video · {sharedVideo.width}×{sharedVideo.height} · {(sharedVideo.size / 1024 / 1024).toFixed(1)} MB</small></div>{needsVideoTrim ? <MediaTrimmer initialTrimRange={trimRange} key={`${sharedVideo.id}:${activeTrimVersion}`} maxExcerptSeconds={projectDuration} mediaType="video" onTrimChange={updateLocalTrim} playButtonPlacement="values" src={`/api/studio/video-uploads/${sharedVideo.id}/preview`} title={sharedVideo.fileName} /> : <button className="studio-primary-action" disabled={selectedVideoCount >= 4} onClick={() => confirmUploadedVideo(sharedVideo, { end: sharedVideo.durationSeconds, start: 0 })} type="button">Add video</button>}</div> : selectedClip ? <div className="studio-pixabay-video-preview"><video controls playsInline poster={selectedClip.previewUrl} src={selectedClip.previewVideoUrl} /><button className="studio-primary-action" disabled={!canAddSelectedClip} onClick={() => { if (canAddSelectedClip) { confirmPixabayClip(selectedClip); setSearchStatus("Pixabay source added to Selected videos for this browser preview."); } }} type="button">{isSelectedPixabayClipAdded ? "Added to project" : selectedVideoCount >= 4 ? "Selected videos full" : "Add video"}</button></div> : <div className="studio-video-empty"><strong>Choose a source to preview</strong><span>Search Pixabay or choose a shared upload.</span></div>}
+          {localVideo ? <div className="studio-local-video"><video controls playsInline src={localVideo.url} /><div><strong>{localVideo.fileName}</strong><small>Local preview · {localVideo.width}×{localVideo.height} · {(localVideo.size / 1024 / 1024).toFixed(1)} MB</small></div>{needsVideoTrim ? <MediaTrimmer initialTrimRange={trimRange} key={`${localVideo.id}:${activeTrimVersion}`} maxExcerptSeconds={projectDuration} mediaType="video" onTrimChange={updateLocalTrim} playButtonPlacement="values" src={localVideo.url} title={localVideo.fileName} /> : null}</div> : sharedVideo ? <div className="studio-local-video"><video controls playsInline src={`/api/studio/video-uploads/${sharedVideo.id}/preview`} /><div><strong>{sharedVideo.fileName}</strong><small>Private workspace video · {sharedVideo.width}×{sharedVideo.height} · {(sharedVideo.size / 1024 / 1024).toFixed(1)} MB</small></div>{needsVideoTrim ? <MediaTrimmer initialTrimRange={trimRange} key={`${sharedVideo.id}:${activeTrimVersion}`} maxExcerptSeconds={projectDuration} mediaType="video" onTrimChange={updateLocalTrim} playButtonPlacement="values" src={`/api/studio/video-uploads/${sharedVideo.id}/preview`} title={sharedVideo.fileName} /> : <button className="studio-primary-action" disabled={selectedVideoCount >= 4} onClick={() => confirmUploadedVideo(sharedVideo, { end: sharedVideo.durationSeconds, start: 0 })} type="button">Add video</button>}</div> : selectedClip ? <div className="studio-pixabay-video-preview"><video controls playsInline poster={selectedClip.previewUrl} src={selectedClip.previewVideoUrl} /><button className="studio-primary-action" disabled={!canAddSelectedClip} onClick={() => { if (canAddSelectedClip) { confirmPixabayClip(selectedClip); setSearchStatus("Pixabay video selected. Open Export to combine it with your audio."); } }} type="button">{isSelectedPixabayClipAdded ? "Added to project" : selectedVideoCount >= 4 ? "Selected videos full" : "Add video"}</button></div> : <div className="studio-video-empty"><strong>Choose a source to preview</strong><span>Search Pixabay or choose a shared upload.</span></div>}
           {needsVideoTrim ? <div className="studio-video-footer"><div><span>Next step</span><strong>Trim ready</strong><small>{formatStudioDuration(trimRange.start)}–{formatStudioDuration(trimRange.end)} is selected. Upload must finish before this source can be used.</small></div><button className="studio-primary-action" disabled={!sharedVideo} onClick={() => { if (sharedVideo) confirmUploadedVideo(sharedVideo, trimRange); setSearchStatus("Shared video trim added to Selected videos."); }} type="button">Use shared trim</button></div> : null}
         </section>
 
@@ -10084,7 +9998,7 @@ function StudioVideoEditor({ audioSnippet, onAudioPreviewSourceChange, onChooseP
         </section>
       </div>
 
-      <section className="studio-video-timeline" aria-label="Video assembly timeline"><div className="studio-timeline-heading"><div><p className="eyebrow">Video timeline</p><h3>Source preview</h3></div><span>{selectedDuration ? `${formatStudioDuration(0)} / ${formatStudioDuration(projectDuration)}` : "Select footage"}</span></div><div className="studio-timeline-ruler"><span>{formatStudioDuration(0)}</span><span>{formatStudioDuration(projectDuration / 3)}</span><span>{formatStudioDuration((projectDuration / 3) * 2)}</span><span>{formatStudioDuration(projectDuration)}</span></div><div className="studio-video-track"><span>Video</span><div>{videoTimelineSegments.map((segment, index) => <i key={`${segment.startSeconds}-${index}`} style={{ backgroundImage: timelineFrameUrl ? `linear-gradient(rgb(12 27 38 / .42), rgb(12 27 38 / .42)), url(${timelineFrameUrl})` : undefined, flexGrow: segment.durationSeconds }}><b>{localVideo?.fileName ?? sharedVideo?.fileName ?? selectedClip?.tags}</b><small>{formatStudioDuration(segment.startSeconds)}–{formatStudioDuration(segment.endSeconds)} · {formatStudioDuration(segment.durationSeconds)}</small></i>)}</div></div><div className="studio-video-audio-track"><span>Audio</span><div className="studio-timeline-waveform" aria-label={audioSnippet ? `${audioSnippet.title} waveform` : "No audio selected"}>{audioSnippet ? <><b>{audioSnippet.title}<small>{formatStudioDuration(audioSnippet.start)} – {formatStudioDuration(audioSnippet.end)}</small></b>{Array.from({ length: 96 }, (_, index) => <i aria-hidden key={index} style={{ height: `${24 + ((index * 37 + audioSnippet.title.length * 13) % 68)}%` }} />)}</> : null}</div></div></section>
+      <section className="studio-video-timeline" aria-label="Video assembly timeline"><div className="studio-timeline-heading"><div><p className="eyebrow">Video timeline</p></div><span>{selectedDuration ? `${formatStudioDuration(0)} / ${formatStudioDuration(projectDuration)}` : "Select footage"}</span></div><div className="studio-timeline-ruler"><span>{formatStudioDuration(0)}</span><span>{formatStudioDuration(projectDuration / 3)}</span><span>{formatStudioDuration((projectDuration / 3) * 2)}</span><span>{formatStudioDuration(projectDuration)}</span></div><div className="studio-video-track"><span>Video</span><div>{videoTimelineSegments.map((segment, index) => <i key={`${segment.startSeconds}-${index}`} style={{ backgroundImage: timelineFrameUrl ? `linear-gradient(rgb(12 27 38 / .42), rgb(12 27 38 / .42)), url(${timelineFrameUrl})` : undefined, flexGrow: segment.durationSeconds }}><b>{localVideo?.fileName ?? sharedVideo?.fileName ?? selectedClip?.tags}</b><small>{formatStudioDuration(segment.startSeconds)}–{formatStudioDuration(segment.endSeconds)} · {formatStudioDuration(segment.durationSeconds)}</small></i>)}</div></div><div className="studio-video-audio-track"><span>Audio</span><div className="studio-timeline-waveform" aria-label={audioSnippet ? `${audioSnippet.title} waveform` : "No audio selected"}>{audioSnippet ? <><b>{audioSnippet.title}<small>{formatStudioDuration(audioSnippet.start)} – {formatStudioDuration(audioSnippet.end)}</small></b>{Array.from({ length: 96 }, (_, index) => <i aria-hidden key={index} style={{ height: `${24 + ((index * 37 + audioSnippet.title.length * 13) % 68)}%` }} />)}</> : null}</div></div></section>
     </section>
   );
 }
@@ -10177,6 +10091,12 @@ function StudioTextOverlayEditor({ onChooseProcess }: { onChooseProcess: (proces
       </div>
     </section>
   );
+}
+
+function StudioOverlaysEditor({ audioSnippets, onChooseProcess, productionSongs, projectDuration, videoPreviewSource, workspaceId }: { audioSnippets: StudioAudioSnippetRecord[]; onChooseProcess: (process: StudioProcess) => void; productionSongs: ProductionSongConfig[]; projectDuration: number; videoPreviewSource?: StudioVideoPreviewSource; workspaceId: string }) {
+  const artworks = productionSongs.filter((song) => song.albumArtUrl.trim()).map((song) => ({ id: song.dbId ?? song.id, legacyId: song.id, title: song.title, url: song.albumArtUrl.trim() }));
+  const audio = audioSnippets[0];
+  return <StudioOverlayComposer workspaceId={workspaceId} duration={projectDuration} artworks={artworks} audio={audio} video={videoPreviewSource?.src ? { key: videoPreviewSource.id, assetId: "preview", fileName: videoPreviewSource.title, previewUrl: videoPreviewSource.src, posterUrl: videoPreviewSource.posterUrl, start: 0, end: projectDuration } : undefined} onContinue={() => onChooseProcess("Export")} />;
 }
 
 function StudioExportPage() {

@@ -1,8 +1,9 @@
+import type { OverlaySnapshot } from "../studio/overlays";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { studioGoogleAuthClient, studioRenderBucketName, studioStorage } from "./adstudio-storage";
 
 type Operation = { name?: string; done?: boolean; error?: { message?: string }; response?: { succeededCount?: number; conditions?: Array<{ type?: string; state?: string }> } };
-export type StudioRenderJob = { id: string; workspace_id: string; studio_project_id: string; status: string; provider_execution_id: string | null; output_object_path: string; failure_message: string | null; created_at: string; result_details?: { songId?: string; videoAssetId?: string; audioTitle: string; audioStart: number; audioEnd: number; videoName: string; videoStart: number; videoEnd: number; durationSeconds: number }; deleted_at?: string | null };
+export type StudioRenderJob = { id: string; workspace_id: string; studio_project_id: string; status: string; provider_execution_id: string | null; output_object_path: string; failure_message: string | null; created_at: string; result_details?: { overlaySetKey?: string; overlaySetLabel?: string; includeOverlays?: boolean; overlaySnapshot?: OverlaySnapshot; songId?: string; videoAssetId?: string; pixabayVideoId?: string; audioTitle: string; audioStart: number; audioEnd: number; videoName: string; videoStart: number; videoEnd: number; durationSeconds: number }; deleted_at?: string | null };
 
 function cloudRunConfig() {
   const project = process.env.ADSTUDIO_GCP_PROJECT_ID;

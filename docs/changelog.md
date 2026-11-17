@@ -2,6 +2,19 @@
 
 This file tracks app versions that are useful to discuss, test, and deploy. It is for product-level changes, not every small database edit.
 
+## Beta 1.36 — Studio Demo and overlay rendering
+
+Prepared 18 November 2026; awaiting coordinated push and deployment acceptance.
+
+- Studio Demo exposes Audio → Video → Overlays → Export, with compact source libraries, consistent portrait previews, independent overlay sets, and composition playback.
+- Workspace members with edit access can prepare audio excerpts, shared uploads, Pixabay sources, and text/artwork/platform-logo overlays. Existing Viewer restrictions remain.
+- FFmpeg generation and generated-result deletion remain restricted server-side to the confirmed `dimasounder@gmail.com` account. Other workspace members can preview/download available results.
+- Export supports up to eight audio × video × overlay-set combinations with four portrait result cards per desktop row. The latest accepted real batch completed all eight outputs.
+- Versioned shared overlay snapshots, private artwork staging and timed transparent-image compositing keep generated output tied to its submitted design. Previous generated outputs are purged when a new batch starts; sources remain.
+- Includes the coordinated Audio/Video/Overlays UI refinements, overlay persistence API/migration, worker source, regression coverage and infrastructure handoff documentation.
+
+See [release checklist](releases/beta-1.36.md) for prerequisites, limitations and validation.
+
 ## Beta 1.34 — Production MP3 sources and Studio Audio
 
 Prepared 13 November 2026; not yet deployed.

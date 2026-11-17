@@ -6,8 +6,13 @@ import { isStudioUuid, renderObjectPaths, validateRenderRequest } from "@/lib/st
 import { canManageStudioRenders } from "@/lib/server/studio-render-access";
 import { purgePreviousStudioOutputs } from "@/lib/server/studio-media-retention";
 
+import { resolvePixabayRenderVideo, stagePixabayRenderVideo } from "@/lib/server/studio-pixabay-render";
+
+import { authorizeOverlaySources, stageOverlayLayers } from "@/lib/server/studio-overlays";
+import { compositionForVideo, videoOverlayKey, overlayIdentity, validateOverlaySnapshot } from "@/lib/studio/overlays";
+
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 180;
 const jobColumns = "id,workspace_id,studio_project_id,status,provider_execution_id,output_object_path,failure_message,created_at,result_details,deleted_at";
 
 export async function GET(request: NextRequest) {
@@ -39,7 +44,7 @@ export async function POST(request: NextRequest) {
     // Explicit activation only after the updated worker and job IAM are ready.
     if (process.env.ADSTUDIO_RENDER_ENABLED !== "true") return NextResponse.json({ error: "Video generation is not enabled yet." }, { status: 503 });
     const input = validateRenderRequest(await request.json());
-    if (!input) return NextResponse.json({ error: "Choose one audio snippet covering the output duration and one shared video snippet." }, { status: 400 });
+    if (!input) return NextResponse.json({ error: "Choose one audio snippet covering the output duration and one selected video snippet." }, { status: 400 });
     if (!input.batchId || typeof input.startBatch !== "boolean") return NextResponse.json({ error: "Refresh Export before generating a new batch." }, { status: 400 });
     const { data: previous, error: previousError } = await serviceClient.from("studio_render_jobs").select(jobColumns).eq("workspace_id", workspaceId).eq("id", input.requestId).maybeSingle();
     if (previousError) throw previousError;
@@ -51,30 +56,53 @@ export async function POST(request: NextRequest) {
     const { data: project, error: projectError } = await serviceClient.from("studio_projects").select("id,title").eq("workspace_id", workspaceId).eq("production_song_id", input.songId).maybeSingle();
     if (projectError) throw projectError;
     if (!project) return NextResponse.json({ error: "The chosen audio is not available in this workspace." }, { status: 404 });
-    const [{ data: audio, error: audioError }, { data: video, error: videoError }] = await Promise.all([
+    const { data: overlayDraft, error: overlayError } = await serviceClient.from("studio_workspace_selection_drafts").select("overlay_composition,overlay_revision").eq("workspace_id", workspaceId).maybeSingle();
+    if (overlayError) throw overlayError;
+    if (input.overlaySnapshot) {
+      let expected = overlayDraft?.overlay_composition ? validateOverlaySnapshot({ revision: overlayDraft.overlay_revision, composition: overlayDraft.overlay_composition }) : null;
+      if (!input.startBatch) {
+        const { data: first, error: firstError } = await serviceClient.from("studio_render_jobs").select("result_details").eq("workspace_id", workspaceId).eq("batch_id", input.batchId).is("deleted_at", null).order("created_at", { ascending: true }).limit(1).maybeSingle();
+        if (firstError) throw firstError;
+        expected = validateOverlaySnapshot(first?.result_details?.overlaySnapshot);
+      }
+      if (!expected || overlayIdentity(expected) !== overlayIdentity(input.overlaySnapshot)) return NextResponse.json({ error: "The overlay composition changed. Refresh Export and review its preview before generating." }, { status: 409 });
+      await authorizeOverlaySources(serviceClient, workspaceId, input.overlaySnapshot.composition);
+    } else if (overlayDraft?.overlay_composition) return NextResponse.json({ error: "Refresh Export to include the saved overlay composition." }, { status: 409 });
+    const paths = renderObjectPaths(workspaceId, input.requestId);
+    const [{ data: audio, error: audioError }, { data: upload, error: videoError }] = await Promise.all([
       serviceClient.from("studio_audio_assets").select("id,cloudinary_url").eq("workspace_id", workspaceId).eq("studio_project_id", project.id).eq("asset_kind", "song-source").eq("is_current", true).maybeSingle(),
-      serviceClient.from("studio_workspace_video_assets").select("id,object_path,duration_seconds,original_file_name").eq("workspace_id", workspaceId).eq("id", input.videoAssetId).is("deleted_at", null).maybeSingle()
+      input.videoAssetId ? serviceClient.from("studio_workspace_video_assets").select("id,object_path,duration_seconds,original_file_name").eq("workspace_id", workspaceId).eq("id", input.videoAssetId).is("deleted_at", null).maybeSingle() : Promise.resolve({ data: null, error: null })
     ]);
     if (audioError || videoError) throw audioError ?? videoError;
-    if (!audio || !video || input.videoEnd > Number(video.duration_seconds) + 0.05 || !video.object_path.startsWith(`workspaces/${workspaceId}/studio/uploads/`)) return NextResponse.json({ error: "The chosen source or trim is unavailable." }, { status: 400 });
+    let pixabay: Awaited<ReturnType<typeof resolvePixabayRenderVideo>> | undefined;
+    if (input.pixabayVideoId) {
+      const { data: draft, error: draftError } = await serviceClient.from("studio_workspace_selection_drafts").select("pixabay_video_snippets").eq("workspace_id", workspaceId).maybeSingle();
+      if (draftError) throw draftError;
+      if (!Array.isArray(draft?.pixabay_video_snippets) || !draft.pixabay_video_snippets.some((clip: { id?: string }) => clip?.id === input.pixabayVideoId)) return NextResponse.json({ error: "Select this Pixabay video in Video first." }, { status: 409 });
+      pixabay = await resolvePixabayRenderVideo(input.pixabayVideoId);
+    }
+    const video = pixabay ? { object_path: paths.video, duration_seconds: pixabay.durationSeconds, original_file_name: `${pixabay.tags} · Pixabay` } : upload;
+    if (!audio || !video || input.videoEnd > Number(video.duration_seconds) + 0.05 || (!pixabay && !video.object_path.startsWith(`workspaces/${workspaceId}/studio/uploads/`))) return NextResponse.json({ error: "The chosen source or trim is unavailable." }, { status: 400 });
     if (audio.cloudinary_url !== input.audioSourceUrl) return NextResponse.json({ error: "The audio source has changed. Select a new snippet from Audio first." }, { status: 409 });
     const audioUrl = new URL(audio.cloudinary_url);
     if (audioUrl.protocol !== "https:" || audioUrl.hostname !== "res.cloudinary.com" || audioUrl.username || audioUrl.password || audioUrl.port || !process.env.CLOUDINARY_CLOUD_NAME || audioUrl.pathname.split("/")[1] !== process.env.CLOUDINARY_CLOUD_NAME) throw new Error("Audio source is not managed by this Studio.");
-    const paths = renderObjectPaths(workspaceId, input.requestId);
-    const resultDetails = { songId: input.songId, videoAssetId: input.videoAssetId, audioTitle: project.title, audioStart: input.audioStart, audioEnd: input.audioEnd, videoName: video.original_file_name, videoStart: input.videoStart, videoEnd: input.videoEnd, durationSeconds: input.durationSeconds };
+    const resultDetails = { ...(input.overlaySetKey ? { overlaySetKey: input.overlaySetKey, overlaySetLabel: `Overlay set ${input.overlaySnapshot!.composition.videoSets!.findIndex(set => set.videoKey === input.overlaySetKey) + 1}` } : {}), ...(input.includeOverlays === false ? { includeOverlays: false } : {}), ...(input.overlaySnapshot ? { overlaySnapshot: input.overlaySnapshot } : {}), songId: input.songId, ...(input.pixabayVideoId ? { pixabayVideoId: input.pixabayVideoId, pixabayPageUrl: pixabay!.pageUrl, pixabayCreator: pixabay!.creator } : { videoAssetId: input.videoAssetId }), audioTitle: project.title, audioStart: input.audioStart, audioEnd: input.audioEnd, videoName: video.original_file_name, videoStart: input.videoStart, videoEnd: input.videoEnd, durationSeconds: input.durationSeconds };
     const { data: reserved, error: reserveError } = await serviceClient.from("studio_render_jobs").insert({ id: input.requestId, batch_id: input.batchId, workspace_id: workspaceId, studio_project_id: project.id, requested_by: user.id, status: "queued", manifest_object_path: paths.manifest, output_object_path: paths.output, result_details: resultDetails }).select(jobColumns).single();
     if (reserveError?.code === "23505") return NextResponse.json({ error: "A render request already exists. Refresh the render list." }, { status: 409 });
     if (reserveError) throw reserveError;
     reservedId = input.requestId;
     // Recheck after claiming the workspace slot to close the source-delete race.
-    const { data: liveVideo, error: liveVideoError } = await serviceClient.from("studio_workspace_video_assets").select("id").eq("workspace_id", workspaceId).eq("id", input.videoAssetId).is("deleted_at", null).maybeSingle();
-    if (liveVideoError || !liveVideo) throw liveVideoError ?? new Error("The source video was deleted.");
+    if (input.videoAssetId) {
+      const { data: liveVideo, error: liveVideoError } = await serviceClient.from("studio_workspace_video_assets").select("id").eq("workspace_id", workspaceId).eq("id", input.videoAssetId).is("deleted_at", null).maybeSingle();
+      if (liveVideoError || !liveVideo) throw liveVideoError ?? new Error("The source video was deleted.");
+    }
     phase = "cleanup";
     await purgePreviousStudioOutputs(serviceClient, workspaceId, input.batchId, input.startBatch);
     phase = "stage-and-dispatch";
     const storage = await studioStorage();
     const bucket = studioStagingBucketName();
-    await storage.bucket(bucket).file(video.object_path).getMetadata();
+    if (pixabay) await stagePixabayRenderVideo(pixabay.previewVideoUrl, storage.bucket(bucket).file(paths.video));
+    else await storage.bucket(bucket).file(video.object_path).getMetadata();
     const response = await fetch(audioUrl, { redirect: "error", signal: AbortSignal.timeout(45000) });
     if (!response.ok || !response.body || Number(response.headers.get("content-length")) > 50 * 1024 * 1024) throw new Error("The audio source could not be staged.");
     const chunks: Uint8Array[] = [];
@@ -93,7 +121,8 @@ export async function POST(request: NextRequest) {
     await storage.bucket(bucket).file(paths.audio).save(Buffer.concat(chunks), { resumable: false, contentType: "audio/mpeg", preconditionOpts: { ifGenerationMatch: 0 } });
     const renderBucket = process.env.ADSTUDIO_RENDER_BUCKET;
     if (!renderBucket) throw new Error("Render bucket is not configured.");
-    const manifest = { render_id: input.requestId, video_uri: `gs://${bucket}/${video.object_path}`, audio_uri: `gs://${bucket}/${paths.audio}`, output_uri: `gs://${renderBucket}/${paths.output}`, duration_seconds: input.durationSeconds, audio_start_seconds: input.audioStart, audio_end_seconds: input.audioEnd, video_start_seconds: input.videoStart, video_end_seconds: input.videoEnd, overlay: {} };
+    const overlayLayers = input.overlaySnapshot && input.includeOverlays !== false ? await stageOverlayLayers(workspaceId, input.requestId, compositionForVideo(input.overlaySnapshot.composition, input.overlaySetKey ?? videoOverlayKey(input)), input.durationSeconds) : [];
+    const manifest = { ...(input.overlaySnapshot ? { overlay_schema_version: 2, overlay_layers: overlayLayers } : {}), render_id: input.requestId, video_uri: `gs://${bucket}/${video.object_path}`, audio_uri: `gs://${bucket}/${paths.audio}`, output_uri: `gs://${renderBucket}/${paths.output}`, duration_seconds: input.durationSeconds, audio_start_seconds: input.audioStart, audio_end_seconds: input.audioEnd, video_start_seconds: input.videoStart, video_end_seconds: input.videoEnd, overlay: {} };
     await storage.bucket(bucket).file(paths.manifest).save(JSON.stringify(manifest), { resumable: false, contentType: "application/json", preconditionOpts: { ifGenerationMatch: 0 } });
     const operation = await dispatchStudioRender(`gs://${bucket}/${paths.manifest}`);
     const { data: running, error: runningError } = await serviceClient.from("studio_render_jobs").update({ status: "running", provider_execution_id: operation, started_at: new Date().toISOString() }).eq("workspace_id", workspaceId).eq("id", input.requestId).select(jobColumns).single();

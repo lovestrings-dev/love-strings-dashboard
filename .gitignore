@@ -47,3 +47,6 @@ vercel 2.json
 # Never commit downloaded Google service-account keys.
 *-service-account.json
 service-account*.json
+
+# Local Vercel link and downloaded environment cache
+.vercel/
