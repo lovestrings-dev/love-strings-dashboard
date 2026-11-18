@@ -18,7 +18,10 @@ export async function purgePreviousStudioOutputs(client: SupabaseClient, workspa
   // Scheduled publishing owns a copied private artifact; retain it even when a
   // newer Studio batch removes its original render output.
   const { data: protectedArtifacts, error: protectedError } = await client.from("studio_publish_artifacts").select("render_job_id").eq("workspace_id", workspaceId);
-  if (protectedError) throw protectedError;
+  // Publishing is optional and its migration may intentionally be pending while
+  // the existing Studio renderer is deployed. In that state there can be no
+  // publish artifacts to preserve, so do not make unrelated rendering fail.
+  if (protectedError && protectedError.code !== "42P01") throw protectedError;
   for (const artifact of protectedArtifacts ?? []) keepIds.add(artifact.render_job_id);
   const prefix = `workspaces/${workspaceId}/studio/renders/`;
   const storage = await studioStorage();
