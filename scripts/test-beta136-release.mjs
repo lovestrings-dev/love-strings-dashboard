@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
 const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
-assert.equal(manifest.version, "1.36.0-beta.1");
+assert.equal(manifest.version, "1.36.0-beta.2");
 assert.ok(page.includes('const appVersionLabel = "Beta 1.36";'));
 assert.ok(page.includes('availableProcesses={["Audio", "Video", "Overlays", "Export"]}'));
 assert.ok(page.includes("Studio Demo"));
@@ -55,7 +55,8 @@ const scripts = [
   "test-studio-render-batch.mjs",
   "test-studio-media-retention.mjs",
   "test-studio-overlays.mjs",
-  "test-studio-pixabay-render.mjs"
+  "test-studio-pixabay-render.mjs",
+  "test-studio-download-zip.mjs"
 ];
 
 let failed = 0;

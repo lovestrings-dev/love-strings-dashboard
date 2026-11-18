@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { defaultOverlayComposition, migrateLegacyOverlays, validateOverlayComposition, type OverlayComposition, type OverlayRaster, type OverlaySnapshot } from "@/lib/studio/overlays";
+import { defaultOverlayComposition, fitOverlaysToDuration, migrateLegacyOverlays, validateOverlayComposition, type OverlayComposition, type OverlayRaster, type OverlaySnapshot } from "@/lib/studio/overlays";
 
 export function useStudioOverlays(workspaceId: string, duration: number, artworks: Array<{ id: string; url: string }> = []) {
   const [composition, setComposition] = useState<OverlayComposition>(() => defaultOverlayComposition(duration, artworks[0]));
@@ -28,7 +28,8 @@ export function useStudioOverlays(workspaceId: string, duration: number, artwork
     })();
     return () => controller.abort();
   }, [workspaceId]);
-  const key = JSON.stringify(validateOverlayComposition(composition)); const savedKey = snapshot ? JSON.stringify(validateOverlayComposition(snapshot.composition)) : "";
+  const fullLengthComposition = fitOverlaysToDuration(composition, duration);
+  const key = JSON.stringify(validateOverlayComposition(fullLengthComposition)); const savedKey = snapshot ? JSON.stringify(validateOverlayComposition(snapshot.composition)) : "";
   useEffect(() => {
     if (!loaded || !canEdit || !snapshot || key === savedKey || error || inFlight.current) return;
     const timer = window.setTimeout(async () => {
@@ -42,7 +43,7 @@ export function useStudioOverlays(workspaceId: string, duration: number, artwork
     }, 500);
     return () => clearTimeout(timer);
   }, [canEdit, error, key, loaded, retry, savedKey, snapshot]);
-  return { composition, setComposition, snapshot, loaded, canEdit, error, saving: saving || key !== savedKey, saved: loaded && key === savedKey && !error, retrySave: () => { setError(""); setRetry((n) => n + 1); } };
+  return { composition: fullLengthComposition, setComposition, snapshot, loaded, canEdit, error, saving: saving || key !== savedKey, saved: loaded && key === savedKey && !error, retrySave: () => { setError(""); setRetry((n) => n + 1); } };
 }
 
 export function useOverlayRasters(composition: OverlayComposition) {

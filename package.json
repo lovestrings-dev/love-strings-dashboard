@@ -1,6 +1,6 @@
 {
   "name": "artistdeck",
-  "version": "1.36.0-beta.1",
+  "version": "1.36.0-beta.2",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -97,7 +97,8 @@
     "test:studio-render-batch": "node --experimental-strip-types scripts/test-studio-render-batch.mjs",
     "test:studio-media-retention": "node --experimental-strip-types scripts/test-studio-media-retention.mjs",
     "test:studio-pixabay": "node --experimental-strip-types scripts/test-studio-pixabay.mjs",
-    "test:beta136-release": "node scripts/test-beta136-release.mjs"
+    "test:beta136-release": "node scripts/test-beta136-release.mjs",
+    "test:studio-download-zip": "node --experimental-strip-types scripts/test-studio-download-zip.mjs"
   },
   "dependencies": {
     "@google-cloud/storage": "7.19.0",

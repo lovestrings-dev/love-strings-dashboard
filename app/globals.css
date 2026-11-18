@@ -12142,3 +12142,8 @@ h2 {
 .studio-export-heading { flex-wrap: wrap; gap: 12px; }
 .studio-export-heading .studio-mixer-status { align-self: flex-start; margin-left: auto; }
 .studio-export-mixer > .studio-mixer-grid { margin-top: 0; }
+
+.studio-result-downloads { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+.studio-result-downloads > span { color: var(--muted); font-size: 11px; font-weight: 700; }
+.studio-result-downloads button { border: 1px solid var(--line); border-radius: 7px; color: var(--module-studio); font-size: 12px; font-weight: 800; padding: 8px 10px; }
+.studio-result-downloads button:disabled { cursor: not-allowed; opacity: .5; }

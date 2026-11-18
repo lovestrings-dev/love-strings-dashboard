@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import sharp from 'sharp';
-import { defaultOverlayComposition, migrateLegacyOverlays, validateOverlayComposition, overlayIdentity, compositionForVideo, ensureVideoOverlaySets, updateVideoOverlayLayer, videoOverlayKey } from '../lib/studio/overlays.ts';
+import { defaultOverlayComposition, fitOverlaysToDuration, migrateLegacyOverlays, validateOverlayComposition, overlayIdentity, compositionForVideo, ensureVideoOverlaySets, updateVideoOverlayLayer, videoOverlayKey } from '../lib/studio/overlays.ts';
 import { createRenderBatch, findRenderForPair } from '../lib/studio/render-batch.ts';
 const require=createRequire(import.meta.url), ts=require('typescript');
 const ws='00000000-0000-0000-0000-000000000001';
@@ -34,6 +34,24 @@ assert.notEqual(compositionForVideo(different,uploadKey).layers[2].text,'PIXABAY
 assert.equal(compositionForVideo(different,pixabayKey).layers[2].text,'PIXABAY ONLY');
 assert.equal(compositionForVideo(different,pixabayKey).layers[2].opacity,37);
 assert.equal(ensureVideoOverlaySets(different,[uploadKey,pixabayKey]),different,'Opening existing sets preserves independent edits');
+// Existing 15-second sets and old delayed starts must follow Audio's new length.
+const oldTiming=structuredClone(different);
+oldTiming.layers[0].start=3;
+oldTiming.videoSets[1].layers[0].start=3;
+const longer=fitOverlaysToDuration(oldTiming,30);
+for(const layer of [...longer.layers,...longer.videoSets.flatMap(set=>set.layers)]) {
+ assert.equal(layer.start,0);assert.equal(layer.end,30);
+}
+assert.equal(compositionForVideo(longer,pixabayKey).layers[2].text,'PIXABAY ONLY');
+assert.equal(compositionForVideo(longer,pixabayKey).layers[2].opacity,37);
+assert.equal(oldTiming.videoSets[1].layers[0].start,3,'Duration normalization is immutable');
+assert.equal(oldTiming.layers[0].end,15);
+assert.equal(fitOverlaysToDuration(longer,30),longer,'Already fitted designs remain stable');
+const shorter=fitOverlaysToDuration(longer,15);
+assert.ok([...shorter.layers,...shorter.videoSets.flatMap(set=>set.layers)].every(layer=>layer.start===0&&layer.end===15));
+assert.ok(validateOverlayComposition(longer));
+assert.throws(()=>fitOverlaysToDuration(longer,0));
+assert.throws(()=>fitOverlaysToDuration(longer,181));
 const twoByTwo=createRenderBatch([audio,{...audio,id:'second',start:20,end:35}],[{...video,assetId:'11111111-1111-4111-8111-111111111111'},{key:'pixabay:125',pixabayVideoId:'125',fileName:'P',start:0,end:30}],15,()=>crypto.randomUUID(),{revision:5,composition:different});
 assert.deepEqual(twoByTwo.pairs.map(p=>compositionForVideo(p.request.overlaySnapshot.composition,videoOverlayKey(p.request)).layers[2].text),[compositionForVideo(different,uploadKey).layers[2].text,'PIXABAY ONLY',compositionForVideo(different,uploadKey).layers[2].text,'PIXABAY ONLY']);
 assert.equal(validateOverlayComposition({...different,videoSets:[...different.videoSets,different.videoSets[0]]}),null,'Duplicate source sets are rejected');
@@ -69,3 +87,13 @@ assert.equal((await routes.PATCH(request())).status,409,'Concurrent stale saves 
 assert.equal((await routes.PATCH(request(1))).status,200);assert.ok(seen.every(f=>f.some(([k,v])=>k==='workspace_id'&&v===ws)));
 assert.equal((await routes.GET(request())).status,200);
 console.log('Overlay validation, legacy migration, independent layers, immutable batches, raster alpha, source isolation and CAS API tests passed.');
+
+const stagedFiles=[];
+const staging=load('lib/server/studio-overlays.ts',{'./adstudio-storage':{studioStorage:async()=>({bucket:()=>({file:(name)=>({save:async()=>stagedFiles.push(name)})})}),studioStagingBucketName:()=>"stage"}});
+const oldText={schemaVersion:2,layers:[{...textOnly.layers[0],start:3,end:15}]};
+const staged=await staging.stageOverlayLayers(ws,'11111111-1111-4111-8111-111111111111',oldText,30);
+assert.equal(staged.length,1);assert.equal(staged[0].start_seconds,0);assert.equal(staged[0].end_seconds,30);
+assert.equal(stagedFiles.length,1);
+const stagedShort=await staging.stageOverlayLayers(ws,'22222222-2222-4222-8222-222222222222',oldText,15);
+assert.equal(stagedShort[0].end_seconds,15);
+console.log('Audio duration changes update all overlay sets and FFmpeg timing from first frame to last.');

@@ -92,3 +92,18 @@ export function updateVideoOverlayLayer(composition: OverlayComposition, videoKe
   const next = ensureVideoOverlaySets(composition, [videoKey]);
   return { ...next, videoSets: next.videoSets!.map((set) => set.videoKey === videoKey ? { ...set, layers: set.layers.map((item) => item.id === layer.id ? layer : item) } : set) };
 }
+
+/** Every enabled overlay spans the project length selected in Audio. */
+export function fitOverlaysToDuration(composition: OverlayComposition, duration: number): OverlayComposition {
+  if (!Number.isInteger(duration) || duration < 1 || duration > 180) throw new RangeError("Invalid project duration.");
+  const fit = (layers: OverlayLayer[]) => layers.every(layer => layer.start === 0 && layer.end === duration)
+    ? layers : layers.map(layer => layer.start === 0 && layer.end === duration ? layer : { ...layer, start: 0, end: duration });
+  const layers = fit(composition.layers);
+  const videoSets = composition.videoSets?.map(set => {
+    const fitted = fit(set.layers);
+    return fitted === set.layers ? set : { ...set, layers: fitted };
+  });
+  if (layers === composition.layers && videoSets?.every((set, index) => set === composition.videoSets![index])) return composition;
+  if (layers === composition.layers && !videoSets) return composition;
+  return { ...composition, layers, ...(videoSets ? { videoSets } : {}) };
+}

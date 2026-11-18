@@ -79,10 +79,9 @@ export async function stageOverlayLayers(workspaceId: string, renderId: string, 
   const storage = await studioStorage();
   const staged = [];
   for (const { layer, bytes } of await rasterizeOverlayLayers(workspaceId, composition)) {
-    if (layer.start >= duration) continue;
     const objectPath = `media/workspaces/${workspaceId}/studio/renders/${renderId}/overlays/${layer.id}.png`;
     await storage.bucket(studioStagingBucketName()).file(objectPath).save(bytes, { resumable: false, contentType: "image/png", preconditionOpts: { ifGenerationMatch: 0 } });
-    staged.push({ image_uri: `gs://${studioStagingBucketName()}/${objectPath}`, x: layer.x / 100, y: layer.y / 100, start_seconds: layer.start, end_seconds: Math.min(duration, layer.end) });
+    staged.push({ image_uri: `gs://${studioStagingBucketName()}/${objectPath}`, x: layer.x / 100, y: layer.y / 100, start_seconds: 0, end_seconds: duration });
   }
   return staged;
 }

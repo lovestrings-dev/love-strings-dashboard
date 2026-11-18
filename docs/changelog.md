@@ -4,6 +4,8 @@ This file tracks app versions that are useful to discuss, test, and deploy. It i
 
 ## Beta 1.36 — Studio Demo and overlay rendering
 
+Follow-up `1.36.0-beta.2`: download completed Preview results together as one ZIP; all overlay sets follow the Audio-selected duration in saved designs, previews and FFmpeg output.
+
 Prepared 18 November 2026; awaiting coordinated push and deployment acceptance.
 
 - Studio Demo exposes Audio → Video → Overlays → Export, with compact source libraries, consistent portrait previews, independent overlay sets, and composition playback.

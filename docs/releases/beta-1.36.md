@@ -1,7 +1,14 @@
 # Beta 1.36 — Studio Demo
 
-Prepared 18 November 2026. Version `1.36.0-beta.1`; About label **Beta 1.36**.
-Status: coordinated release candidate; 44/44 offline suites, TypeScript, full ESLint, production build and diff check passed locally.
+Prepared 18 November 2026. Version `1.36.0-beta.2`; About label **Beta 1.36**.
+Status: coordinated release candidate; 45/45 offline suites, TypeScript, full ESLint, production build and diff check passed locally.
+
+## Follow-up publication — 18 November 2026
+
+- Added **Download all videos**: a single streaming ZIP of completed results currently displayed in Preview, available to workspace users including Viewers. No new generation permission or temporary cloud archive is required.
+- Overlay timing now follows Audio project duration across every set, saved composition, preview and FFmpeg staging. Existing 15-second/delayed bounds normalize to the full current duration; overlays remain visible at the preview endpoint.
+- Existing cloud outputs are preserved; this publication starts no new render and requires no migration or worker deployment.
+- Local archive integrity/access tests passed; live browser archive acceptance was blocked by the browser download gate.
 
 ## Included scope
 

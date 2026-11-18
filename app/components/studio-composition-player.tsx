@@ -55,7 +55,7 @@ export function StudioCompositionPlayer({ audio, video, duration, composition, r
       {videoUrl ? <video aria-label="Composition video source" muted playsInline preload="metadata" poster={video?.posterUrl} ref={videoRef} src={videoUrl} onLoadedMetadata={() => { if (videoRef.current && video) videoRef.current.currentTime = video.start; }} onError={() => setError("The selected video preview is unavailable.")} /> : <span className="studio-composition-no-video">Select a video in Video</span>}
       {composition.layers.map((layer, index) => {
         const image = rasters.find((r) => r.id === layer.id); if (!image || !layer.enabled) return null;
-        const visible = position >= layer.start && position < Math.min(duration, layer.end);
+        const visible = position >= layer.start && position <= Math.min(duration, layer.end);
         return <div key={layer.id} className={`studio-composition-layer${selectedId === layer.id ? " is-selected" : ""}`} style={{ left: `${layer.x}%`, top: `${layer.y}%`, width: `${image.width / 1080 * 100}%`, aspectRatio: `${image.width}/${image.height}`, zIndex: index + 1, visibility: visible ? "visible" : "hidden" }} onPointerDown={(event) => startDrag(event, layer, "move")}>
           {/* Server-produced pixels are shared with FFmpeg. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
