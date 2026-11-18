@@ -195,6 +195,19 @@ export async function consumeFixedCallbackOAuthAttempt({
   };
 }
 
+// The provider has one registered callback. This lookup does not consume or
+// disclose an attempt; it only lets that callback forward a valid state to the
+// narrowly scoped handler which will atomically consume it.
+export async function fixedCallbackIntegrationForState(state: string | null | undefined) {
+  if (!state) return null;
+  const client = createServiceSupabaseClient();
+  const { data, error } = await client.from("app_oauth_attempts")
+    .select("integration_kind,expires_at,consumed_at")
+    .eq("state_hash", hashOAuthState(state)).maybeSingle();
+  if (error || !data || data.consumed_at || new Date(data.expires_at).getTime() <= Date.now()) return null;
+  return data.integration_kind as string;
+}
+
 export const oauthAttemptTesting = {
   defaultReturnPath: defaultOAuthReturnPath,
   oauthAttemptLifetimeMs

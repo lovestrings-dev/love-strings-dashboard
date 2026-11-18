@@ -8,18 +8,27 @@ import {
   fetchFstatsLoginGrantedScopes,
   fstatsLoginConnectionKind,
   fstatsLoginIntegrationKind,
+  fstatsPublishingIntegrationKind,
   getFstatsLoginRedirectUri
 } from "@/lib/meta/fstats-login-oauth";
 import { encryptMetaTokenPayload } from "@/lib/meta/tokens";
 import { saveMetaConnection, saveMetaFacebookPageCandidates } from "@/lib/server/meta-connections";
 import { runLinkedInstagramDiscovery } from "@/lib/server/meta-fstats-discovery";
 import { readAuthoritativeFstatsLoginState } from "@/lib/server/meta-fstats-state";
-import { consumeFixedCallbackOAuthAttempt, OAuthAttemptError } from "@/lib/server/oauth-attempts";
+import { consumeFixedCallbackOAuthAttempt, fixedCallbackIntegrationForState, OAuthAttemptError } from "@/lib/server/oauth-attempts";
 import { createServiceSupabaseClient } from "@/lib/server/workspace-owner";
 
 export async function GET(request: NextRequest) {
   let attempt: Awaited<ReturnType<typeof consumeFixedCallbackOAuthAttempt>> | null = null;
   try {
+    // Meta is registered against this existing callback for both Login for
+    // Business configurations. Forward only a still-pending publishing state;
+    // the handler below does not receive or consume analytics states.
+    if (await fixedCallbackIntegrationForState(request.nextUrl.searchParams.get("state")) === fstatsPublishingIntegrationKind) {
+      const url = new URL("/api/integrations/meta/fstats-login/publishing/callback", request.nextUrl.origin);
+      request.nextUrl.searchParams.forEach((value, key) => url.searchParams.append(key, value));
+      return NextResponse.redirect(url);
+    }
     attempt = await consumeFixedCallbackOAuthAttempt({
       expectedIntegrationKind: fstatsLoginIntegrationKind,
       state: request.nextUrl.searchParams.get("state")

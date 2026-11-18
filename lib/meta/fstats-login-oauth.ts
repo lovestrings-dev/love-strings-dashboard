@@ -1,5 +1,8 @@
 export const fstatsLoginConnectionKind = "fstats_login_facebook_page";
 export const fstatsLoginIntegrationKind = "meta:fstats-login-facebook-page";
+// A separate Facebook Login for Business configuration in the same Meta app.
+// Keeping this distinct prevents publishing consent from changing analytics grants.
+export const fstatsPublishingIntegrationKind = "meta:fstats-login-instagram-publishing";
 const fstatsLoginCallbackPath = "/api/integrations/meta/fstats-login/callback";
 const graphApiVersion = "v23.0";
 
@@ -35,6 +38,14 @@ export function getFstatsLoginRedirectUri(origin: string) {
 }
 
 export function createFstatsLoginAuthorizationUrl({ redirectUri, state }: { redirectUri: string; state: string }) {
+  return createFstatsAuthorizationUrl({ redirectUri, state, configId: getMetaFstatsConfigId() });
+}
+
+export function createFstatsPublishingAuthorizationUrl({ redirectUri, state }: { redirectUri: string; state: string }) {
+  return createFstatsAuthorizationUrl({ redirectUri, state, configId: getMetaFstatsPublishingConfigId() });
+}
+
+function createFstatsAuthorizationUrl({ redirectUri, state, configId }: { redirectUri: string; state: string; configId: string }) {
   if (!state) throw new Error("OAuth authorization state is required.");
   const url = new URL(`https://www.facebook.com/${graphApiVersion}/dialog/oauth`);
   url.searchParams.set("client_id", getMetaFstatsAppId());
@@ -42,7 +53,7 @@ export function createFstatsLoginAuthorizationUrl({ redirectUri, state }: { redi
   url.searchParams.set("response_type", "code");
   // Facebook Login for Business configurations own the permission and asset selection.
   // Meta recommends config_id instead of a parallel scope list for this flow.
-  url.searchParams.set("config_id", getMetaFstatsConfigId());
+  url.searchParams.set("config_id", configId);
   url.searchParams.set("state", state);
   return url;
 }
@@ -151,6 +162,12 @@ function getMetaFstatsConfigId() {
   if (!value || !/^\d+$/.test(value)) {
     throw new Error("META_FSTATS_CONFIG_ID is not configured correctly.");
   }
+  return value;
+}
+
+function getMetaFstatsPublishingConfigId() {
+  const value = process.env.META_FSTATS_PUBLISHING_CONFIG_ID?.trim();
+  if (!value || !/^\d+$/.test(value)) throw new Error("META_FSTATS_PUBLISHING_CONFIG_ID is not configured correctly.");
   return value;
 }
 

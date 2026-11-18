@@ -15,6 +15,11 @@ export async function purgePreviousStudioOutputs(client: SupabaseClient, workspa
   const { data: keep, error: keepError } = await client.from("studio_render_jobs").select("id").eq("workspace_id", workspaceId).eq("batch_id", batchId);
   if (keepError) throw keepError;
   const keepIds = new Set((keep ?? []).map((job) => job.id));
+  // Scheduled publishing owns a copied private artifact; retain it even when a
+  // newer Studio batch removes its original render output.
+  const { data: protectedArtifacts, error: protectedError } = await client.from("studio_publish_artifacts").select("render_job_id").eq("workspace_id", workspaceId);
+  if (protectedError) throw protectedError;
+  for (const artifact of protectedArtifacts ?? []) keepIds.add(artifact.render_job_id);
   const prefix = `workspaces/${workspaceId}/studio/renders/`;
   const storage = await studioStorage();
   const [files] = await storage.bucket(studioRenderBucketName()).getFiles({ prefix });
@@ -24,10 +29,15 @@ export async function purgePreviousStudioOutputs(client: SupabaseClient, workspa
     if (!isStudioUuid(id)) throw new Error("Unexpected render object identity.");
     return !keepIds.has(id);
   });
-  // Hide stale links before removing blobs. A partial failure blocks dispatch;
-  // the next pair/retry rechecks all objects rather than assuming cleanup ran.
-  const { error: markError } = await client.from("studio_render_jobs").update({ deleted_at: new Date().toISOString() }).eq("workspace_id", workspaceId).or(`batch_id.is.null,batch_id.neq.${batchId}`);
-  if (markError) throw markError;
+  // Hide only unprotected stale links before removing blobs. A scheduled Reel
+  // owns its source artifact and must remain reachable for audit/recovery.
+  const { data: allJobs, error: allJobsError } = await client.from("studio_render_jobs").select("id,batch_id").eq("workspace_id", workspaceId).is("deleted_at", null);
+  if (allJobsError) throw allJobsError;
+  const markIds = (allJobs ?? []).filter((job) => job.batch_id !== batchId && !keepIds.has(job.id)).map((job) => job.id);
+  if (markIds.length) {
+    const { error: markError } = await client.from("studio_render_jobs").update({ deleted_at: new Date().toISOString() }).eq("workspace_id", workspaceId).in("id", markIds);
+    if (markError) throw markError;
+  }
   for (const file of stale) await file.delete({ ignoreNotFound: true });
 }
 

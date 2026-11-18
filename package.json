@@ -56,6 +56,8 @@
     "test:recovery-error-ux": "node scripts/test-recovery-error-ux.mjs",
     "test:meta-connection-foundation": "node --experimental-strip-types scripts/test-meta-connection-foundation.mjs",
     "test:meta-fstats-login-oauth": "node --experimental-strip-types scripts/test-meta-fstats-login-oauth.mjs",
+    "test:instagram-reel-publishing": "node scripts/test-instagram-reel-publishing.mjs",
+    "test:internal-instagram-reel-dispatch": "node scripts/test-internal-instagram-reel-dispatch.mjs",
     "test:meta-creator-instagram-oauth": "node --experimental-strip-types scripts/test-meta-creator-instagram-oauth.mjs",
     "test:meta-creator-threads-oauth": "node --experimental-strip-types scripts/test-meta-creator-threads-oauth.mjs",
     "test:meta-creator-instagram-ui": "node scripts/test-meta-creator-instagram-ui.mjs",
