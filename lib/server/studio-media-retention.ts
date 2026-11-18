@@ -21,7 +21,9 @@ export async function purgePreviousStudioOutputs(client: SupabaseClient, workspa
   // Publishing is optional and its migration may intentionally be pending while
   // the existing Studio renderer is deployed. In that state there can be no
   // publish artifacts to preserve, so do not make unrelated rendering fail.
-  if (protectedError && protectedError.code !== "42P01") throw protectedError;
+  // Supabase's REST schema cache reports the same condition as PGRST205,
+  // whereas direct PostgreSQL reports 42P01.
+  if (protectedError && !["42P01", "PGRST205"].includes(protectedError.code)) throw protectedError;
   for (const artifact of protectedArtifacts ?? []) keepIds.add(artifact.render_job_id);
   const prefix = `workspaces/${workspaceId}/studio/renders/`;
   const storage = await studioStorage();
