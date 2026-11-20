@@ -1,0 +1,161 @@
+name: ArtistDeck one-time Supabase backup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: artistdeck-supabase-one-time-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Export and encrypt database backup
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.122.1
+
+      - name: Install age
+        shell: bash
+        run: |
+          set -euo pipefail
+          go install filippo.io/age/cmd/age@v1.2.1
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      - name: Validate backup target
+        env:
+          ARTISTDECK_BACKUP_DB_URL: ${{ secrets.ARTISTDECK_BACKUP_DB_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const connectionString = process.env.ARTISTDECK_BACKUP_DB_URL;
+          if (!connectionString) throw new Error("ARTISTDECK_BACKUP_DB_URL is not configured.");
+
+          const url = new URL(connectionString);
+          const expectedProjectRef = "ezmphpcytohigfdtfvzm";
+          const expectedUser = `postgres.${expectedProjectRef}`;
+          const isSessionPooler = /^aws-[a-z0-9-]+\\.pooler\\.supabase\\.com$/i.test(url.hostname);
+
+          if (!['postgres:', 'postgresql:'].includes(url.protocol)) {
+            throw new Error("Backup URL must use the PostgreSQL protocol.");
+          }
+          if (!isSessionPooler || url.username !== expectedUser || url.pathname !== '/postgres') {
+            throw new Error("Backup URL must be the expected project Session Pooler connection string.");
+          }
+          if (url.port && !['5432', '6543'].includes(url.port)) {
+            throw new Error("Backup URL must use a supported Session Pooler port.");
+          }
+
+          console.log(`Validated Session Pooler target for Supabase project ${expectedProjectRef}.`);
+          NODE
+
+      - name: Export and encrypt backup
+        id: backup
+        env:
+          ARTISTDECK_BACKUP_DB_URL: ${{ secrets.ARTISTDECK_BACKUP_DB_URL }}
+          ARTISTDECK_BACKUP_AGE_RECIPIENT: ${{ vars.ARTISTDECK_BACKUP_AGE_RECIPIENT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+
+          if [[ -z "${ARTISTDECK_BACKUP_AGE_RECIPIENT:-}" ]] || ! [[ "$ARTISTDECK_BACKUP_AGE_RECIPIENT" =~ ^age1[a-z0-9]+$ ]]; then
+            echo "ARTISTDECK_BACKUP_AGE_RECIPIENT must contain an age public recipient."
+            exit 1
+          fi
+
+          work_dir="$(mktemp -d "${RUNNER_TEMP}/artistdeck-supabase-backup.XXXXXX")"
+          plain_dir="$work_dir/plain"
+          encrypted_dir="$work_dir/encrypted"
+          artifact_dir="${RUNNER_TEMP}/artistdeck-supabase-backup-artifact"
+          timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          archive_name="artistdeck-supabase-${timestamp}.tar.gz.age"
+          checksum_name="${archive_name}.sha256.age"
+          trap 'rm -rf "$work_dir"' EXIT
+
+          rm -rf "$artifact_dir"
+          mkdir -p "$plain_dir" "$encrypted_dir" "$artifact_dir"
+
+          supabase db dump --db-url "$ARTISTDECK_BACKUP_DB_URL" --role-only --file "$plain_dir/roles.sql"
+          supabase db dump --db-url "$ARTISTDECK_BACKUP_DB_URL" --file "$plain_dir/schema.sql"
+          supabase db dump --db-url "$ARTISTDECK_BACKUP_DB_URL" --data-only --use-copy --file "$plain_dir/data.sql"
+          supabase db dump --db-url "$ARTISTDECK_BACKUP_DB_URL" --schema supabase_migrations --data-only --use-copy --file "$plain_dir/migration-history.sql"
+
+          for component in roles schema data migration-history; do
+            test -s "$plain_dir/${component}.sql"
+          done
+
+          supabase_version="$(supabase --version)"
+          age_version="$(age --version)"
+          node - "$plain_dir" "$timestamp" "$supabase_version" "$age_version" <<'NODE'
+          const crypto = require('node:crypto');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const [directory, timestamp, supabaseVersion, ageVersion] = process.argv.slice(2);
+          const files = ['roles.sql', 'schema.sql', 'data.sql', 'migration-history.sql'].map((name) => {
+            const file = path.join(directory, name);
+            const contents = fs.readFileSync(file);
+            return {
+              name,
+              bytes: contents.length,
+              sha256: crypto.createHash('sha256').update(contents).digest('hex'),
+            };
+          });
+          fs.writeFileSync(path.join(directory, 'manifest.json'), `${JSON.stringify({
+            created_at_utc: timestamp,
+            source_project_ref: 'ezmphpcytohigfdtfvzm',
+            tools: { supabase_cli: supabaseVersion, age: ageVersion },
+            exported_components: files,
+            known_exclusions: [
+              'Supabase Auth schema data is excluded by the default Supabase CLI dump.',
+              'Supabase Storage schema metadata is excluded by the default Supabase CLI dump.',
+              'Actual Supabase Storage objects are not database rows and are not exported.',
+              'This export is not a tested restore or point-in-time recovery artifact.',
+            ],
+          }, null, 2)}\n`, { mode: 0o600 });
+          NODE
+          test -s "$plain_dir/manifest.json"
+
+          for component in roles schema data migration-history manifest; do
+            age -r "$ARTISTDECK_BACKUP_AGE_RECIPIENT" \
+              -o "$encrypted_dir/${component}.$([[ "$component" == manifest ]] && echo json || echo sql).age" \
+              "$plain_dir/${component}.$([[ "$component" == manifest ]] && echo json || echo sql)"
+          done
+
+          find "$encrypted_dir" -type f -size 0 -print -quit | grep -q . && {
+            echo "Encrypted backup component is empty."
+            exit 1
+          }
+
+          tar -C "$encrypted_dir" -czf "$work_dir/backup.tar.gz" .
+          age -r "$ARTISTDECK_BACKUP_AGE_RECIPIENT" -o "$artifact_dir/$archive_name" "$work_dir/backup.tar.gz"
+          sha256sum "$artifact_dir/$archive_name" > "$work_dir/$archive_name.sha256"
+          age -r "$ARTISTDECK_BACKUP_AGE_RECIPIENT" -o "$artifact_dir/$checksum_name" "$work_dir/$archive_name.sha256"
+
+          if find "$artifact_dir" -type f ! -name '*.age' -print -quit | grep -q .; then
+            echo "Refusing to upload a plaintext backup artifact."
+            exit 1
+          fi
+          test -s "$artifact_dir/$archive_name"
+          test -s "$artifact_dir/$checksum_name"
+          echo "artifact_dir=$artifact_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Upload encrypted backup artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: artistdeck-supabase-one-time-backup
+          path: ${{ steps.backup.outputs.artifact_dir }}/*.age
+          if-no-files-found: error
+          retention-days: 7
