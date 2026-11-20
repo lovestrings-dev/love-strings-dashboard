@@ -100,7 +100,11 @@
     "test:studio-media-retention": "node --experimental-strip-types scripts/test-studio-media-retention.mjs",
     "test:studio-pixabay": "node --experimental-strip-types scripts/test-studio-pixabay.mjs",
     "test:beta136-release": "node scripts/test-beta136-release.mjs",
-    "test:studio-download-zip": "node --experimental-strip-types scripts/test-studio-download-zip.mjs"
+    "test:studio-download-zip": "node --experimental-strip-types scripts/test-studio-download-zip.mjs",
+    "test:smart-links-phase1a": "node scripts/test-smart-links-phase1a.mjs",
+    "test:smart-links-phase1a:db": "node scripts/test-smart-links-phase1a-db.mjs",
+    "test:smart-links-phase1b": "node --experimental-strip-types scripts/test-smart-links-phase1b.mjs",
+    "test:smart-links-phase1b:db": "node scripts/test-smart-links-phase1b-db.mjs"
   },
   "dependencies": {
     "@google-cloud/storage": "7.19.0",

@@ -15,6 +15,8 @@ jobs:
     name: Run disposable Supabase behavior tests
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      SMART_LINKS_LOCAL_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
 
     steps:
       - name: Check out repository
@@ -42,17 +44,19 @@ jobs:
       - name: Install local PostgreSQL client
         run: sudo apt-get update && sudo apt-get install --yes postgresql-client
 
-      - name: Start disposable local Supabase
+      - name: Start and bootstrap disposable local Supabase
         shell: bash
         run: |
           set -euo pipefail
-          supabase init
-          supabase start
-          supabase db reset --local --yes
+          test_workdir="$RUNNER_TEMP/artistdeck-smart-links-supabase"
+          mkdir -p "$test_workdir"
+          supabase --workdir "$test_workdir" init
+          supabase --workdir "$test_workdir" start
+          psql "$SMART_LINKS_LOCAL_DATABASE_URL" --set=ON_ERROR_STOP=1 --file supabase/tests/smart-links-bootstrap.sql
+          psql "$SMART_LINKS_LOCAL_DATABASE_URL" --set=ON_ERROR_STOP=1 --file supabase/migrations/20261119160000_create_smart_links_foundation.sql
+          psql "$SMART_LINKS_LOCAL_DATABASE_URL" --set=ON_ERROR_STOP=1 --file supabase/migrations/20261120171244_smart_links_management_rpc.sql
 
       - name: Run Phase 1A and 1B PostgreSQL behavior suites
-        env:
-          SMART_LINKS_LOCAL_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
         shell: bash
         run: |
           set -euo pipefail
@@ -61,4 +65,4 @@ jobs:
 
       - name: Stop disposable local Supabase
         if: always()
-        run: supabase stop || true
+        run: supabase --workdir "$RUNNER_TEMP/artistdeck-smart-links-supabase" stop --no-backup || true
