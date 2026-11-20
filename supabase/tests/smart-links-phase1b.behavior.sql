@@ -26,9 +26,9 @@ begin
 end;
 $$;
 
-set local role service_role;
-
 -- Auth users are temporary fixtures solely to satisfy membership foreign keys.
+-- They are inserted by the bootstrap superuser because the local service_role
+-- intentionally has no direct write privilege on auth.users.
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password,
   email_confirmed_at, raw_app_meta_data, raw_user_meta_data
@@ -37,6 +37,8 @@ insert into auth.users (
   ('00000000-0000-0000-0000-000000000000', '41000000-0000-4000-8000-000000000002', 'authenticated', 'authenticated', 'sl-member@example.test', '$2a$10$fixture', now(), '{}'::jsonb, '{}'::jsonb),
   ('00000000-0000-0000-0000-000000000000', '41000000-0000-4000-8000-000000000003', 'authenticated', 'authenticated', 'sl-viewer@example.test', '$2a$10$fixture', now(), '{}'::jsonb, '{}'::jsonb),
   ('00000000-0000-0000-0000-000000000000', '41000000-0000-4000-8000-000000000004', 'authenticated', 'authenticated', 'sl-non-member@example.test', '$2a$10$fixture', now(), '{}'::jsonb, '{}'::jsonb);
+
+set local role service_role;
 
 insert into public.app_workspaces (id, name, slug) values
   ('61000000-0000-4000-8000-000000000001', 'Smart Links Runtime One', 'smart-links-runtime-one'),
