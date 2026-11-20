@@ -64,6 +64,7 @@ declare
   v_link_id uuid;
   v_destination_id uuid;
   v_revision timestamptz;
+  v_stale_revision timestamptz;
   v_second_revision timestamptz;
   v_song_id uuid := '71000000-0000-4000-8000-000000000001';
   v_song_link jsonb;
@@ -118,8 +119,11 @@ begin
   v_updated := public.smart_link_management_mutate(v_workspace_one, v_member, 'update', v_link_id, v_revision, jsonb_build_object('titleOverride', 'Member changed this'));
   v_second_revision := (v_updated -> 'link' ->> 'updated_at')::timestamptz;
   perform pg_temp.assert_true((v_updated -> 'link' ->> 'title_override') = 'Member changed this', 'Member can update a Smart Link');
+  -- now() is transaction-stable, so this suite cannot rely on a later update
+  -- receiving a different timestamp inside this one enclosing transaction.
+  v_stale_revision := v_revision - interval '1 microsecond';
   begin
-    perform public.smart_link_management_mutate(v_workspace_one, v_admin, 'update', v_link_id, v_revision, jsonb_build_object('titleOverride', 'Stale overwrite'));
+    perform public.smart_link_management_mutate(v_workspace_one, v_admin, 'update', v_link_id, v_stale_revision, jsonb_build_object('titleOverride', 'Stale overwrite'));
     raise exception 'Expected stale mutation to fail.';
   exception when serialization_failure then null;
   end;
