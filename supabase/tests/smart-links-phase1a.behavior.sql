@@ -1,5 +1,5 @@
--- Execute only against a freshly reset, isolated local Supabase database after
--- all repository migrations have been applied. This entire suite rolls back.
+-- Execute only against the isolated Smart Links bootstrap after it has applied
+-- the exact Phase 1A and Phase 1B migrations. This entire suite rolls back.
 \set ON_ERROR_STOP on
 
 begin;
