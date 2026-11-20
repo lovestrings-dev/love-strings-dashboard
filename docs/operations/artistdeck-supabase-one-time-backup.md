@@ -33,12 +33,13 @@ The workflow exports separate roles, schema, public data, and `supabase_migratio
 
 ## Verify and inspect offline
 
-On a trusted machine, with the private key and downloaded `.age` files:
+On a trusted machine, change into the directory containing the downloaded `.age` files, then run the following with the private key. The checksum is intentionally calculated against the encrypted archive by filename only, so this works after downloading it into any directory.
 
 ```bash
-age -d -i artistdeck-backup-age-key.txt -o backup.tar.gz artistdeck-supabase-<timestamp>.tar.gz.age
-age -d -i artistdeck-backup-age-key.txt -o backup.tar.gz.age.sha256 artistdeck-supabase-<timestamp>.tar.gz.age.sha256
-sha256sum -c backup.tar.gz.age.sha256
+archive="artistdeck-supabase-<timestamp>.tar.gz.age"
+age -d -i artistdeck-backup-age-key.txt -o "${archive}.sha256" "${archive}.sha256.age"
+sha256sum -c "${archive}.sha256"
+age -d -i artistdeck-backup-age-key.txt -o backup.tar.gz "$archive"
 tar -xzf backup.tar.gz
 age -d -i artistdeck-backup-age-key.txt -o manifest.json manifest.json.age
 cat manifest.json

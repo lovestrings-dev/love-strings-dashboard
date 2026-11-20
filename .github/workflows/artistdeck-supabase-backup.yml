@@ -45,7 +45,7 @@ jobs:
           const url = new URL(connectionString);
           const expectedProjectRef = "ezmphpcytohigfdtfvzm";
           const expectedUser = `postgres.${expectedProjectRef}`;
-          const isSessionPooler = /^aws-[a-z0-9-]+\\.pooler\\.supabase\\.com$/i.test(url.hostname);
+          const isSessionPooler = /^aws-[a-z0-9-]+\.pooler\.supabase\.com$/i.test(url.hostname);
 
           if (!['postgres:', 'postgresql:'].includes(url.protocol)) {
             throw new Error("Backup URL must use the PostgreSQL protocol.");
@@ -140,7 +140,10 @@ jobs:
 
           tar -C "$encrypted_dir" -czf "$work_dir/backup.tar.gz" .
           age -r "$ARTISTDECK_BACKUP_AGE_RECIPIENT" -o "$artifact_dir/$archive_name" "$work_dir/backup.tar.gz"
-          sha256sum "$artifact_dir/$archive_name" > "$work_dir/$archive_name.sha256"
+          (
+            cd "$artifact_dir"
+            sha256sum "$archive_name" > "$work_dir/$archive_name.sha256"
+          )
           age -r "$ARTISTDECK_BACKUP_AGE_RECIPIENT" -o "$artifact_dir/$checksum_name" "$work_dir/$archive_name.sha256"
 
           if find "$artifact_dir" -type f ! -name '*.age' -print -quit | grep -q .; then
