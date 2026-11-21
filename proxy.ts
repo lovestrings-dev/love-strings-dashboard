@@ -7,6 +7,7 @@ import {
   resolveWorkspaceMembership
 } from "@/lib/workspace";
 import { isPlatformAdministrationPath } from "@/lib/platform-administration-routing";
+import { isPublicSmartLinkPathname } from "@/lib/smart-link-public-routing";
 
 const cronSecret = process.env.CRON_SECRET;
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -138,6 +139,7 @@ async function isPlatformOperator(userId: string) {
 
 function isPublicPath(pathname: string) {
   return (
+    isPublicSmartLinkPathname(pathname) ||
     pathname === "/login" ||
     pathname === "/forgot-password" ||
     pathname === "/no-workspace" ||
