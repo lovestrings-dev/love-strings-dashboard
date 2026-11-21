@@ -24,14 +24,18 @@ export async function GET(request: NextRequest) {
     if (productionSongId && !isUuid(productionSongId)) throw new SmartLinkInputError("Production song filter is invalid.");
     let query = serviceClient
       .from("smart_links")
-      .select("id, workspace_id, production_song_id, public_slug, status, source_song_title, source_artist_name, source_artwork_url, title_override, artist_name_override, artwork_url_override, background_mode, background_color, social_links, pixel_mode, pixel_override_id, published_at, disabled_at, archived_at, created_at, updated_at")
+      .select("id, workspace_id, production_song_id, public_slug, status, source_song_title, source_artist_name, source_artwork_url, title_override, artist_name_override, artwork_url_override, background_mode, background_color, social_links, pixel_mode, pixel_override_id, published_at, disabled_at, archived_at, created_at, updated_at, smart_link_destinations(platform_key, is_enabled, retired_at)")
       .eq("workspace_id", workspaceId)
       .order("updated_at", { ascending: false });
     if (status) query = query.eq("status", status);
     if (productionSongId) query = query.eq("production_song_id", productionSongId);
     const { data, error } = await query;
     if (error) throw error;
-    return smartLinkResponse({ links: data ?? [], canManage: role !== "viewer", workspaceId });
+    const links = (data ?? []).map(({ smart_link_destinations, ...link }) => ({
+      ...link,
+      destinations: smart_link_destinations ?? []
+    }));
+    return smartLinkResponse({ links, canManage: role !== "viewer", workspaceId });
   } catch (error) {
     return smartLinkResponse({ error: errorMessage(error, "Smart Links are unavailable.") }, errorStatus(error));
   }

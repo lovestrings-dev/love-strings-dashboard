@@ -778,12 +778,13 @@ const platformStats = [
   }
 ];
 
-const appVersionLabel = "Beta 1.36";
+const appVersionLabel = "Beta 1.37";
 const defaultAppLogoUrl = "/artistdeck-logo.png";
 
 const sections = [
   "Dashboard",
   "Marketing",
+  "Smart Links",
   "Production",
   "Platforms",
   "Events",
@@ -5968,6 +5969,7 @@ export default function Home() {
     return [
       "Dashboard",
       ...personalizedModules,
+      "Smart Links",
       "Studio"
     ] as Section[];
   }, [dashboardPreferences.topLevelOrder]);
@@ -9067,7 +9069,16 @@ export default function Home() {
 
         <div className="nav-scroll-shell">
           <nav className="nav-list">
-            {navigationSections.map((section) => section === "Studio" ? (
+            {navigationSections.map((section) => section === "Smart Links" ? (
+              <button
+                className="nav-module-smart-links"
+                key={section}
+                onClick={() => { window.location.assign("/smart-links"); }}
+                type="button"
+              >
+                Smart Links
+              </button>
+            ) : section === "Studio" ? (
               <div className="studio-sidebar-nav-control" key={section} ref={studioSidebarNavRef}>
                 <button
                   aria-current={activeSection === section ? "page" : undefined}

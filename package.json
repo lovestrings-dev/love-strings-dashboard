@@ -104,7 +104,8 @@
     "test:smart-links-phase1a": "node scripts/test-smart-links-phase1a.mjs",
     "test:smart-links-phase1a:db": "node scripts/test-smart-links-phase1a-db.mjs",
     "test:smart-links-phase1b": "node --experimental-strip-types scripts/test-smart-links-phase1b.mjs",
-    "test:smart-links-phase1b:db": "node scripts/test-smart-links-phase1b-db.mjs"
+    "test:smart-links-phase1b:db": "node scripts/test-smart-links-phase1b-db.mjs",
+    "test:smart-links-library-ui": "node --experimental-strip-types scripts/test-smart-links-library-ui.mjs"
   },
   "dependencies": {
     "@google-cloud/storage": "7.19.0",
