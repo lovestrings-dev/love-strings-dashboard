@@ -17,6 +17,8 @@ type SmartLinkPlatformKey = (typeof smartLinkPlatformKeys)[number];
 type SmartLinkPixelMode = (typeof smartLinkPixelModes)[number];
 
 const socialPlatforms = new Set(["instagram", "facebook", "youtube", "tiktok", "threads", "website", "custom"]);
+// Kept local because the Phase 1B contract verifies the management guard
+// independently of the edge-compatible public-route matcher.
 const reservedSlugs = new Set([
   "api", "_next", "artistdeck", "budget", "dashboard", "events", "favicon.ico",
   "forgot-password", "login", "marketing", "no-workspace", "platform", "platforms",

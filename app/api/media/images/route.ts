@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { requireWorkspaceAccess, WorkspaceAccessError } from "@/lib/server/workspace-owner";
 
-const allowedModules = ["production", "marketing", "events", "qr"] as const;
+const allowedModules = ["production", "marketing", "events", "qr", "smart-links"] as const;
 const allowedMimeTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 const maximumFileSize = 8 * 1024 * 1024;
 

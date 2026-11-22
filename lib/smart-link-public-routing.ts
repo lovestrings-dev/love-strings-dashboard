@@ -1,5 +1,5 @@
 const reservedSmartLinkSlugs = new Set([
-  "api", "_next", "artistdeck", "budget", "dashboard", "events", "favicon.ico",
+  "about", "api", "_next", "artistdeck", "budget", "dashboard", "events", "favicon.ico",
   "forgot-password", "login", "marketing", "no-workspace", "platform", "platforms",
   "privacy", "production", "roadmap", "robots.txt", "set-password", "sitemap.xml",
   "studio", "terms", "workspace-unavailable"

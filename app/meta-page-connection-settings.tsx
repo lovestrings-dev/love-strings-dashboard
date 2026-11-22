@@ -7,6 +7,7 @@ import { cleanConsumedFstatsLoginContinuation, hasFstatsLoginContinuation } from
 import type { FstatsLoginState, InstagramIdentity } from "@/lib/meta/fstats-login-state";
 import { cleanCreatorSocialContinuation, readCreatorSocialContinuation, type CreatorSocialContinuation } from "@/lib/meta/creator-social-continuation";
 import type { CreatorInstagramContinuationResult } from "@/lib/meta/creator-instagram-continuation";
+import { MetaPixelSettings } from "./meta-pixel-settings";
 
 type RequestState = "idle" | "loading" | "error";
 type MetaAction = "select_page" | "refresh_pages" | "connect_instagram" | "skip_instagram" | "retry_instagram_discovery" | "disconnect_instagram" | "disconnect_page";
@@ -307,6 +308,8 @@ export function MetaPageConnectionSettings({
         {message ? <p className={requestState === "error" ? "settings-error" : "settings-status"} role={requestState === "error" ? "alert" : "status"}>{message}</p> : null}
         </div>
       </article>
+
+      <MetaPixelSettings />
 
       <article className="general-settings-card settings-provider-card meta-settings-card meta-creator-card meta-instagram-creator-card">
         <StandaloneInstagramRow
