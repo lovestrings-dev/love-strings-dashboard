@@ -19,7 +19,10 @@ import {
   type SmartLinkStatusFilter
 } from "@/lib/smart-links-library";
 
-type SmartLinkRow = SmartLinkListItem & { destinations?: SmartLinkDestinationSummary[] };
+type SmartLinkRow = SmartLinkListItem & {
+  destinations?: SmartLinkDestinationSummary[];
+  statistics?: { clicks: number; ctr: number; views: number };
+};
 type SmartLinksResponse = { canManage?: boolean; error?: string; links?: SmartLinkRow[]; workspaceId?: string };
 
 const platformLabels: Record<string, string> = {
@@ -29,6 +32,10 @@ const platformLabels: Record<string, string> = {
 function displayDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", year: "numeric" }).format(date);
+}
+
+function formatStatistic(value: number) {
+  return new Intl.NumberFormat(undefined, { notation: value >= 10_000 ? "compact" : "standard", maximumFractionDigits: 1 }).format(value);
 }
 
 export function SmartLinksLibrary() {
@@ -99,7 +106,7 @@ export function SmartLinksLibrary() {
       );
       const payload = await response.json().catch(() => null) as { error?: string } | null;
       if (!response.ok) throw new Error(payload?.error ?? "Smart Link lifecycle update failed.");
-      setNotice(`Smart Link ${nextStatus === "published" ? "published" : `${nextStatus}`}. Public pages will be available in Phase 3.`);
+      setNotice(`Smart Link ${nextStatus === "published" ? "published" : `${nextStatus}`}.`);
       await loadLinks();
     } catch (mutationError) {
       setNotice(mutationError instanceof Error ? mutationError.message : "Smart Link lifecycle update failed.");
@@ -147,7 +154,7 @@ export function SmartLinksLibrary() {
     {loadState === "error" ? <div className="smart-links-state is-error" role="alert"><Link2 aria-hidden size={22} /><div><strong>Smart Links couldn’t load</strong><p>{error}</p></div><button onClick={() => void loadLinks()} type="button">Try again</button></div> : null}
     {loadState === "ready" && displayLinks.length === 0 ? <SmartLinksEmpty canManage={canManage} /> : null}
     {loadState === "ready" && displayLinks.length > 0 && visibleLinks.length === 0 ? <div className="smart-links-state"><Search aria-hidden size={22} /><div><strong>No matching Smart Links</strong><p>Try another search or status filter.</p></div><button onClick={() => { setQuery(""); setStatus("all"); }} type="button">Clear filters</button></div> : null}
-    {loadState === "ready" && visibleLinks.length > 0 ? <div className="smart-links-table-wrap"><table className="smart-links-table"><thead><tr><th>Smart Link</th><th>Link</th><th>Status</th><th>Destinations</th><th>Updated</th><th><span className="smart-links-stats-heading" title="Analytics collection arrives in Phase 4. Views, clicks and CTR are unavailable until then.">Statistics <Info aria-hidden size={13} /></span></th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{visibleLinks.map((link) => <SmartLinksRow busy={busyId === link.id} canManage={canManage || fixtureMode} fixtureMode={fixtureMode} key={link.id} link={link} onCopy={copyLink} onDuplicate={duplicate} onMenuChange={setOpenMenuId} onTransition={transition} openMenu={openMenuId === link.id} />)}</tbody></table></div> : null}
+    {loadState === "ready" && visibleLinks.length > 0 ? <div className="smart-links-table-wrap"><table className="smart-links-table"><thead><tr><th>Smart Link</th><th>Link</th><th>Status</th><th>Destinations</th><th>Updated</th><th><span className="smart-links-stats-heading" title="Anonymous aggregate landing-page views, destination clicks, and click-through rate.">Statistics <Info aria-hidden size={13} /></span></th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{visibleLinks.map((link) => <SmartLinksRow busy={busyId === link.id} canManage={canManage || fixtureMode} fixtureMode={fixtureMode} key={link.id} link={link} onCopy={copyLink} onDuplicate={duplicate} onMenuChange={setOpenMenuId} onTransition={transition} openMenu={openMenuId === link.id} />)}</tbody></table></div> : null}
   </section>;
 }
 
@@ -163,10 +170,10 @@ function SmartLinksRow({ busy, canManage, fixtureMode, link, onCopy, onDuplicate
   return <tr className="smart-links-row">
     <td data-label="Smart Link"><div className="smart-links-song"><span className="smart-links-artwork">{artwork ? <img alt="" src={artwork} /> : <Link2 aria-hidden size={19} />}</span><span><strong>{smartLinkTitle(link)}</strong><small>{smartLinkArtist(link)}</small></span></div></td>
     <td data-label="Link"><div className="smart-links-url"><span>artistdeck.app/{link.public_slug}</span><button aria-label={`Copy artistdeck.app/${link.public_slug}`} onClick={() => void onCopy(link.public_slug)} title="Copy URL" type="button"><Copy aria-hidden size={15} /></button></div></td>
-    <td data-label="Status"><span className={`smart-links-status is-${link.status}`}>{lifecycleLabel(link.status)}</span>{link.status === "published" ? <small className="smart-links-public-pending">Public page pending</small> : null}</td>
+    <td data-label="Status"><span className={`smart-links-status is-${link.status}`}>{lifecycleLabel(link.status)}</span></td>
     <td data-label="Destinations"><div className="smart-links-destinations">{platforms.length ? platforms.map((platform) => <span key={platform}>{platformLabels[platform] ?? platform}</span>) : <span className="is-none">None configured</span>}</div></td>
     <td data-label="Updated"><time dateTime={link.updated_at}>{displayDate(link.updated_at)}</time></td>
-    <td className="smart-links-stats" data-label="Statistics"><span>—<small>Views</small></span><span>—<small>Clicks</small></span><span>—<small>CTR</small></span></td>
+    <td className="smart-links-stats" data-label="Statistics"><span>{formatStatistic(link.statistics?.views ?? 0)}<small>Views</small></span><span>{formatStatistic(link.statistics?.clicks ?? 0)}<small>Clicks</small></span><span>{(link.statistics?.ctr ?? 0).toFixed(1)}%<small>CTR</small></span></td>
     <td className="smart-links-actions" data-label="Actions">{canManage ? <>{fixtureMode ? <button aria-label={`Edit ${smartLinkTitle(link)}`} className="smart-links-icon-button" disabled title="Sample data" type="button"><Pencil aria-hidden size={16} /></button> : <Link aria-label={`Edit ${smartLinkTitle(link)}`} className="smart-links-icon-button" href={`/smart-links/${link.id}`} title="Edit"><Pencil aria-hidden size={16} /></Link>}<div className="smart-links-menu-wrap"><button aria-expanded={openMenu} aria-haspopup="menu" aria-label={`More actions for ${smartLinkTitle(link)}`} className="smart-links-icon-button" disabled={busy} onClick={() => onMenuChange(openMenu ? null : link.id)} type="button"><MoreHorizontal aria-hidden size={18} /></button>{openMenu ? <div className="smart-links-menu" role="menu">{fixtureMode ? <p>Sample actions are disabled</p> : <><button onClick={() => onDuplicate(link)} role="menuitem" type="button"><Copy aria-hidden size={15} />Duplicate</button><button onClick={() => onTransition(link, lifecycleAction)} role="menuitem" type="button">{link.status === "draft" || link.status === "disabled" ? <Check aria-hidden size={15} /> : <ChevronDown aria-hidden size={15} />}{lifecycleLabelText}</button>{link.status !== "archived" ? <button onClick={() => onTransition(link, "archived")} role="menuitem" type="button"><Archive aria-hidden size={15} />Archive</button> : null}</>}</div> : null}</div></> : <span className="smart-links-view-only">View only</span>}</td>
   </tr>;
 }

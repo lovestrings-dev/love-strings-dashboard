@@ -9,6 +9,7 @@ import { localSmartLinkPreview, resolvePublishedSmartLink } from "@/lib/server/p
 import { isReservedSmartLinkSlug } from "@/lib/smart-link-public-routing";
 import { PublicSmartLinkPixel } from "@/app/components/public-smart-link-pixel";
 import { PublicSmartLinkDestination } from "@/app/components/public-smart-link-destination";
+import { PublicSmartLinkTracker } from "@/app/components/public-smart-link-tracker";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -52,7 +53,7 @@ export default async function PublicSmartLinkPage({ params }: PageProps) {
         <p className="public-smart-link-artist">{link.artistName}</p>
         <nav className="public-smart-link-destinations" aria-label="Listen on">
           {link.destinations.map((destination) => (
-            <PublicSmartLinkDestination buttonLabel={destination.buttonLabel} href={destination.targetUrl} key={`${destination.platformKey}-${destination.targetUrl}`} platform={destination.platformKey} slug={slug}>
+            <PublicSmartLinkDestination buttonLabel={destination.buttonLabel} destinationId={destination.id} href={destination.targetUrl} key={destination.id} platform={destination.platformKey} slug={slug}>
               <span><PlatformMark label={destination.buttonLabel} platform={destination.platformKey} />{destination.buttonLabel}</span><b>{destination.platformKey === "custom" ? "Open" : "Play"}</b>
             </PublicSmartLinkDestination>
           ))}
@@ -63,6 +64,7 @@ export default async function PublicSmartLinkPage({ params }: PageProps) {
         <small className="public-smart-link-footer"><Link href="/terms">Terms</Link>&nbsp; · &nbsp;<button aria-label="Manage privacy choices" id="public-smart-link-privacy" type="button">Privacy</button><br />Powered by <Link href="/artistdeck">ArtistDeck.app</Link></small>
       </section>
       <PublicSmartLinkPixel pixelId={link.pixelId} />
+      {link !== localSmartLinkPreview ? <PublicSmartLinkTracker slug={slug} /> : null}
     </main>
   );
 }

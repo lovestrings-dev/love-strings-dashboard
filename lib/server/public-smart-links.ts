@@ -3,6 +3,7 @@ import "server-only";
 import { createServiceSupabaseClient } from "@/lib/server/workspace-owner";
 
 type PublicDestination = {
+  id: string;
   platformKey: string;
   buttonLabel: string;
   targetUrl: string;
@@ -36,12 +37,12 @@ export const localSmartLinkPreview: PublicSmartLink = {
   backgroundMode: "blurred-artwork",
   backgroundColor: null,
   destinations: [
-    { platformKey: "spotify", buttonLabel: "Spotify", targetUrl: "https://open.spotify.com/track/5xPDq8dS9nuu3Z5TutudPj?si=02141a4ef218408c" },
-    { platformKey: "apple_music", buttonLabel: "Apple Music", targetUrl: "https://music.apple.com/us/album/pesenka-mamontenka-single/6830342297" },
-    { platformKey: "youtube_music", buttonLabel: "YouTube Music", targetUrl: "https://music.youtube.com/playlist?list=OLAK5uy_llb044ZVVfS1PX3ebkalSZWj_JfjUhoLo" },
-    { platformKey: "amazon_music", buttonLabel: "Amazon Music", targetUrl: "https://amazon.de/music/player/albums/B0HQ8R47C2?marketplaceId=A1PA6795UKMFR9&musicTerritory=DE&ref=dm_sh_OB0qSpeuQZmvkAcgGlINhYo3X" },
-    { platformKey: "deezer", buttonLabel: "Deezer", targetUrl: "https://link.deezer.com/s/350Ph3cFynn0tWwRwv7xH" },
-    { platformKey: "custom", buttonLabel: "YouTube Channel", targetUrl: "https://www.youtube.com/channel/UCKlfg9lYKyMOg_Oiz-Zb1Fg" }
+    { id: "preview-spotify", platformKey: "spotify", buttonLabel: "Spotify", targetUrl: "https://open.spotify.com/track/5xPDq8dS9nuu3Z5TutudPj?si=02141a4ef218408c" },
+    { id: "preview-apple", platformKey: "apple_music", buttonLabel: "Apple Music", targetUrl: "https://music.apple.com/us/album/pesenka-mamontenka-single/6830342297" },
+    { id: "preview-youtube-music", platformKey: "youtube_music", buttonLabel: "YouTube Music", targetUrl: "https://music.youtube.com/playlist?list=OLAK5uy_llb044ZVVfS1PX3ebkalSZWj_JfjUhoLo" },
+    { id: "preview-amazon", platformKey: "amazon_music", buttonLabel: "Amazon Music", targetUrl: "https://amazon.de/music/player/albums/B0HQ8R47C2?marketplaceId=A1PA6795UKMFR9&musicTerritory=DE&ref=dm_sh_OB0qSpeuQZmvkAcgGlINhYo3X" },
+    { id: "preview-deezer", platformKey: "deezer", buttonLabel: "Deezer", targetUrl: "https://link.deezer.com/s/350Ph3cFynn0tWwRwv7xH" },
+    { id: "preview-youtube", platformKey: "custom", buttonLabel: "YouTube Channel", targetUrl: "https://www.youtube.com/channel/UCKlfg9lYKyMOg_Oiz-Zb1Fg" }
   ],
   socialLinks: [
     { label: "Instagram", url: "https://www.instagram.com/lovestringsband/" },
@@ -76,7 +77,7 @@ export async function resolvePublishedSmartLink(slug: string): Promise<PublicSma
 
     const { data: rows, error: destinationError } = await client
       .from("smart_link_destinations")
-      .select("platform_key, button_label, target_url, position, retired_at")
+      .select("id, platform_key, button_label, target_url, position, retired_at")
       .eq("smart_link_id", link.id)
       .eq("is_enabled", true)
       .is("retired_at", null)
@@ -87,7 +88,7 @@ export async function resolvePublishedSmartLink(slug: string): Promise<PublicSma
       const targetUrl = safeHttpsUrl(row.target_url);
       const buttonLabel = normalizeText(row.button_label, 80);
       if (!targetUrl || !buttonLabel || !isSupportedDestinationPlatform(row.platform_key)) return [];
-      return [{ platformKey: row.platform_key, buttonLabel, targetUrl }];
+      return [{ id: row.id, platformKey: row.platform_key, buttonLabel, targetUrl }];
     });
     if (!destinations.length) return null;
 

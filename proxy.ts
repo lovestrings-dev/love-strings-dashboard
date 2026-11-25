@@ -140,6 +140,7 @@ async function isPlatformOperator(userId: string) {
 function isPublicPath(pathname: string) {
   return (
     isPublicSmartLinkPathname(pathname) ||
+    /^\/api\/public\/smart-links\/[a-z0-9]+(?:-[a-z0-9]+)*\/events$/.test(pathname) ||
     pathname === "/login" ||
     pathname === "/forgot-password" ||
     pathname === "/no-workspace" ||
