@@ -13,23 +13,6 @@ export function PublicSmartLinkPixel({ pixelId }: { pixelId: string | null }) {
   useEffect(() => { if (!pixelId) return; const privacyButton = document.getElementById("public-smart-link-privacy"); const openPreferences = () => setConsent("pending"); privacyButton?.addEventListener("click", openPreferences); return () => privacyButton?.removeEventListener("click", openPreferences); }, [pixelId]);
   useEffect(() => { const content = document.getElementById("public-smart-link-content"); if (!content) return; const pending = Boolean(pixelId) && consent === "pending"; content.setAttribute("aria-hidden", String(pending)); (content as HTMLElement & { inert: boolean }).inert = pending; return () => { content.removeAttribute("aria-hidden"); (content as HTMLElement & { inert: boolean }).inert = false; }; }, [consent, pixelId]);
   useEffect(() => { if (!pixelId || consent !== "accepted" || document.getElementById("artistdeck-meta-pixel")) return; const target = window as Window & { fbq?: Fbq; _fbq?: unknown }; const fbq = ((...args: unknown[]) => { fbq.queue.push(args); }) as Fbq; fbq.queue = []; fbq.push = fbq; fbq.loaded = true; fbq.version = "2.0"; target.fbq = fbq; target._fbq = fbq; const script = document.createElement("script"); script.async = true; script.id = "artistdeck-meta-pixel"; script.src = "https://connect.facebook.net/en_US/fbevents.js"; document.head.append(script); fbq("init", pixelId); fbq("track", "PageView"); }, [consent, pixelId]);
-  useEffect(() => {
-    if (!pixelId || consent !== "accepted") return;
-    const trackDestination = (event: MouseEvent) => {
-      if (!(event.target instanceof Element)) return;
-      const destination = event.target.closest<HTMLAnchorElement>("[data-smart-link-destination]");
-      if (!destination) return;
-      const fbq = (window as Window & { fbq?: Fbq }).fbq;
-      if (!fbq) return;
-      fbq("trackCustom", "SmartLinkPlay", {
-        button_label: destination.dataset.buttonLabel ?? "",
-        platform: destination.dataset.platformKey ?? "",
-        smart_link_slug: destination.dataset.smartLinkSlug ?? ""
-      });
-    };
-    document.addEventListener("click", trackDestination, true);
-    return () => document.removeEventListener("click", trackDestination, true);
-  }, [consent, pixelId]);
   if (!pixelId) return null;
   if (consent !== "pending") return null;
   const choose = (next: Exclude<Consent, "pending">) => { window.localStorage.setItem(keyFor(pixelId), next); setConsent(next); };

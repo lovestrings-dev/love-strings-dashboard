@@ -8,6 +8,7 @@ import { Link2, Music2 } from "lucide-react";
 import { localSmartLinkPreview, resolvePublishedSmartLink } from "@/lib/server/public-smart-links";
 import { isReservedSmartLinkSlug } from "@/lib/smart-link-public-routing";
 import { PublicSmartLinkPixel } from "@/app/components/public-smart-link-pixel";
+import { PublicSmartLinkDestination } from "@/app/components/public-smart-link-destination";
 
 type PageProps = { params: Promise<{ slug: string }> };
 
@@ -51,9 +52,9 @@ export default async function PublicSmartLinkPage({ params }: PageProps) {
         <p className="public-smart-link-artist">{link.artistName}</p>
         <nav className="public-smart-link-destinations" aria-label="Listen on">
           {link.destinations.map((destination) => (
-            <a data-button-label={destination.buttonLabel} data-platform-key={destination.platformKey} data-smart-link-destination data-smart-link-slug={slug} key={`${destination.platformKey}-${destination.targetUrl}`} href={destination.targetUrl} target="_blank" rel="noopener noreferrer">
+            <PublicSmartLinkDestination buttonLabel={destination.buttonLabel} href={destination.targetUrl} key={`${destination.platformKey}-${destination.targetUrl}`} platform={destination.platformKey} slug={slug}>
               <span><PlatformMark label={destination.buttonLabel} platform={destination.platformKey} />{destination.buttonLabel}</span><b>{destination.platformKey === "custom" ? "Open" : "Play"}</b>
-            </a>
+            </PublicSmartLinkDestination>
           ))}
         </nav>
         {link.socialLinks.length ? <nav className="public-smart-link-socials" aria-label="Social links">
