@@ -51,7 +51,7 @@ export default async function PublicSmartLinkPage({ params }: PageProps) {
         <p className="public-smart-link-artist">{link.artistName}</p>
         <nav className="public-smart-link-destinations" aria-label="Listen on">
           {link.destinations.map((destination) => (
-            <a key={`${destination.platformKey}-${destination.targetUrl}`} href={destination.targetUrl} target="_blank" rel="noopener noreferrer">
+            <a data-button-label={destination.buttonLabel} data-platform-key={destination.platformKey} data-smart-link-destination data-smart-link-slug={slug} key={`${destination.platformKey}-${destination.targetUrl}`} href={destination.targetUrl} target="_blank" rel="noopener noreferrer">
               <span><PlatformMark label={destination.buttonLabel} platform={destination.platformKey} />{destination.buttonLabel}</span><b>{destination.platformKey === "custom" ? "Open" : "Play"}</b>
             </a>
           ))}
